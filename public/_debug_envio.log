@@ -1,0 +1,309 @@
+2025-12-26 17:09:05 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:09:05 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:09:05 | POST cc=
+2025-12-26 17:09:05 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:09:05 | POST cuadrillas=3051
+2025-12-26 17:09:05 | LEN cuerpo=118
+2025-12-26 17:09:05 | LEN html_participantes=1215
+2025-12-26 17:09:05 | LEN bodyHtml=1617
+2025-12-26 17:09:05 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto.<br /> <br /> Saludos cordiales.</div> <hr
+2025-12-26 17:09:05 | ANTES DE SEND
+2025-12-26 17:09:10 | MAIL ENVIADO OK
+2025-12-26 17:09:10 | UPDATE OK rowCount=1
+2025-12-26 17:11:52 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:11:52 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:11:52 | POST cc=
+2025-12-26 17:11:52 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:11:52 | POST cuadrillas=3051,3050
+2025-12-26 17:11:52 | LEN cuerpo=118
+2025-12-26 17:11:52 | LEN html_participantes=1948
+2025-12-26 17:11:52 | LEN bodyHtml=2350
+2025-12-26 17:11:52 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto.<br /> <br /> Saludos cordiales.</div> <hr
+2025-12-26 17:11:52 | ANTES DE SEND
+2025-12-26 17:11:57 | MAIL ENVIADO OK
+2025-12-26 17:11:57 | UPDATE OK rowCount=2
+2025-12-26 17:16:03 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:16:03 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:16:03 | POST cc=
+2025-12-26 17:16:03 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:16:03 | POST cuadrillas=3051,3050
+2025-12-26 17:16:03 | LEN cuerpo=118
+2025-12-26 17:16:03 | LEN html_participantes=1948
+2025-12-26 17:16:03 | LEN bodyHtml=2350
+2025-12-26 17:16:03 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto.<br /> <br /> Saludos cordiales.</div> <hr
+2025-12-26 17:16:03 | Adjuntando archivo: correo.msg (113664 bytes)
+2025-12-26 17:16:03 | ANTES DE SEND
+2025-12-26 17:16:08 | MAIL ENVIADO OK
+2025-12-26 17:16:08 | UPDATE OK rowCount=2
+2025-12-26 17:31:01 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:31:01 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:31:01 | POST cc=
+2025-12-26 17:31:01 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:31:01 | POST cuadrillas=3051,3050
+2025-12-26 17:31:01 | LEN cuerpo=119
+2025-12-26 17:31:01 | LEN html_participantes=1948
+2025-12-26 17:31:01 | LEN bodyHtml=2351
+2025-12-26 17:31:01 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto. <br /> <br /> Saludos cordiales.</div> <h
+2025-12-26 17:31:01 | No se recibieron adjuntos
+2025-12-26 17:31:01 | ANTES DE SEND
+2025-12-26 17:31:05 | MAIL ENVIADO OK
+2025-12-26 17:31:05 | UPDATE OK rowCount=2
+2025-12-26 17:32:01 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:32:01 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:32:01 | POST cc=
+2025-12-26 17:32:01 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:32:01 | POST cuadrillas=3051,3050
+2025-12-26 17:32:01 | LEN cuerpo=118
+2025-12-26 17:32:01 | LEN html_participantes=1948
+2025-12-26 17:32:01 | LEN bodyHtml=2350
+2025-12-26 17:32:01 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto.<br /> <br /> Saludos cordiales.</div> <hr
+2025-12-26 17:32:01 | Adjuntando archivo: correo.msg (113664 bytes)
+2025-12-26 17:32:01 | ANTES DE SEND
+2025-12-26 17:32:06 | MAIL ENVIADO OK
+2025-12-26 17:32:06 | UPDATE OK rowCount=2
+2025-12-26 17:34:52 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 17:34:52 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 17:34:52 | POST cc=
+2025-12-26 17:34:52 | POST asunto=Orden de Evaluación – Habilitación Cuadrillas
+2025-12-26 17:34:52 | POST cuadrillas=3052
+2025-12-26 17:34:52 | LEN cuerpo=118
+2025-12-26 17:34:52 | LEN html_participantes=554
+2025-12-26 17:34:52 | LEN bodyHtml=956
+2025-12-26 17:34:52 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Se solicita la evaluación de las siguientes cuadrillas según el detalle adjunto.<br /> <br /> Saludos cordiales.</div> <hr
+2025-12-26 17:34:52 | Adjuntando archivo: correo.msg (113664 bytes)
+2025-12-26 17:34:52 | ANTES DE SEND
+2025-12-26 17:34:57 | MAIL ENVIADO OK
+2025-12-26 17:34:57 | UPDATE OK rowCount=1
+2025-12-26 18:08:47 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 18:08:47 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 18:08:47 | POST cc=
+2025-12-26 18:08:47 | POST asunto=Habilitación 26/12/2025
+2025-12-26 18:08:47 | POST cuadrillas=3053
+2025-12-26 18:08:47 | LEN cuerpo=96
+2025-12-26 18:08:47 | LEN html_participantes=764
+2025-12-26 18:08:47 | LEN bodyHtml=1144
+2025-12-26 18:08:47 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación. 26/12/2025<br /> <br /> Saludos cordiales.</div> <hr style='margin:18px 0;
+2025-12-26 18:08:47 | Adjuntando archivo: correo.msg (113664 bytes)
+2025-12-26 18:08:47 | ANTES DE SEND
+2025-12-26 18:08:52 | MAIL ENVIADO OK
+2025-12-26 18:08:52 | UPDATE OK rowCount=1
+2025-12-26 18:26:20 | === ENTRA enviar_orden_mail.php ===
+2025-12-26 18:26:20 | POST para=marcelo.jofre.external@enel.com
+2025-12-26 18:26:20 | POST cc=
+2025-12-26 18:26:20 | POST asunto=Habilitación
+2025-12-26 18:26:20 | POST cuadrillas=3052
+2025-12-26 18:26:20 | LEN cuerpo=96
+2025-12-26 18:26:20 | LEN html_participantes=805
+2025-12-26 18:26:20 | LEN bodyHtml=1185
+2025-12-26 18:26:20 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha .<br /> <br /> Saludos cordiales.</div> <hr style='margin:18px 0;
+2025-12-26 18:26:20 | No se recibieron adjuntos
+2025-12-26 18:26:20 | ANTES DE SEND
+2025-12-26 18:26:25 | MAIL ENVIADO OK
+2025-12-26 18:26:25 | UPDATE OK rowCount=1
+2025-12-29 10:17:36 | === ENTRA enviar_orden_mail.php ===
+2025-12-29 10:17:36 | POST para=marcelo.jofre.external@enel.com
+2025-12-29 10:17:36 | POST cc=
+2025-12-29 10:17:36 | POST asunto=Habilitación 26/12/2025
+2025-12-29 10:17:36 | POST cuadrillas=3053,3052
+2025-12-29 10:17:36 | LEN cuerpo=122
+2025-12-29 10:17:36 | LEN html_participantes=1599
+2025-12-29 10:17:36 | LEN bodyHtml=2005
+2025-12-29 10:17:36 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 26/12/2025.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2025-12-29 10:17:36 | No se recibieron adjuntos
+2025-12-29 10:17:36 | ANTES DE SEND
+2025-12-29 10:17:41 | MAIL ENVIADO OK
+2025-12-29 10:17:41 | UPDATE OK rowCount=2
+2026-01-19 09:54:25 | === ENTRA enviar_orden_mail.php ===
+2026-01-19 09:54:25 | POST para=marcelo.jofre.external@enel.com
+2026-01-19 09:54:25 | POST cc=
+2026-01-19 09:54:25 | POST asunto=Habilitación 19/01/2026
+2026-01-19 09:54:25 | POST cuadrillas=3054
+2026-01-19 09:54:25 | LEN cuerpo=122
+2026-01-19 09:54:25 | LEN html_participantes=1374
+2026-01-19 09:54:25 | LEN bodyHtml=1780
+2026-01-19 09:54:25 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 19/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-19 09:54:25 | No se recibieron adjuntos
+2026-01-19 09:54:25 | ANTES DE SEND
+2026-01-19 09:54:30 | MAIL ENVIADO OK
+2026-01-19 09:54:30 | UPDATE OK rowCount=1
+2026-01-19 12:48:06 | === ENTRA enviar_orden_mail.php ===
+2026-01-19 12:48:06 | POST para=marcelo.jofre.external@enel.com
+2026-01-19 12:48:06 | POST cc=leonel.morales2.external@enel.com
+2026-01-19 12:48:06 | POST asunto=Habilitación 19/01/2026
+2026-01-19 12:48:06 | POST cuadrillas=3056,3055
+2026-01-19 12:48:06 | LEN cuerpo=122
+2026-01-19 12:48:06 | LEN html_participantes=2460
+2026-01-19 12:48:06 | LEN bodyHtml=2866
+2026-01-19 12:48:06 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 19/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-19 12:48:06 | No se recibieron adjuntos
+2026-01-19 12:48:06 | ANTES DE SEND
+2026-01-19 12:48:11 | MAIL ENVIADO OK
+2026-01-19 12:48:11 | UPDATE OK rowCount=2
+2026-01-20 13:45:05 | === ENTRA enviar_orden_mail.php ===
+2026-01-20 13:45:05 | POST para=marcelo.jofre.external@enel.com
+2026-01-20 13:45:05 | POST cc=
+2026-01-20 13:45:05 | POST asunto=Habilitación 21/01/2026
+2026-01-20 13:45:05 | POST cuadrillas=3058
+2026-01-20 13:45:05 | LEN cuerpo=122
+2026-01-20 13:45:05 | LEN html_participantes=1065
+2026-01-20 13:45:05 | LEN bodyHtml=1471
+2026-01-20 13:45:05 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 21/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-20 13:45:05 | Permisos encontrados: 1
+2026-01-20 13:45:05 | No se recibieron adjuntos
+2026-01-20 13:45:05 | ANTES DE SEND
+2026-01-20 13:45:05 | Adjuntando permiso automático: Permiso_Cuadrilla_3058.pdf
+2026-01-20 13:45:10 | MAIL ENVIADO OK
+2026-01-20 13:45:10 | UPDATE OK rowCount=1
+2026-01-21 16:48:19 | === ENTRA enviar_orden_mail.php ===
+2026-01-21 16:48:19 | POST para=marcelo.jofre.external@enel.com
+2026-01-21 16:48:19 | POST cc=
+2026-01-21 16:48:19 | POST asunto=Habilitación 21/01/2026
+2026-01-21 16:48:19 | POST cuadrillas=3060
+2026-01-21 16:48:19 | LEN cuerpo=122
+2026-01-21 16:48:19 | LEN html_participantes=1065
+2026-01-21 16:48:19 | LEN bodyHtml=1471
+2026-01-21 16:48:19 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 21/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-21 16:48:19 | Permisos encontrados: 1
+2026-01-21 16:48:19 | No se recibieron adjuntos
+2026-01-21 16:48:19 | ANTES DE SEND
+2026-01-21 16:48:19 | Adjuntando permiso automático: Permiso_Cuadrilla_3060.pdf
+2026-01-21 16:48:24 | MAIL ENVIADO OK
+2026-01-21 16:48:24 | UPDATE OK rowCount=1
+2026-01-22 09:54:01 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 09:54:01 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 09:54:01 | POST cc=
+2026-01-22 09:54:01 | POST asunto=Habilitación 22/01/2026
+2026-01-22 09:54:01 | POST cuadrillas=3061
+2026-01-22 09:54:01 | LEN cuerpo=122
+2026-01-22 09:54:01 | LEN html_participantes=1351
+2026-01-22 09:54:01 | LEN bodyHtml=1757
+2026-01-22 09:54:01 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 09:54:01 | Permisos encontrados: 0
+2026-01-22 09:54:01 | ERROR: faltan permisos para una o más cuadrillas
+2026-01-22 10:22:09 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 10:22:09 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 10:22:09 | POST cc=
+2026-01-22 10:22:09 | POST asunto=Habilitación 22/01/2026
+2026-01-22 10:22:09 | POST cuadrillas=3061
+2026-01-22 10:22:09 | LEN cuerpo=122
+2026-01-22 10:22:09 | LEN html_participantes=1639
+2026-01-22 10:22:09 | LEN bodyHtml=2045
+2026-01-22 10:22:09 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 10:22:09 | Permisos encontrados: 1
+2026-01-22 10:22:09 | No se recibieron adjuntos
+2026-01-22 10:22:09 | ANTES DE SEND
+2026-01-22 10:22:09 | ⚠️ Archivo no encontrado: storage/permisos/2026/Permiso_Solicitud_5030.pdf
+2026-01-22 10:22:13 | MAIL ENVIADO OK
+2026-01-22 10:22:13 | UPDATE OK rowCount=1
+2026-01-22 10:42:33 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 10:42:33 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 10:42:33 | POST cc=
+2026-01-22 10:42:33 | POST asunto=Habilitación 22/01/2026
+2026-01-22 10:42:33 | POST cuadrillas=3062
+2026-01-22 10:42:33 | LEN cuerpo=122
+2026-01-22 10:42:33 | LEN html_participantes=1639
+2026-01-22 10:42:33 | LEN bodyHtml=2045
+2026-01-22 10:42:33 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 10:42:33 | Permisos encontrados: 0
+2026-01-22 10:42:33 | ERROR: faltan permisos para una o más cuadrillas
+2026-01-22 10:44:04 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 10:44:04 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 10:44:04 | POST cc=
+2026-01-22 10:44:04 | POST asunto=Habilitación 22/01/2026
+2026-01-22 10:44:04 | POST cuadrillas=3062
+2026-01-22 10:44:04 | LEN cuerpo=122
+2026-01-22 10:44:04 | LEN html_participantes=1639
+2026-01-22 10:44:04 | LEN bodyHtml=2045
+2026-01-22 10:44:04 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 10:44:04 | Permisos encontrados: 1
+2026-01-22 10:44:04 | No se recibieron adjuntos
+2026-01-22 10:44:04 | ANTES DE SEND
+2026-01-22 10:44:04 | Adjuntando permiso automático: Permiso_Cuadrilla_3062.pdf
+2026-01-22 10:44:09 | MAIL ENVIADO OK
+2026-01-22 10:44:09 | UPDATE OK rowCount=1
+2026-01-22 11:31:37 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 11:31:37 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 11:31:37 | POST cc=
+2026-01-22 11:31:37 | POST asunto=Habilitación 22/01/2026
+2026-01-22 11:31:37 | POST cuadrillas=3063
+2026-01-22 11:31:37 | LEN cuerpo=122
+2026-01-22 11:31:37 | LEN html_participantes=1352
+2026-01-22 11:31:37 | LEN bodyHtml=1758
+2026-01-22 11:31:37 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 11:31:37 | Permisos encontrados: 0
+2026-01-22 11:31:37 | ERROR: faltan permisos para una o más cuadrillas
+2026-01-22 11:51:16 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 11:51:16 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 11:51:16 | POST cc=
+2026-01-22 11:51:16 | POST asunto=Habilitación 22/01/2026
+2026-01-22 11:51:16 | POST cuadrillas=3064
+2026-01-22 11:51:16 | LEN cuerpo=122
+2026-01-22 11:51:16 | LEN html_participantes=1352
+2026-01-22 11:51:16 | LEN bodyHtml=1758
+2026-01-22 11:51:16 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 22/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 11:51:16 | Permisos encontrados: 1
+2026-01-22 11:51:16 | No se recibieron adjuntos
+2026-01-22 11:51:16 | ANTES DE SEND
+2026-01-22 11:51:16 | Adjuntando permiso automático: Permiso_Cuadrilla_3064.pdf
+2026-01-22 11:51:21 | MAIL ENVIADO OK
+2026-01-22 11:51:21 | UPDATE OK rowCount=1
+2026-01-22 12:28:15 | === ENTRA enviar_orden_mail.php ===
+2026-01-22 12:28:15 | POST para=marcelo.jofre.external@enel.com
+2026-01-22 12:28:15 | POST cc=
+2026-01-22 12:28:15 | POST asunto=Habilitación 23/01/2026
+2026-01-22 12:28:15 | POST cuadrillas=3065
+2026-01-22 12:28:15 | LEN cuerpo=122
+2026-01-22 12:28:15 | LEN html_participantes=1067
+2026-01-22 12:28:15 | LEN bodyHtml=1473
+2026-01-22 12:28:15 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 23/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-22 12:28:15 | Permisos encontrados: 1
+2026-01-22 12:28:15 | No se recibieron adjuntos
+2026-01-22 12:28:15 | ANTES DE SEND
+2026-01-22 12:28:15 | Adjuntando permiso automático: Permiso_Cuadrilla_3065.pdf
+2026-01-22 12:28:20 | MAIL ENVIADO OK
+2026-01-22 12:28:20 | UPDATE OK rowCount=1
+2026-01-23 15:58:11 | === ENTRA enviar_orden_mail.php ===
+2026-01-23 15:58:11 | POST para=marcelo.jofre.external@enel.com
+2026-01-23 15:58:11 | POST cc=leonel.morales2.external@enel.com
+2026-01-23 15:58:11 | POST asunto=Habilitación 23/01/2026
+2026-01-23 15:58:11 | POST cuadrillas=3066
+2026-01-23 15:58:11 | LEN cuerpo=122
+2026-01-23 15:58:11 | LEN html_participantes=1094
+2026-01-23 15:58:11 | LEN bodyHtml=1500
+2026-01-23 15:58:11 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 23/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-23 15:58:11 | Permisos encontrados: 1
+2026-01-23 15:58:11 | No se recibieron adjuntos
+2026-01-23 15:58:11 | ANTES DE SEND
+2026-01-23 15:58:11 | Adjuntando permiso automático: Permiso_Cuadrilla_3066.pdf
+2026-01-23 15:58:16 | MAIL ENVIADO OK
+2026-01-23 15:58:16 | UPDATE OK rowCount=1
+2026-01-26 15:44:22 | === ENTRA enviar_orden_mail.php ===
+2026-01-26 15:44:22 | POST para=marcelo.jofre.external@enel.com
+2026-01-26 15:44:22 | POST cc=
+2026-01-26 15:44:22 | POST asunto=Habilitación 26/01/2026
+2026-01-26 15:44:22 | POST cuadrillas=3067
+2026-01-26 15:44:22 | LEN cuerpo=122
+2026-01-26 15:44:22 | LEN html_participantes=1094
+2026-01-26 15:44:22 | LEN bodyHtml=1500
+2026-01-26 15:44:22 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 26/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-26 15:44:22 | Permisos encontrados: 1
+2026-01-26 15:44:22 | No se recibieron adjuntos
+2026-01-26 15:44:22 | ANTES DE SEND
+2026-01-26 15:44:22 | Adjuntando permiso automático: Permiso_Cuadrilla_3067.pdf
+2026-01-26 15:44:27 | MAIL ENVIADO OK
+2026-01-26 15:44:27 | UPDATE OK rowCount=1
+2026-01-29 17:35:51 | === ENTRA enviar_orden_mail.php ===
+2026-01-29 17:35:51 | POST para=marcelo.jofre.external@enel.com
+2026-01-29 17:35:51 | POST cc=
+2026-01-29 17:35:51 | POST asunto=Habilitación 30/01/2026
+2026-01-29 17:35:51 | POST cuadrillas=3068
+2026-01-29 17:35:51 | LEN cuerpo=122
+2026-01-29 17:35:51 | LEN html_participantes=2252
+2026-01-29 17:35:51 | LEN bodyHtml=2658
+2026-01-29 17:35:51 | BODY PREVIEW (first 300):  <!doctype html> <html> <head> <meta charset='UTF-8'> </head> <body style='font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111'> <div>Estimados,<br /> <br /> Agradeceré realizar el proceso de Habilitación con fecha 30/01/2026.<br /> <br /> Saludos cordiales.</div> <hr style='marg
+2026-01-29 17:35:51 | Permisos encontrados: 1
+2026-01-29 17:35:51 | No se recibieron adjuntos
+2026-01-29 17:35:51 | ANTES DE SEND
+2026-01-29 17:35:51 | Adjuntando permiso automático: Permiso_Cuadrilla_3068.pdf
+2026-01-29 17:35:56 | MAIL ENVIADO OK
+2026-01-29 17:35:56 | UPDATE OK rowCount=1

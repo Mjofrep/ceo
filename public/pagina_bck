@@ -1,0 +1,500 @@
+<?php
+// --------------------------------------------------------------
+// nueva_solicitud.php - Centro de Excelencia Operacional (CEO)
+// Página para registrar nueva solicitud y cargar participantes.
+// --------------------------------------------------------------
+declare(strict_types=1);
+ini_set('display_errors', '1');
+error_reporting(E_ALL);
+session_start();
+
+date_default_timezone_set('America/Santiago');
+
+require_once '../config/db.php';
+require_once '../config/functions.php';
+require_once __DIR__ . '/../config/app.php';
+
+if (empty($_SESSION['auth'])) {
+  header('Location: /ceo/public/index.php');
+  exit;
+}
+
+$pdo = db();
+
+/** Helper para catálogos (id => texto) */
+function fetchPairs(PDO $pdo, string $sql, string $key = 'id', string $label = 'nombre'): array {
+  $out = [];
+  try {
+    $st = $pdo->query($sql);
+    if ($st) {
+      while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        $out[$r[$key]] = $r[$label];
+      }
+    }
+  } catch (Throwable $e) {
+    // Ignora error pero deja registro en log
+    error_log($e->getMessage());
+  }
+  return $out;
+}
+
+/* === Catálogos === */
+$empresas  = fetchPairs($pdo, "SELECT id, nombre FROM ceo_empresas ORDER BY nombre");
+$procesos  = fetchPairs($pdo, "SELECT id, desc_proceso AS nombre FROM ceo_procesos ORDER BY desc_proceso");
+$patiosSemana = $pdo->query("SELECT id, desc_patios FROM ceo_patios ORDER BY desc_patios")->fetchAll(PDO::FETCH_ASSOC);
+/* === Catálogos solicitados === */
+// 1) Habilitación CEO: ceo_habilitaciontipo (id, desc_tipo)
+$habCeo = fetchPairs($pdo, "SELECT id, desc_tipo AS nombre FROM ceo_habilitaciontipo ORDER BY desc_tipo");
+
+// 3) Patios: ceo_patios (id, desc_patios)
+$patios = fetchPairs($pdo, "SELECT id, desc_patios AS nombre FROM ceo_patios ORDER BY desc_patios");
+
+// 3) UO: ceo_uo (id, desc_uo)
+$uo = fetchPairs($pdo, "SELECT id, desc_uo AS nombre FROM ceo_uo ORDER BY desc_uo");
+
+/* 4) Endpoint AJAX: servicios por UO (ceo_servicios: id, servicio, uo) */
+if (isset($_GET['action']) && $_GET['action'] === 'servicios_by_uo') {
+  header('Content-Type: application/json; charset=utf-8');
+  $uoId = (int)($_GET['uo_id'] ?? 0);
+  $out = [];
+  if ($uoId > 0) {
+    $st = $pdo->prepare("SELECT id, servicio FROM ceo_servicios WHERE uo = :uo ORDER BY servicio");
+    $st->execute([':uo' => $uoId]);
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+      $out[] = ['id' => (int)$r['id'], 'text' => (string)$r['servicio']];
+    }
+  }
+  echo json_encode($out, JSON_UNESCAPED_UNICODE);
+  exit;
+}
+
+/* Semana actual */
+/* Semana actual (siempre desde el lunes correspondiente a la fecha actual) */
+$hoy = new DateTime();
+$lunes = (clone $hoy)->modify('Monday this week'); // fuerza lunes de la semana actual
+$viernes = (clone $lunes)->modify('+4 days');      // viernes de la misma semana
+
+
+/* Ocupaciones actuales */
+$ocupaciones = [];
+try {
+  $sql = "SELECT id_patio, fecha, nsolicitud
+          FROM ceo_calendario
+          WHERE fecha BETWEEN :l AND :v
+            AND (estado <> 'DISPONIBLE' OR nsolicitud IS NOT NULL)";
+  $st = $pdo->prepare($sql);
+  $st->execute([':l' => $lunes->format('Y-m-d'), ':v' => $viernes->format('Y-m-d')]);
+  $ocupaciones = $st->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+  error_log($e->getMessage());
+}
+
+$fechaDefault = $hoy->format('Y-m-d');
+?>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Nueva Solicitud - <?= esc(APP_NAME) ?></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    body { background:#f7f9fc }
+    .topbar { background:#fff;border-bottom:1px solid #e3e6ea }
+    .brand-title { color:#0065a4;font-weight:600 }
+    .card { border:none;box-shadow:0 2px 4px rgba(0,0,0,.05) }
+    .table thead { position:sticky;top:0;z-index:2 }
+    .table th { background:#eaf2fb;font-size:.85rem }
+    .form-label { color:#4b73a6;font-weight:500 }
+    .ocupado { background:#dc3545!important;color:#fff;cursor:not-allowed }
+    .semana-tabla th, .semana-tabla td { font-size:.8rem }
+  </style>
+</head>
+<body>
+
+<header class="topbar py-3 mb-4">
+  <div class="container d-flex align-items-center justify-content-between">
+    <div class="d-flex align-items-center gap-2">
+      <img src="<?= APP_LOGO ?>" alt="Logo <?= esc(APP_NAME) ?>" style="height:60px;">
+      <div>
+        <div class="brand-title h4 mb-0"><?= esc(APP_NAME) ?></div>
+        <small class="text-secondary"><?= esc(APP_SUBTITLE) ?></small>
+      </div>
+    </div>
+    <a href="solicitudes.php" class="btn btn-outline-primary btn-sm">← Volver</a>
+  </div>
+</header>
+
+<h4 class="fw-bold text-primary mb-3 d-flex align-items-center justify-content-between flex-wrap">
+  <div>
+    <i class="bi bi-file-earmark-plus me-2"></i> Nueva Solicitud
+  </div>
+  <!-- Ícono para carga Excel -->
+  <div class="d-flex align-items-center gap-2">
+    <label for="inputExcel" class="btn btn-outline-success btn-sm mb-0" title="Cargar Excel de Participantes">
+      <i class="bi bi-upload"></i> Cargar Excel
+    </label>
+    <input type="file" id="inputExcel" accept=".xlsx,.xls,.csv" style="display:none;">
+  </div>
+</h4>
+
+
+  <!-- === Formulario Cabecera === -->
+  <div class="card rounded-4 mb-4">
+    <div class="card-body">
+      <form id="formSolicitud" class="row g-3">
+  <div class="col-md-2">
+    <label class="form-label">Fecha</label>
+    <input type="date" class="form-control form-control-sm" name="fecha" value="<?= esc($fechaDefault) ?>" required>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Hora de Inicio</label>
+    <input type="time" class="form-control form-control-sm" name="hora_inicio" required>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Hora de Término</label>
+    <input type="time" class="form-control form-control-sm" name="hora_termino" required>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Empresa</label>
+    <select name="empresa" class="form-select form-select-sm" required>
+      <option value="">— Seleccionar —</option>
+      <?php foreach ($empresas as $id=>$txt): ?>
+        <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Proceso</label>
+    <select name="proceso" class="form-select form-select-sm" required>
+      <option value="">— Seleccionar —</option>
+      <?php foreach ($procesos as $id=>$txt): ?>
+        <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+
+<div class="col-md-3">
+  <label class="form-label">Habilitación CEO</label>
+  <select name="habilitacion_ceo" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <?php foreach ($habCeo as $id => $txt): ?>
+      <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+    <?php endforeach; ?>
+  </select>
+</div>
+
+
+<div class="col-md-3">
+  <label class="form-label">Tipo de Habilitación</label>
+  <select name="tipo_habilitacion" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <option value="Seguridad">Seguridad</option>
+    <option value="Técnica">Técnica</option>
+    <option value="Ambos">Ambos</option>
+  </select>
+</div>
+
+
+<div class="col-md-3">
+  <label class="form-label">Patio</label>
+  <select name="patio" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <?php foreach ($patios as $id => $txt): ?>
+      <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+    <?php endforeach; ?>
+  </select>
+</div>
+>
+
+  <div class="col-md-3">
+    <label class="form-label">Responsable HSE</label>
+    <select name="resp_hse" class="form-select form-select-sm">
+      <option value="">— Seleccionar —</option>
+      <?php foreach ($responsables as $id=>$txt): ?>
+        <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Responsable Línea</label>
+    <select name="resp_linea" class="form-select form-select-sm">
+      <option value="">— Seleccionar —</option>
+      <?php foreach ($responsables as $id=>$txt): ?>
+        <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+
+<div class="col-md-3">
+  <label class="form-label">UO</label>
+  <select name="uo" id="selUO" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <?php foreach ($uo as $id => $txt): ?>
+      <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+    <?php endforeach; ?>
+  </select>
+</div>
+
+
+<div class="col-md-3">
+  <label class="form-label">Servicio</label>
+  <select name="servicio" id="selServicio" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar UO primero —</option>
+  </select>
+</div>
+
+
+  <div class="col-md-3">
+    <label class="form-label">Responsable UO</label>
+    <select name="resp_uo" class="form-select form-select-sm">
+      <option value="">— Seleccionar —</option>
+      <?php foreach ($responsables as $id=>$txt): ?>
+        <option value="<?= (int)$id ?>"><?= esc($txt) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </div>
+
+  <div class="col-12">
+    <label class="form-label">Observación</label>
+    <input type="text" name="observacion" class="form-control form-control-sm">
+  </div>
+</form>
+
+    </div>
+  </div>
+
+  <!-- === Agenda semanal y Participantes === -->
+  <div class="row g-4 mb-4">
+    <div class="col-lg-5">
+      <div class="card rounded-4 h-100">
+        <div class="card-body p-2">
+          <h6 class="fw-bold mb-2">Agenda semanal patios</h6>
+          <div id="tablaSemana" class="table-responsive"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card rounded-4 h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold m-0">Lista de Participantes (desde Excel)</h6>
+            <div>
+              <button id="btnTablaCompleta" class="btn btn-outline-secondary btn-sm me-2">Vista Completa</button>
+              <button id="btnTablaCondensada" class="btn btn-outline-secondary btn-sm">Vista Condensada</button>
+            </div>
+          </div>
+          <div id="tablaParticipantes" class="table-responsive" style="max-height:420px;overflow:auto;">
+            <div class="text-center text-muted py-4">Cargando participantes...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-end mb-5">
+    <button id="btnGuardar" class="btn btn-primary">
+      <i class="bi bi-save me-1"></i> Guardar Solicitud
+    </button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const ocupacionesSemana = <?= json_encode($ocupaciones, JSON_UNESCAPED_UNICODE) ?>;
+
+// === Tabla semanal ===
+// === Tabla semanal ===
+// === Tabla semanal ===
+function renderSemana() {
+  const cont = document.getElementById('tablaSemana');
+
+  // Base en lunes calculado por PHP (ya es el lunes de la semana actual)
+  const lunesBase = new Date("<?= $lunes->format('Y-m-d') ?>T00:00:00");
+
+  const dias = ['Lun','Mar','Mié','Jue','Vie'];
+  let header = '<tr><th>Patio</th>';
+  const fechas = [];
+
+  // Genera lunes a viernes correctamente
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(lunesBase);
+    d.setDate(lunesBase.getDate() + i);
+
+    const yyyyMMdd = d.toISOString().split('T')[0];
+    fechas.push(yyyyMMdd);
+
+    // Mostrar fecha sin depender del locale del navegador
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    header += `<th>${dias[i]}<br>${dd}-${mm}-${yy}</th>`;
+  }
+  header += '</tr>';
+
+  let body = '';
+  <?php foreach ($patiosSemana as $p): ?>
+    body += `<tr><td><?= esc($p['desc_patios']) ?></td>`;
+    for (let f of fechas) {
+      const ocupado = ocupacionesSemana.find(o => Number(o.id_patio) === <?= (int)$p['id'] ?> && o.fecha === f);
+      if (ocupado) {
+        body += `<td class="ocupado" title="Ocupado #${ocupado.nsolicitud || ''}">❌</td>`;
+      } else {
+        body += `<td><input type="checkbox" data-patio="<?= (int)$p['id'] ?>" data-fecha="${f}"></td>`;
+      }
+    }
+    body += '</tr>';
+  <?php endforeach; ?>
+
+  cont.innerHTML = `<table class="table table-bordered table-sm text-center semana-tabla">
+    <thead>${header}</thead><tbody>${body}</tbody></table>`;
+}
+
+
+
+// === Participantes ===
+let _rows=[];
+
+async function cargarParticipantes(){
+  const cont = document.getElementById('tablaParticipantes');
+  try {
+    const r = await fetch('leer_excel.php');
+    if (!r.ok) throw new Error('Respuesta HTTP ' + r.status);
+    const j = await r.json();
+
+    // Si el archivo no existe todavía
+    if (!j.ok && j.error && j.error.includes('No se encontró')) {
+      cont.innerHTML = `
+        <div class="text-muted py-4">
+          <i class="bi bi-info-circle me-2"></i>
+          Aún no se ha cargado un archivo Excel. 
+          <br>Utiliza el botón <strong>“Cargar Excel”</strong> para incorporar los participantes.
+        </div>`;
+      return;
+    }
+
+    if (j.ok) {
+      _rows = j.rows || [];
+      renderTablaCondensada(_rows);
+    } else {
+      cont.innerHTML = `<div class="text-danger">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        ${j.error || 'Debe cargar un archivo Excel para visualizar los participantes.'}
+      </div>`;
+    }
+  } catch (e) {
+    console.error('Error cargar participantes', e);
+    cont.innerHTML = `
+      <div class="text-muted py-4">
+        <i class="bi bi-info-circle me-2"></i>
+        Esperando carga de archivo Excel...
+      </div>`;
+  }
+}
+
+
+function trimEmptyRows(rows){return (rows||[]).filter(r=>Array.isArray(r)&&r.some(c=>String(c||'').trim()!==''));}
+function looksLikeHeader(row){const j=(row||[]).join(' ').toUpperCase();return j.includes('RUT')||j.includes('APELLIDO')||j.includes('CARGO');}
+
+function renderTablaCondensada(rows){
+  const clean=trimEmptyRows(rows);
+  const cont=document.getElementById('tablaParticipantes');
+  if(!clean.length){cont.innerHTML='<div class="text-muted py-4">Sin datos</div>';return;}
+  const hdr=(clean[0]||[]).map(c=>String(c||'').toUpperCase().trim());
+  const idx={
+    rut:hdr.findIndex(h=>h.includes('RUT')),
+    nombre:hdr.findIndex(h=>h.includes('NOMBRE')),
+    ap1:hdr.findIndex(h=>h.includes('PATERNO')),
+    ap2:hdr.findIndex(h=>h.includes('MATERNO')),
+    cargo:hdr.findIndex(h=>h.includes('CARGO'))
+  };
+  const start=looksLikeHeader(clean[0])?1:0;
+  let html='<table class="table table-bordered table-sm"><thead><tr><th>RUT</th><th>Nombre</th><th>1° Apellido</th><th>2° Apellido</th><th>Cargo</th></tr></thead><tbody>';
+  for(let i=start;i<clean.length;i++){
+    const r=clean[i];
+    html+=`<tr><td>${r[idx.rut]||''}</td><td>${r[idx.nombre]||''}</td><td>${r[idx.ap1]||''}</td><td>${r[idx.ap2]||''}</td><td>${r[idx.cargo]||''}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  cont.innerHTML=html;
+}
+
+function renderTablaCompleta(rows){
+  const clean=trimEmptyRows(rows);
+  const cont=document.getElementById('tablaParticipantes');
+  if(!clean.length){cont.innerHTML='<div class="text-muted py-4">Sin datos</div>';return;}
+  const numCols=Math.max(...clean.map(r=>r.length));
+  let html='<table class="table table-bordered table-sm"><thead><tr>';
+  for(let i=0;i<numCols;i++)html+=`<th>${String.fromCharCode(65+i)}</th>`;
+  html+='</tr></thead><tbody>';
+  clean.forEach(r=>{html+='<tr>'+r.map(c=>`<td>${c||''}</td>`).join('')+'</tr>';});
+  html+='</tbody></table>';
+  cont.innerHTML=html;
+}
+
+window.addEventListener('DOMContentLoaded',()=>{
+  renderSemana();
+  cargarParticipantes();
+  document.getElementById('btnTablaCompleta').onclick=()=>renderTablaCompleta(_rows);
+  document.getElementById('btnTablaCondensada').onclick=()=>renderTablaCondensada(_rows);
+});
+
+// === Carga manual de Excel ===
+document.getElementById('inputExcel').addEventListener('change', async function() {
+  const file = this.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('excel', file);
+
+  const cont = document.getElementById('tablaParticipantes');
+  cont.innerHTML = '<div class="text-muted py-4">Leyendo archivo...</div>';
+
+  try {
+    const resp = await fetch('leer_excel.php', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (data.ok) {
+      _rows = data.rows || [];
+      renderTablaCondensada(_rows);
+    } else {
+      cont.innerHTML = `<div class="text-danger">${data.error || 'Error al procesar el archivo.'}</div>`;
+    }
+  } catch (err) {
+    console.error('Error leyendo Excel:', err);
+    cont.innerHTML = '<div class="text-danger">Error al leer el archivo Excel.</div>';
+  }
+});
+// === Carga dinámica de servicios por UO ===
+(function() {
+  const selUO = document.getElementById('selUO');
+  const selSrv = document.getElementById('selServicio');
+
+  if (selUO && selSrv) {
+    selUO.addEventListener('change', async function () {
+      const uoId = this.value;
+      selSrv.innerHTML = '<option value="">Cargando servicios...</option>';
+      if (!uoId) {
+        selSrv.innerHTML = '<option value="">— Seleccionar UO primero —</option>';
+        return;
+      }
+      try {
+        const r = await fetch(`nueva_solicitud.php?action=servicios_by_uo&uo_id=${encodeURIComponent(uoId)}`);
+        const data = await r.json();
+        let opts = '<option value="">— Seleccionar —</option>';
+        data.forEach(s => { opts += `<option value="${s.id}">${s.text}</option>`; });
+        selSrv.innerHTML = opts || '<option value="">(Sin servicios para esta UO)</option>';
+      } catch (e) {
+        console.error(e);
+        selSrv.innerHTML = '<option value="">Error al cargar servicios</option>';
+      }
+    });
+  }
+})();
+
+</script>
+</body>
+</html>
+

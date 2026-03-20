@@ -1,0 +1,394 @@
+
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Jan-2026 20:12:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Jan-2026 20:36:25 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Jan-2026 20:42:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[14-Jan-2026 17:58:24 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[14-Jan-2026 17:59:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[14-Jan-2026 22:06:29 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[14-Jan-2026 22:18:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[15-Jan-2026 14:39:27 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[19-Jan-2026 09:58:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[19-Jan-2026 12:50:57 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[20-Jan-2026 15:16:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[22-Jan-2026 10:25:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[22-Jan-2026 11:54:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[22-Jan-2026 12:29:13 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 15:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 15:59:09 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 16:05:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 16:12:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 16:34:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 16:56:18 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 17:58:49 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[23-Jan-2026 18:15:39 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[25-Jan-2026 20:08:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[26-Jan-2026 15:30:30 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[26-Jan-2026 15:49:28 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[29-Jan-2026 17:45:34 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[10-Feb-2026 12:34:52 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[10-Feb-2026 12:35:43 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[10-Feb-2026 12:41:02 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[10-Feb-2026 19:36:01 America/Santiago] Error al enviar correo (solicitud 5568): SMTP Error: The following recipients failed: marcelo.jofre.external@enel.com: Temporary local problem - please try later
+leonel.morales2.external@enel.com: Temporary local problem - please try later
+yanett.henriquez@enel.com: Temporary local problem - please try later
+
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[06-Mar-2026 09:28:07 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[06-Mar-2026 12:01:50 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[07-Mar-2026 23:20:58 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[07-Mar-2026 23:31:19 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 16:47:17 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 16:52:03 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 17:17:14 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 17:21:36 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 17:37:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[08-Mar-2026 17:50:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[09-Mar-2026 13:14:12 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[09-Mar-2026 16:02:54 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[09-Mar-2026 16:10:15 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[13-Mar-2026 17:44:35 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[13-Mar-2026 17:49:37 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[13-Mar-2026 19:14:21 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[16-Mar-2026 16:58:49 America/Santiago] ⚠️ Error al enviar correo a Marcelo Jofré (Solicitud 5736): SMTP Error: The following recipients failed: Alain.cortes@inmel.cl: Temporary local problem - please try later
+
+[16-Mar-2026 17:09:01 America/Santiago] ⚠️ Error al enviar correo a Marcelo Jofré (Solicitud 5737): SMTP Error: The following recipients failed: Alain.cortes@inmel.cl: Temporary local problem - please try later
+
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[17-Mar-2026 18:00:31 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[17-Mar-2026 18:02:22 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] POST recibido
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] CSRF válido
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Evaluador ID: 64
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Clave ingresada: [OK]
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Ejecutando consulta de login
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Login exitoso para usuario ID 64
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Preparando redirección
+[18-Mar-2026 09:31:05 America/Santiago] [DEBUG LOGIN EVALUADOR] Headers OK, redirigiendo
+[18-Mar-2026 15:59:17 America/Santiago] ⚠️ Error al enviar correo a Marcelo Jofré (Solicitud 5750): SMTP Error: Could not authenticate.

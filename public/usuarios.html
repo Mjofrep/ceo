@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Evaluaciones por Participante</title>
+<style>
+    body { font-family: Arial; }
+    #tabs { display: flex; border-bottom: 1px solid #ccc; }
+    .tab {
+        padding: 10px 15px;
+        border: 1px solid #ccc;
+        border-bottom: none;
+        cursor: pointer;
+        margin-right: 3px;
+        border-radius: 5px 5px 0 0;
+        background: #eee;
+    }
+    .tab.active { background: white; font-weight: bold; }
+    #content > div { display: none; padding: 15px; border: 1px solid #ccc; }
+    #content > div.active { display: block; }
+    #addTab {
+        padding: 10px;
+        background: #3b82f6;
+        color: white;
+        cursor: pointer;
+        border-radius: 5px;
+        margin-left: auto;
+    }
+</style>
+</head>
+<body>
+
+<h2>Evaluaciones de Participantes</h2>
+
+<div id="tabs">
+    <!-- Tabs se generarán dinámicamente -->
+    <div id="addTab">+ Añadir Participante</div>
+</div>
+
+<div id="content">
+    <!-- Contenido dinámico -->
+</div>
+
+<script>
+let contador = 0;
+
+function crearPestaña(nombre = "Participante " + (contador + 1)) {
+
+    contador++;
+
+    // Crear tab
+    const tab = document.createElement("div");
+    tab.className = "tab";
+    tab.textContent = nombre;
+    tab.dataset.id = contador;
+
+    // Crear contenido asociado
+    const contenido = document.createElement("div");
+    contenido.className = "contenedor-tab";
+    contenido.id = "tab-" + contador;
+
+    contenido.innerHTML = `
+        <h3>Evaluación de ${nombre}</h3>
+        <label>Puntaje: <input type="number" id="puntaje-${contador}"></label><br><br>
+        <label>Comentarios:</label><br>
+        <textarea id="coment-${contador}" rows="5" cols="40"></textarea><br><br>
+        <button onclick="guardar(${contador})">Guardar en BD</button>
+    `;
+
+    document.getElementById("content").appendChild(contenido);
+
+    // Insertar tab antes de "+ Añadir"
+    const addBtn = document.getElementById("addTab");
+    document.getElementById("tabs").insertBefore(tab, addBtn);
+
+    // Activar la pestaña
+    activarTab(tab);
+    
+    tab.addEventListener("click", function() {
+        activarTab(tab);
+    });
+}
+
+function activarTab(tab) {
+    // Desactivar pestañas
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll("#content > div").forEach(c => c.classList.remove("active"));
+
+    tab.classList.add("active");
+
+    const id = tab.dataset.id;
+    document.getElementById("tab-" + id).classList.add("active");
+}
+
+// Guardado simulado
+function guardar(id) {
+    const puntaje = document.getElementById("puntaje-" + id).value;
+    const coment = document.getElementById("coment-" + id).value;
+
+    alert(`Se guardó evaluación ${id}:\nPuntaje: ${puntaje}\nComentario: ${coment}`);
+
+    // Aquí tu AJAX a PHP:
+    // fetch("guardar.php", { method:"POST", body: JSON.stringify({id, puntaje, coment}) })
+}
+
+document.getElementById("addTab").onclick = () =>
+    crearPestaña(prompt("Nombre del participante:"));
+</script>
+
+</body>
+</html>
+

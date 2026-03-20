@@ -1,0 +1,107 @@
+
+[2025-10-27 21:45:34] OK
+SEARCH: ''
+WHERE: 1=1
+PARAMS: Array
+(
+)
+
+SQL COUNT: 
+        SELECT COUNT(*)
+        FROM ceo_solicitudes s
+        LEFT JOIN ceo_usuarios u ON s.solicitante = u.id
+        LEFT JOIN ceo_patios p ON s.patio = p.id
+        LEFT JOIN ceo_empresas ce ON s.contratista = ce.id
+        WHERE 1=1
+    
+SQL DATA: 
+        SELECT 
+            s.id,
+            s.nsolicitud,
+            CONCAT(u.nombres, ' ', u.apellidos) AS solicitante,
+            p.desc_patios AS patio,
+            s.fecha,
+            s.horainicio,
+            s.horatermino,
+            s.estado,
+            ce.nombre AS contratista,
+            cp.desc_proceso AS proceso,
+            ch.desc_tipo AS habilitacionceo,
+            s.tipohabilitacion,
+            (
+                SELECT COUNT(*) 
+                FROM ceo_participantes_solicitud ps 
+                WHERE ps.id_solicitud = s.nsolicitud
+            ) AS cantidad_personas
+        FROM ceo_solicitudes s
+        LEFT JOIN ceo_usuarios u ON s.solicitante = u.id
+        LEFT JOIN ceo_patios p ON s.patio = p.id
+        LEFT JOIN ceo_empresas ce ON s.contratista = ce.id
+        LEFT JOIN ceo_procesos cp ON s.proceso = cp.id
+        LEFT JOIN ceo_habilitaciontipo ch ON s.habilitacionceo = ch.id
+        WHERE 1=1
+        ORDER BY s.nsolicitud DESC
+        LIMIT :limit OFFSET :offset
+    
+REGISTROS: 25
+
+[2025-10-27 21:45:38] ERROR: SQLSTATE[HY093]: Invalid parameter number
+Archivo: C:\xampp\htdocs\ceo\public\ajax_solicitudes.php:76
+Trace:
+#0 C:\xampp\htdocs\ceo\public\ajax_solicitudes.php(76): PDOStatement->execute()
+#1 {main}
+
+[2025-10-27 21:45:38] ERROR: SQLSTATE[HY093]: Invalid parameter number
+Archivo: C:\xampp\htdocs\ceo\public\ajax_solicitudes.php:76
+Trace:
+#0 C:\xampp\htdocs\ceo\public\ajax_solicitudes.php(76): PDOStatement->execute()
+#1 {main}
+
+[2025-10-27 21:47:40] OK
+SEARCH=''
+WHERE=1=1
+PARAMS=Array
+(
+)
+
+LIMIT=25 OFFSET=0
+RESULTADOS=25
+
+[2025-10-27 21:47:47] ERROR: SQLSTATE[HY093]: Invalid parameter number
+Archivo: C:\xampp\htdocs\ceo\public\ajax_solicitudes.php:72
+Trace:
+#0 C:\xampp\htdocs\ceo\public\ajax_solicitudes.php(72): PDOStatement->execute()
+#1 {main}
+
+[2025-10-27 21:47:47] ERROR: SQLSTATE[HY093]: Invalid parameter number
+Archivo: C:\xampp\htdocs\ceo\public\ajax_solicitudes.php:72
+Trace:
+#0 C:\xampp\htdocs\ceo\public\ajax_solicitudes.php(72): PDOStatement->execute()
+#1 {main}
+
+[2025-10-27 21:48:00] OK
+SEARCH=''
+WHERE=1=1
+PARAMS=Array
+(
+)
+
+LIMIT=25 OFFSET=0
+RESULTADOS=25
+
+[2025-10-27 21:48:02] ERROR: SQLSTATE[HY093]: Invalid parameter number
+Archivo: C:\xampp\htdocs\ceo\public\ajax_solicitudes.php:72
+Trace:
+#0 C:\xampp\htdocs\ceo\public\ajax_solicitudes.php(72): PDOStatement->execute()
+#1 {main}
+
+[2025-10-27 21:54:17] OK
+SEARCH=''
+WHERE=1=1
+PARAMS=Array
+(
+)
+
+LIMIT=25 OFFSET=0
+RESULTADOS=25
+
