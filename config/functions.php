@@ -25,6 +25,68 @@ function esc($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+if (!function_exists('auditLog')) {
+    function auditLog(
+        string $accion,
+        string $entidad = '',
+        ?int $entidadId = null,
+        array $detalle = [],
+        array $usuario = []
+    ): void {
+        if (!function_exists('db')) {
+            return;
+        }
+
+        $sessionUser = $_SESSION['auth'] ?? [];
+
+        $usuarioId = $usuario['id'] ?? $sessionUser['id'] ?? null;
+        $usuarioCodigo = $usuario['codigo'] ?? $sessionUser['codigo'] ?? '';
+        $usuarioNombre = $usuario['nombre'] ?? $sessionUser['nombre'] ?? '';
+        $usuarioRol = $usuario['rol'] ?? $sessionUser['rol'] ?? '';
+
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        $metodo = $_SERVER['REQUEST_METHOD'] ?? '';
+        $url = $_SERVER['REQUEST_URI'] ?? '';
+
+        $detalleJson = '{}';
+        if (!empty($detalle)) {
+            $encoded = json_encode($detalle, JSON_UNESCAPED_UNICODE);
+            if ($encoded !== false) {
+                $detalleJson = $encoded;
+            }
+        }
+
+        try {
+            $pdo = db();
+            $stmt = $pdo->prepare("
+                INSERT INTO ceo_auditoria
+                    (usuario_id, usuario_codigo, usuario_nombre, usuario_rol,
+                     accion, entidad, entidad_id, detalle, ip, user_agent, metodo, url, created_at)
+                VALUES
+                    (:usuario_id, :usuario_codigo, :usuario_nombre, :usuario_rol,
+                     :accion, :entidad, :entidad_id, :detalle, :ip, :user_agent, :metodo, :url, NOW())
+            ");
+            $stmt->execute([
+                ':usuario_id' => $usuarioId,
+                ':usuario_codigo' => $usuarioCodigo,
+                ':usuario_nombre' => $usuarioNombre,
+                ':usuario_rol' => $usuarioRol,
+                ':accion' => $accion,
+                ':entidad' => $entidad,
+                ':entidad_id' => $entidadId,
+                ':detalle' => $detalleJson,
+                ':ip' => $ip,
+                ':user_agent' => $userAgent,
+                ':metodo' => $metodo,
+                ':url' => $url
+            ]);
+        } catch (Throwable $e) {
+            return;
+        }
+    }
+}
+
 /**
  * Redirige a una ruta dentro del proyecto.
  */

@@ -6,6 +6,7 @@ require_once __DIR__.'/../config/app.php';
 require_once __DIR__.'/../src/Csrf.php';
 require_once __DIR__.'/../src/Auth.php';
 require_once __DIR__.'/../config/db.php'; // conexión PDO
+require_once __DIR__.'/../config/functions.php';
 
 $err = '';
 
@@ -13,12 +14,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 1) Validación CSRF
     if (!Csrf::validate($_POST['csrf'] ?? null)) {
         $err = 'Sesión expirada. Por favor, recarga e intenta nuevamente.';
+        if (function_exists('auditLog')) {
+            auditLog('LOGIN_FAIL', 'auth', null, [
+                'motivo' => 'csrf'
+            ], [
+                'codigo' => trim((string)($_POST['usuario'] ?? ''))
+            ]);
+        }
     } else {
         // 2) Sanitización básica
         $codigo = trim((string)($_POST['usuario'] ?? ''));
         $clave  = (string)($_POST['password'] ?? '');
         if ($codigo === '' || $clave === '') {
             $err = 'Debes ingresar usuario y contraseña.';
+            if (function_exists('auditLog')) {
+                auditLog('LOGIN_FAIL', 'auth', null, [
+                    'motivo' => 'campos_vacios'
+                ], [
+                    'codigo' => $codigo
+                ]);
+            }
         } else {
             // 3) Validación de credenciales (usa Auth)
             $res = Auth::login($codigo, $clave);
@@ -61,15 +76,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // Redirige solo si la sesión fue correctamente creada
                     if (!empty($_SESSION['auth']['id_rol'])) {
+                        if (function_exists('auditLog')) {
+                            auditLog('LOGIN_OK', 'auth', null, [
+                                'rol' => $_SESSION['auth']['rol'] ?? ''
+                            ]);
+                        }
                         header('Location: /ceo.noetica.cl/public/general.php');
                         exit;
                     }
 
                 } catch (Throwable $e) {
                     $err = 'Error interno al cargar información del usuario.';
+                    if (function_exists('auditLog')) {
+                        auditLog('LOGIN_FAIL', 'auth', null, [
+                            'motivo' => 'exception'
+                        ], [
+                            'codigo' => $codigo
+                        ]);
+                    }
                 }
             } else {
                 $err = $res['msg'];
+                if (function_exists('auditLog')) {
+                    auditLog('LOGIN_FAIL', 'auth', null, [
+                        'motivo' => 'credenciales'
+                    ], [
+                        'codigo' => $codigo
+                    ]);
+                }
             }
         }
     }
@@ -282,4 +316,3 @@ $csrf = Csrf::token();
   </script>
 </body>
 </html>
-

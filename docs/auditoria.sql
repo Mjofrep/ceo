@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS ceo_auditoria (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    usuario_id INT NULL,
+    usuario_codigo VARCHAR(100) NULL,
+    usuario_nombre VARCHAR(200) NULL,
+    usuario_rol VARCHAR(100) NULL,
+    accion VARCHAR(60) NOT NULL,
+    entidad VARCHAR(60) NULL,
+    entidad_id INT NULL,
+    detalle LONGTEXT NULL,
+    ip VARCHAR(45) NULL,
+    user_agent VARCHAR(255) NULL,
+    metodo VARCHAR(10) NULL,
+    url VARCHAR(500) NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_auditoria_usuario (usuario_id),
+    INDEX idx_auditoria_accion (accion),
+    INDEX idx_auditoria_fecha (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

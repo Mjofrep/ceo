@@ -7,6 +7,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 require_once __DIR__.'/../config/app.php';
 require_once __DIR__.'/../src/Csrf.php';
 require_once __DIR__.'/../config/db.php';
+require_once __DIR__.'/../config/functions.php';
 
 $err = '';
 
@@ -14,6 +15,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!Csrf::validate($_POST['csrf'] ?? null)) {
         $err = 'Sesión expirada. Recarga la página.';
+        if (function_exists('auditLog')) {
+            auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
+                'motivo' => 'csrf'
+            ]);
+        }
     } else {
 
         $rutAlumno = trim($_POST['usuario'] ?? '');
@@ -21,6 +27,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($rutAlumno === '' || $clave === '') {
             $err = 'Debe ingresar Rut y clave.';
+            if (function_exists('auditLog')) {
+                auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
+                    'motivo' => 'campos_vacios'
+                ], [
+                    'codigo' => $rutAlumno
+                ]);
+            }
         } else {
 
             try {
@@ -55,6 +68,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (!$usr) {
                     $err = "Usuario o clave incorrecta.";
+                    if (function_exists('auditLog')) {
+                        auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
+                            'motivo' => 'credenciales'
+                        ], [
+                            'codigo' => $rutAlumno
+                        ]);
+                    }
                 } else {
 
                     /**
@@ -73,6 +93,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if (!$pruebas) {
                         $err = "El RUT ingresado no registra pruebas pendientes.";
+                        if (function_exists('auditLog')) {
+                            auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
+                                'motivo' => 'sin_pruebas'
+                            ], [
+                                'codigo' => $rutAlumno
+                            ]);
+                        }
                     }
                      else {
 
@@ -100,8 +127,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                             if (!$cargo) {
                                 $err = "El alumno no está registrado como contratista.";
+                                if (function_exists('auditLog')) {
+                                    auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
+                                        'motivo' => 'sin_contratista'
+                                    ], [
+                                        'codigo' => $rutAlumno
+                                    ]);
+                                }
                             }
-                             else {
+                              else {
                             // ✔ Campos correctos en tu BD
                             $id_servicio = $alumno['id_servicio'];      // este es el ID del servicio
                             $id_empresa  = $cargo['id_empresa'];   // es tu campo de empresa
@@ -117,7 +151,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $sql = "SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id";
                             $stmt = $pdo->prepare($sql);
                             $stmt->execute(['id' => $id_servicio]);
-                            $servicio = $stmt->fetchColumn();
+                                $servicio = $stmt->fetchColumn();
+
+                                if (function_exists('auditLog')) {
+                                    auditLog('LOGIN_OK', 'auth_evaluador', null, [
+                                        'id_servicio' => $id_servicio ?? null,
+                                        'id_empresa' => $id_empresa ?? null,
+                                        'id_uo' => $id_uo ?? null
+                                    ], [
+                                        'id' => $usr['id'] ?? null,
+                                        'codigo' => $usr['correo'] ?? '',
+                                        'nombre' => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
+                                        'rol' => $usr['rol'] ?? ''
+                                    ]);
+                                }
 
                             // ✔ UO
                             $sql = "SELECT desc_uo, subgerencia FROM ceo_uo WHERE id = :id";
@@ -151,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'pruebas' => []
                             ];
                             
-                            // Si quieres nombre, t�malo desde contratistas (si existe en esa tabla)
+                            // Si quieres nombre, t�malo desde contratistas (si existe en esa tabla)
                             // o arma uno simple desde la primera fila si tu tabla lo trae.
                             $_SESSION['evaluado']['nombre'] = trim(
                                 ($pruebas[0]['nombres'] ?? '') . ' ' .

@@ -6,6 +6,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
+require_once __DIR__.'/db.php';
+require_once __DIR__.'/functions.php';
+
 // ⏱️ Tiempo máximo de inactividad (en segundos)
 $MAX_IDLE = 15 * 60; // 15 minutos
 
@@ -20,6 +23,12 @@ if (empty($_SESSION['auth'])) {
 $ahora = time();
 
 if (isset($_SESSION['LAST_ACTIVITY']) && ($ahora - $_SESSION['LAST_ACTIVITY']) > $MAX_IDLE) {
+    if (function_exists('auditLog')) {
+        auditLog('SESSION_TIMEOUT', 'session', null, [
+            'motivo' => 'inactividad',
+            'url' => $_SERVER['REQUEST_URI'] ?? ''
+        ]);
+    }
     session_unset();
     session_destroy();
     header('Location: /ceo.noetica.cl/config/index.php?timeout=1');
@@ -28,6 +37,15 @@ if (isset($_SESSION['LAST_ACTIVITY']) && ($ahora - $_SESSION['LAST_ACTIVITY']) >
 
 // ✔️ Actualiza actividad
 $_SESSION['LAST_ACTIVITY'] = $ahora;
+
+if (function_exists('auditLog')) {
+    auditLog('PAGE_ACCESS', 'page', null, [
+        'path' => $_SERVER['PHP_SELF'] ?? '',
+        'query_keys' => !empty($_GET) ? array_keys($_GET) : [],
+        'post_keys' => !empty($_POST) ? array_keys($_POST) : [],
+        'ajax' => (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') ? 'S' : 'N'
+    ]);
+}
 
 // 🔒 Evita cache (Back/Forward)
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
