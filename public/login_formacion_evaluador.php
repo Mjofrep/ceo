@@ -101,14 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ]);
                         }
                     }
-                     else {
-
-                        // ✔ Datos base del alumno
-                        //$id_solicitud = $alumno['id_solicitud'];
-                        //$id_cargo     = $alumno['id_cargo'];
-
-                        // ✔ CARGO
-                        //$sql = "SELECT cargo FROM ceo_cargo_contratistas WHERE id = :id";
+                    else {
+                        // ✔ CARGO (si existe en contratistas)
                         $sql = "SELECT a.*, b.cargo, c.desc_uo, d.nombre AS nom_empresa FROM `ceo_contratistas` a
                                 LEFT  JOIN ceo_cargo_contratistas b ON b.id = a.id_cargo
                                 LEFT  JOIN ceo_uo c ON c.id  = a.uo
@@ -118,142 +112,124 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt->execute(['rut' => $rutAlumno]);
                         $cargo = $stmt->fetch(PDO::FETCH_ASSOC);
 
+                        // ✔ Para Formaciones, no exigimos que sea contratista
+                        $id_servicio = (int)($pruebas[0]['id_servicio'] ?? 0);
+                        $id_empresa  = (int)($cargo['id_empresa'] ?? 0);
+                        $id_uo       = (int)($cargo['uo'] ?? 0);
 
-                        // ✔ SOLICITUD (CORREGIDO)
-                        //$sql = "SELECT a.*, b.id_servicio FROM ceo_formacion_solicitudes a INNER JOIN ceo_formacion b ON a.nsolicitud = b.nsolicitud WHERE a.nsolicitud = :id";
-                        //$stmt = $pdo->prepare($sql);
-                        //$stmt->execute(['id' => $id_solicitud]);
-                        //$sol = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                            if (!$cargo) {
-                                $err = "El alumno no está registrado como contratista.";
-                                if (function_exists('auditLog')) {
-                                    auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
-                                        'motivo' => 'sin_contratista'
-                                    ], [
-                                        'codigo' => $rutAlumno
-                                    ]);
-                                }
-                            }
-                              else {
-                            // ✔ Campos correctos en tu BD
-                            $id_servicio = $alumno['id_servicio'];      // este es el ID del servicio
-                            $id_empresa  = $cargo['id_empresa'];   // es tu campo de empresa
-                            $id_uo       = $cargo['uo'];
-
-                            // ✔ EMPRESA
+                        // ✔ EMPRESA
+                        $empresa = ['nombre' => '', 'rut' => ''];
+                        if ($id_empresa > 0) {
                             $sql = "SELECT nombre, rut FROM ceo_empresas WHERE id = :id";
                             $stmt = $pdo->prepare($sql);
                             $stmt->execute(['id' => $id_empresa]);
-                            $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
+                            $empresa = $stmt->fetch(PDO::FETCH_ASSOC) ?: $empresa;
+                        }
 
-                            // ✔ SERVICIO (nombre)
-                            $sql = "SELECT servicio FROM ceo_formacion_servicios WHERE id = :id";
-                            $stmt = $pdo->prepare($sql);
-                            $stmt->execute(['id' => $id_servicio]);
-                                $servicio = $stmt->fetchColumn();
+                        // ✔ SERVICIO (nombre)
+                        $sql = "SELECT servicio FROM ceo_formacion_servicios WHERE id = :id";
+                        $stmt = $pdo->prepare($sql);
+                        $stmt->execute(['id' => $id_servicio]);
+                        $servicio = $stmt->fetchColumn();
 
-                                if (function_exists('auditLog')) {
-                                    auditLog('LOGIN_OK', 'auth_evaluador', null, [
-                                        'id_servicio' => $id_servicio ?? null,
-                                        'id_empresa' => $id_empresa ?? null,
-                                        'id_uo' => $id_uo ?? null
-                                    ], [
-                                        'id' => $usr['id'] ?? null,
-                                        'codigo' => $usr['correo'] ?? '',
-                                        'nombre' => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
-                                        'rol' => $usr['rol'] ?? ''
-                                    ]);
-                                }
+                        if (function_exists('auditLog')) {
+                            auditLog('LOGIN_OK', 'auth_evaluador', null, [
+                                'id_servicio' => $id_servicio ?? null,
+                                'id_empresa' => $id_empresa ?? null,
+                                'id_uo' => $id_uo ?? null
+                            ], [
+                                'id' => $usr['id'] ?? null,
+                                'codigo' => $usr['correo'] ?? '',
+                                'nombre' => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
+                                'rol' => $usr['rol'] ?? ''
+                            ]);
+                        }
 
-                            // ✔ UO
+                        // ✔ UO
+                        $uo = ['desc_uo' => '', 'subgerencia' => ''];
+                        if ($id_uo > 0) {
                             $sql = "SELECT desc_uo, subgerencia FROM ceo_uo WHERE id = :id";
                             $stmt = $pdo->prepare($sql);
                             $stmt->execute(['id' => $id_uo]);
-                            $uo = $stmt->fetch(PDO::FETCH_ASSOC);
+                            $uo = $stmt->fetch(PDO::FETCH_ASSOC) ?: $uo;
+                        }
 
-                            /**
-                             * 3) Sesión del evaluador
-                             */
-                            $_SESSION['auth'] = [
-                                'nombre'      => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
-                                'correo'      => $usr['correo'] ?? '',
-                                'rol'         => $usr['rol'] ?? 'Evaluador',
-                                'id_rol'      => (int)($usr['id_rol'] ?? 4),
-                                'id_empresa'  => (int)($usr['id_empresa'] ?? 0),
-                                'empresa'     => $usr['empresa'] ?? '',
-                                'id'          => $usr['id'] ?? 0,
-                                'codigo'      => $rutAlumno
+                        /**
+                         * 3) Sesión del evaluador
+                         */
+                        $_SESSION['auth'] = [
+                            'nombre'      => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
+                            'correo'      => $usr['correo'] ?? '',
+                            'rol'         => $usr['rol'] ?? 'Evaluador',
+                            'id_rol'      => (int)($usr['id_rol'] ?? 4),
+                            'id_empresa'  => (int)($usr['id_empresa'] ?? 0),
+                            'empresa'     => $usr['empresa'] ?? '',
+                            'id'          => $usr['id'] ?? 0,
+                            'codigo'      => $rutAlumno
+                        ];
+
+                        /**
+                         * 4) Sesión del ALUMNO con valores REALES
+                         */
+                        $_SESSION['evaluado'] = [
+                            'rut'     => $rutAlumno,
+                            'cargo'   => $cargo,
+                            'empresa' => $empresa,
+                            'uo'      => $uo,
+                            'pruebas' => []
+                        ];
+
+                        $_SESSION['evaluado']['nombre'] = trim(
+                            ($pruebas[0]['nombres'] ?? '') . ' ' .
+                            ($pruebas[0]['apellidop'] ?? '') . ' ' .
+                            ($pruebas[0]['apellidom'] ?? '')
+                        );
+
+                        // Por cada prueba pendiente, agregamos su info
+                        $sqlServ = "SELECT servicio FROM ceo_formacion_servicios WHERE id = :id";
+                        $stmtServ = $pdo->prepare($sqlServ);
+
+                        foreach ($pruebas as $p) {
+                            $idServicio = (int)($p['id_servicio'] ?? 0);
+
+                            $stmtServ->execute(['id' => $idServicio]);
+                            $nombreServicio = (string)$stmtServ->fetchColumn();
+
+                            $_SESSION['evaluado']['pruebas'][] = [
+                                'id_programada' => (int)$p['id'],
+                                'id_servicio'   => $idServicio,
+                                'servicio'      => $nombreServicio,
+                                'nsolicitud'    => $p['nsolicitud'] ?? null,
+                                'cuadrilla'     => $p['cuadrilla'] ?? null,
+                                'fecha_prog'    => $p['fecha_programacion'] ?? null,
+                                'intento'       => $p['intento'] ?? null
                             ];
+                        }
 
-                            /**
-                             * 4) Sesión del ALUMNO con valores REALES
-                             */
-                            // Datos "base" del alumno (contratista)
-                            $_SESSION['evaluado'] = [
-                                'rut'     => $rutAlumno,
-                                'cargo'   => $cargo,
-                                'empresa' => $empresa,
-                                'uo'      => $uo,
-                                'pruebas' => []
-                            ];
-                            
-                            // Si quieres nombre, t�malo desde contratistas (si existe en esa tabla)
-                            // o arma uno simple desde la primera fila si tu tabla lo trae.
-                            $_SESSION['evaluado']['nombre'] = trim(
-                                ($pruebas[0]['nombres'] ?? '') . ' ' .
-                                ($pruebas[0]['apellidop'] ?? '') . ' ' .
-                                ($pruebas[0]['apellidom'] ?? '')
-                            );
-                            
-                            // Por cada prueba pendiente, agregamos su info
-                            $sqlServ = "SELECT servicio FROM ceo_formacion_servicios WHERE id = :id";
-                            $stmtServ = $pdo->prepare($sqlServ);
-                            
-                            foreach ($pruebas as $p) {
-                                $idServicio = (int)($p['id_servicio'] ?? 0);
-                            
-                                $stmtServ->execute(['id' => $idServicio]);
-                                $nombreServicio = (string)$stmtServ->fetchColumn();
-                            
-                                $_SESSION['evaluado']['pruebas'][] = [
-                                    'id_programada' => (int)$p['id'],                 // id de ceo_formacion_programadas
-                                    'id_servicio'   => $idServicio,
-                                    'servicio'      => $nombreServicio,
-                                    'nsolicitud'    => $p['nsolicitud'] ?? null,      // si existe columna
-                                    'cuadrilla'     => $p['cuadrilla'] ?? null,
-                                    'fecha_prog'    => $p['fecha_programacion'] ?? null,
-                                    'intento'       => $p['intento'] ?? null
-                                ];
-                            }
-
-
-                            // ✔ Redirección correcta
-                            file_put_contents(__DIR__.'/debug_redirect.log',
-                                    date('Y-m-d H:i:s')." REDIRIGIENDO\n",
-                                    FILE_APPEND
-                                );
-
-                            $logFile = __DIR__ . '/debug_redirect.log';
-                            
-                            $logData = [
-                                'fecha'    => date('Y-m-d H:i:s'),
-                                'auth'     => $_SESSION['auth'],
-                                'evaluado' => $_SESSION['evaluado'],
-                                'ip'       => $_SERVER['REMOTE_ADDR'] ?? 'N/A',
-                                'script'   => $_SERVER['PHP_SELF'] ?? 'N/A'
-                            ];
-                            
-                            file_put_contents(
-                                $logFile,
-                                json_encode($logData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . PHP_EOL . str_repeat('-', 60) . PHP_EOL,
+                        file_put_contents(__DIR__.'/debug_redirect.log',
+                                date('Y-m-d H:i:s')." REDIRIGIENDO\n",
                                 FILE_APPEND
                             );
 
-                            ob_end_clean(); // 🧹 Limpia cualquier salida previa
-                            header('Location: /ceo.noetica.cl/public/formacion_evaluador_home.php');
-                            exit;
-                        }
+                        $logFile = __DIR__ . '/debug_redirect.log';
+
+                        $logData = [
+                            'fecha'    => date('Y-m-d H:i:s'),
+                            'auth'     => $_SESSION['auth'],
+                            'evaluado' => $_SESSION['evaluado'],
+                            'ip'       => $_SERVER['REMOTE_ADDR'] ?? 'N/A',
+                            'script'   => $_SERVER['PHP_SELF'] ?? 'N/A'
+                        ];
+
+                        file_put_contents(
+                            $logFile,
+                            json_encode($logData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . PHP_EOL . str_repeat('-', 60) . PHP_EOL,
+                            FILE_APPEND
+                        );
+
+                        ob_end_clean();
+                        header('Location: /ceo.noetica.cl/public/formacion_evaluador_home.php');
+                        exit;
                     }
                 }
 
@@ -365,4 +341,3 @@ body{
 
 </body>
 </html>
-

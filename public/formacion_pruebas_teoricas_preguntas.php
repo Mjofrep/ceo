@@ -81,6 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $tipoContenido = $_POST['tipo_contenido'] ?? '';
     $retroPos = trim($_POST['retro_correcta'] ?? '');
     $retroNeg = trim($_POST['retro_incorrecta'] ?? '');
+
+    $textoPregunta = html_entity_decode(strip_tags($textoPregunta), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $retroPos = html_entity_decode(strip_tags($retroPos), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $retroNeg = html_entity_decode(strip_tags($retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $areaComp = (int)($_POST['areacomp'] ?? 0);
     
     if ($areaComp <= 0) {
@@ -129,19 +133,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
       }
     } else {
-      $correcta = $_POST['correcta_alt'] ?? '';
-      for ($i = 1; $i <= 8; $i++) {
-        if (!isset($_POST["tipo_alt_$i"])) continue;
-        $tipoAlt = $_POST["tipo_alt_$i"];
-        $alternativa = '';
-        $imagenAlt = '';
+       $correcta = $_POST['correcta_alt'] ?? '';
+       for ($i = 1; $i <= 8; $i++) {
+           if (!isset($_POST["tipo_alt_$i"])) continue;
+           $tipoAlt = $_POST["tipo_alt_$i"];
+           $alternativa = '';
+           $imagenAlt = '';
 
 // Siempre capturamos texto opcional si existe (para imagen o video)
-$alternativaTextoOpc = trim($_POST["alt_textoextra_$i"] ?? '');
+ $alternativaTextoOpc = trim($_POST["alt_textoextra_$i"] ?? '');
 
 // Evaluar por tipo
-if ($tipoAlt === 'texto' && !empty($_POST["alt_texto_$i"])) {
-    $alternativa = trim($_POST["alt_texto_$i"]);
+ if ($tipoAlt === 'texto' && !empty($_POST["alt_texto_$i"])) {
+     $alternativa = trim($_POST["alt_texto_$i"]);
 
 } elseif ($tipoAlt === 'imagen') {
     if (!empty($_FILES["alt_img_$i"]['name'])) {
@@ -152,17 +156,18 @@ if ($tipoAlt === 'texto' && !empty($_POST["alt_texto_$i"])) {
         }
     }
     // texto opcional si usuario quiere agregar explicación
-    $alternativa = $alternativaTextoOpc;
+     $alternativa = $alternativaTextoOpc;
 
 } elseif ($tipoAlt === 'video') {
     if (!empty($_POST["alt_video_$i"])) {
         $imagenAlt = trim($_POST["alt_video_$i"]);
     }
     // texto opcional si usuario quiere agregar explicación
-    $alternativa = $alternativaTextoOpc;
+     $alternativa = $alternativaTextoOpc;
 }
 
 
+        $alternativa = html_entity_decode(strip_tags($alternativa), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $estadoCor = ($correcta == $i) ? 'S' : 'N';
         $stmtAlt = $pdo->prepare("INSERT INTO ceo_formacion_alternativas_preguntas
           (alternativa, correcta, estado, id_pregunta, imagen)

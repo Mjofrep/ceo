@@ -33,6 +33,7 @@ SELECT
     1 AS reevaluacion,
     p.rut,
     p.nombre,
+    p.apellidos,
     p.cargo,
     sp.servicio,
     ce.nombre AS empresa,
@@ -346,7 +347,7 @@ function filtrarParticipantes() {
                 <td><?= $p['n_cuadrilla'] ?></td>
                 <td><?= $p['reevaluacion'] ?></td>
                 <td><?= $p['rut'] ?></td>
-                <td><?= $p['nombre'] ?></td>
+                <td><?= trim(($p['nombre'] ?? '').' '.($p['apellidos'] ?? '')) ?></td>
                 <td><?= $p['cargo'] ?></td>
                 <td><?= $p['servicio'] ?></td>
                 <td><?= $p['empresa'] ?></td>
@@ -773,7 +774,7 @@ document.querySelectorAll("#plan input[type='text']").forEach(inp => {
                         let fila = `
                             <tr>
                                 <td>${p.rut}</td>
-                                <td>${p.nombre}</td>
+                                <td>${[p.nombre, p.apellidos].filter(Boolean).join(' ')}</td>
                                 <td>${p.apellidos.split(" ")[0]}</td>
                                 <td>${p.apellidos.split(" ")[1] ?? ""}</td>
                                 <td>${p.cargo}</td>
@@ -862,7 +863,7 @@ fetch("../public/get_participantes_cuadrilla.php?cuadrilla=" + cuadrilla)
             let fila = `
                 <tr>
                     <td>${p.rut}</td>
-                    <td>${p.nombre}</td>
+                    <td>${[p.nombre, p.apellidos].filter(Boolean).join(' ')}</td>
                     <td>${ap[0] ?? ''}</td>
                     <td>${ap[1] ?? ''}</td>
                     <td>${p.cargo}</td>
@@ -1110,7 +1111,7 @@ document.getElementById("btnCargarExcel").addEventListener("click", () => {
 
     mostrarCargaExcelAgenda("Leyendo y validando archivo Excel…");
 
-    fetch("../public/procesa_excel.php", {
+    fetch("../public/procesa_excel_formacion.php", {
         method: "POST",
         body: formData
     })
@@ -1142,7 +1143,7 @@ document.getElementById("btnCargarExcel").addEventListener("click", () => {
             const fila = `
                 <tr>
                     <td>${p.rut}</td>
-                    <td>${p.nombre}</td>
+                    <td>${[p.nombre, p.apellidos].filter(Boolean).join(' ')}</td>
                     <td>${p.app}</td>
                     <td>${p.apm}</td>
                     <td>${p.cargo}</td>

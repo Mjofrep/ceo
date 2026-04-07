@@ -1,5 +1,5 @@
 <?php
-// procesa_excel.php
+// procesa_excel_formacion.php
 declare(strict_types=1);
 
 ini_set('display_errors', '1');
@@ -49,17 +49,22 @@ $tmpPath = $_FILES['excel']['tmp_name'];
 // =========================================================
 try {
     $pdo = db();
-    $spreadsheet = IOFactory::load($tmpPath);
+    $reader = IOFactory::createReaderForFile($tmpPath);
+    $reader->setReadDataOnly(true);
+    $spreadsheet = $reader->load($tmpPath);
 
     // Usar hoja "Solicitud" o la activa si no existe
     $sheet = $spreadsheet->getSheetByName('Solicitud') ?? $spreadsheet->getActiveSheet();
 
     // Filas del formato actual
     $inicioFila = 16;
-    $finFila    = 30;
+    $finFila    = (int)$sheet->getHighestRow();
+    $finFila    = min($finFila, $inicioFila + 2000);
 
     $participantes = [];
     $errores = [];
+
+    $emptyStreak = 0;
 
     for ($i = $inicioFila; $i <= $finFila; $i++) {
         $rut   = trim((string)$sheet->getCell("B{$i}")->getValue());
@@ -68,10 +73,16 @@ try {
         $apMat = trim((string)$sheet->getCell("I{$i}")->getValue());
         $cargo = trim((string)$sheet->getCell("L{$i}")->getValue());
 
-        // Fila vacía
+        // Fila vacia
         if ($rut === '' && $nom === '' && $apPat === '' && $apMat === '' && $cargo === '') {
+            $emptyStreak++;
+            if ($emptyStreak >= 5) {
+                break;
+            }
             continue;
         }
+
+        $emptyStreak = 0;
 
         // Normalizar RUT
         $rut = normalizarRut($rut);

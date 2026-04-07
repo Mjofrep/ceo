@@ -47,6 +47,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
       if (!empty($_POST['pregunta_video'])) $imagen = trim($_POST['pregunta_video']);
 
+      $texto = html_entity_decode(strip_tags($texto), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+      $retroPos = html_entity_decode(strip_tags($retroPos), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+      $retroNeg = html_entity_decode(strip_tags($retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
       $pdo->prepare("UPDATE ceo_formacion_preguntas_servicios 
                        SET pregunta=?, imagen=?, retropos=?, retroneg=? 
                      WHERE id=?")
@@ -63,7 +67,7 @@ $alternativaTexto = $_POST["alt_texto_$idAlt"] ?? '';
 $alternativaTextoExtra = trim($_POST["alt_textoextra_$idAlt"] ?? '');
 
 // Siempre almacenamos texto adicional si existe
-$alternativa = $alternativaTexto ?: $alternativaTextoExtra;
+          $alternativa = $alternativaTexto ?: $alternativaTextoExtra;
 
           $imgAlt = $_POST["alt_imagen_actual_$idAlt"] ?? '';
           if (!empty($_FILES["alt_imagen_$idAlt"]['name'])) {
@@ -75,6 +79,8 @@ $alternativa = $alternativaTexto ?: $alternativaTextoExtra;
           }
           if (!empty($_POST["alt_video_$idAlt"])) $imgAlt = trim($_POST["alt_video_$idAlt"]);
           $correcta = ($correctaAlt == $idAlt) ? 'S' : 'N';
+
+          $alternativa = html_entity_decode(strip_tags($alternativa), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
           $pdo->prepare("UPDATE ceo_formacion_alternativas_preguntas 
                             SET alternativa=?, correcta=?, imagen=? 
@@ -113,6 +119,7 @@ if (!empty($_POST['nueva_alt_texto'])) {
       continue;
     }
 
+    $textoFinal = html_entity_decode(strip_tags($textoFinal), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $imagenFinal = $nuevoVideo ?: $nuevaImg;
 
     // Nuevas alternativas quedan como no correctas por defecto
