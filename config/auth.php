@@ -10,7 +10,7 @@ require_once __DIR__.'/db.php';
 require_once __DIR__.'/functions.php';
 
 // ⏱️ Tiempo máximo de inactividad (en segundos)
-$MAX_IDLE = 15 * 60; // 15 minutos
+$MAX_IDLE = 60 * 60; // 60 minutos
 
 // ❌ No está logueado
 if (empty($_SESSION['auth'])) {

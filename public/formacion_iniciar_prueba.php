@@ -19,6 +19,42 @@ if (!function_exists('debug')) {
     }
 }
 
+if (!function_exists('formacionImagenUrl')) {
+    function formacionImagenUrl(string $ruta): string
+    {
+        $ruta = trim($ruta);
+        if ($ruta === '') {
+            return '';
+        }
+        if (preg_match('/^https?:\/\//i', $ruta)) {
+            return $ruta;
+        }
+        if (defined('APP_BASE') && $ruta !== '' && formacionStartsWith($ruta, APP_BASE)) {
+            return $ruta;
+        }
+        if (formacionStartsWith($ruta, '/public/uploads/')) {
+            $ruta = substr($ruta, 7);
+        }
+        if (formacionStartsWith($ruta, '/uploads/')) {
+            return (defined('APP_BASE') ? APP_BASE : '') . $ruta;
+        }
+        if (formacionStartsWith($ruta, 'uploads/')) {
+            return (defined('APP_BASE') ? APP_BASE : '') . '/' . $ruta;
+        }
+        return (defined('APP_BASE') ? APP_BASE : '') . '/' . ltrim($ruta, '/');
+    }
+}
+
+if (!function_exists('formacionStartsWith')) {
+    function formacionStartsWith(string $haystack, string $needle): bool
+    {
+        if ($needle === '') {
+            return true;
+        }
+        return strncmp($haystack, $needle, strlen($needle)) === 0;
+    }
+}
+
 $pdo = db();
 $err  = '';
 $msg  = '';
@@ -589,7 +625,7 @@ $csrfToken = Csrf::token();
 
                         <?php if (!empty($preg['imagen'])): ?>
                             <div class="mb-3">
-                                <img src="<?= htmlspecialchars($preg['imagen']) ?>"
+                                <img src="<?= htmlspecialchars(formacionImagenUrl((string)$preg['imagen'])) ?>"
                                      alt="Imagen pregunta"
                                      class="img-fluid rounded">
                             </div>
@@ -612,9 +648,9 @@ $csrfToken = Csrf::token();
                                     </label>
                                     <?php if (!empty($alt['imagen'])): ?>
                                         <div class="mt-1">
-                                            <img src="<?= htmlspecialchars($alt['imagen']) ?>"
-                                                 alt="Imagen alternativa"
-                                                 class="img-fluid rounded">
+                                            <img src="<?= htmlspecialchars(formacionImagenUrl((string)$alt['imagen'])) ?>"
+                                                  alt="Imagen alternativa"
+                                                  class="img-fluid rounded">
                                         </div>
                                     <?php endif; ?>
                                 </div>
