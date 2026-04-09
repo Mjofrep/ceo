@@ -25,6 +25,7 @@ if (empty($_SESSION['evaluado'])) {
 }
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/db.php';
 
 /* ============================================================
    VARIABLES DE SESIÓN
@@ -36,9 +37,40 @@ $alumno    = $_SESSION['evaluado'];  // Datos del alumno a evaluar
 $nombreAlumno = trim($alumno['nombre'] ?? '');
 
 // Servicio y RUT del alumno (lo usaremos para iniciar la prueba)
-//$idServicio = isset($alumno['id_servicio']) ? (int)$alumno['id_servicio'] : 0;
-$pruebas = $alumno['pruebas'] ?? [];
+$pruebas = [];
 $rutAlumno  = trim($alumno['rut'] ?? '');
+
+if ($rutAlumno !== '') {
+    $pdo = db();
+    $stmt = $pdo->prepare("
+        SELECT id, id_servicio, cuadrilla, fecha_programacion, intento, resultado, estado
+        FROM ceo_formacion_programadas
+        WHERE rut = :rut
+          AND estado = 'PENDIENTE'
+          AND resultado = 'PENDIENTE'
+          AND tipo = 'PRUEBA'
+        ORDER BY fecha_programacion ASC, id ASC
+    ");
+    $stmt->execute([':rut' => $rutAlumno]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($rows) {
+        $stmtServ = $pdo->prepare("SELECT servicio FROM ceo_formacion_servicios WHERE id = :id");
+        foreach ($rows as $row) {
+            $stmtServ->execute([':id' => (int)$row['id_servicio']]);
+            $nombreServicio = (string)$stmtServ->fetchColumn();
+            $pruebas[] = [
+                'id_programada' => (int)$row['id'],
+                'id_servicio'   => (int)$row['id_servicio'],
+                'servicio'      => $nombreServicio,
+                'nsolicitud'    => null,
+                'cuadrilla'     => $row['cuadrilla'] ?? null,
+                'fecha_prog'    => $row['fecha_programacion'] ?? null,
+                'intento'       => $row['intento'] ?? null
+            ];
+        }
+    }
+}
 
 ?>
 <!DOCTYPE html>
@@ -157,7 +189,7 @@ body{
 
                     <div class="mb-3">
                         <strong>Servicio:</strong><br>
-                        <?= htmlspecialchars($alumno['servicio'] ?? '') ?>
+                        <?= htmlspecialchars($pruebas[0]['servicio'] ?? '') ?>
                     </div>
 
                     <div class="mb-3">
@@ -167,7 +199,7 @@ body{
 
                     <div class="mb-3">
                         <strong>N° Formacion:</strong><br>
-                        <?= htmlspecialchars($alumno['id_solicitud'] ?? '') ?>
+                        <?= htmlspecialchars((string)($pruebas[0]['cuadrilla'] ?? '')) ?>
                     </div>
 
                     <div class="mb-4">
