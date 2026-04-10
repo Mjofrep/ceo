@@ -51,6 +51,9 @@ if ($id <= 0 && $cuadrilla <= 0) {
                     p.apellidos,
                     p.cargo,
                     ep.resultado,
+                    ep.fecha_inicio,
+                    ep.fecha_termino,
+                    ep.cierre_modo,
                     ri.notafinal,
                     ri.puntaje_total,
                     ri.correctas,
@@ -108,6 +111,22 @@ function estadoResultado(?string $resultado): string
         return $res;
     }
     return $res;
+}
+
+function formatDuracion(?string $inicio, ?string $termino): string
+{
+    if (!$inicio || !$termino) {
+        return '';
+    }
+    try {
+        $dtInicio = new DateTime($inicio);
+        $dtTermino = new DateTime($termino);
+        $diff = $dtInicio->diff($dtTermino);
+        $mins = ($diff->days * 24 * 60) + ($diff->h * 60) + $diff->i;
+        return (string)$mins . ' min';
+    } catch (Throwable $e) {
+        return '';
+    }
 }
 ?>
 <!doctype html>
@@ -180,6 +199,10 @@ body {background:#f7f9fc;}
             <th>Correctas</th>
             <th>Incorrectas</th>
             <th>No contestadas</th>
+            <th>Inicio</th>
+            <th>Termino</th>
+            <th>Duracion</th>
+            <th>Motivo</th>
             <th>Estado</th>
           </tr>
         </thead>
@@ -202,6 +225,10 @@ body {background:#f7f9fc;}
               <td><?= esc((string)($p['correctas'] ?? '')) ?></td>
               <td><?= esc((string)($p['incorrectas'] ?? '')) ?></td>
               <td><?= esc((string)($p['ncontestadas'] ?? '')) ?></td>
+              <td><?= esc((string)($p['fecha_inicio'] ?? '')) ?></td>
+              <td><?= esc((string)($p['fecha_termino'] ?? '')) ?></td>
+              <td><?= esc(formatDuracion($p['fecha_inicio'] ?? null, $p['fecha_termino'] ?? null)) ?></td>
+              <td><?= esc((string)($p['cierre_modo'] ?? '')) ?></td>
               <td><?= esc($estado) ?></td>
             </tr>
           <?php endforeach; ?>

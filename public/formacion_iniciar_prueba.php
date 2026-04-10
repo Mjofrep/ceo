@@ -80,6 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data['rut_alumno']    = trim($_POST['rut_alumno'] ?? '');
         $data['nsolicitud']    = (int)($_POST['nsolicitud'] ?? 0);
         $data['proceso']       = (int)($_POST['proceso'] ?? 0);
+        $cierreModo            = strtoupper(trim((string)($_POST['cierre_modo'] ?? '')));
+        if (!in_array($cierreModo, ['MANUAL', 'TIEMPO', 'SALIDA'], true)) {
+            $cierreModo = 'MANUAL';
+        }
 
 
         $respuestas = $_POST['respuestas'] ?? [];
@@ -316,13 +320,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sqlUpdProc = "
                     UPDATE ceo_formacion_programadas
                     SET estado = 'EJECUTADA',
-                        resultado = :resultado
+                        resultado = :resultado,
+                        fecha_resultado = NOW(),
+                        fecha_termino = NOW(),
+                        cierre_modo = :cierre_modo
                     WHERE id = :id
                 ";
 
                 $stmtUpd = $pdo->prepare($sqlUpdProc);
                 $stmtUpd->execute([
                     ':resultado' => $resultado,
+                    ':cierre_modo' => $cierreModo,
                     ':id'        => $data['proceso']
                 ]);
 
@@ -351,6 +359,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($data['id_servicio'] <= 0) {
         $err = "No se indicó servicio.";
+    }
+
+    if ($err === '' && $data['proceso'] > 0) {
+        $stmtInicio = $pdo->prepare("
+            UPDATE ceo_formacion_programadas
+            SET fecha_inicio = NOW()
+            WHERE id = :id
+              AND fecha_inicio IS NULL
+        ");
+        $stmtInicio->execute([':id' => $data['proceso']]);
     }
 }
 
@@ -405,23 +423,141 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
            =========================================================== */
         $cantidadPreguntas = (int)$agrupacion['cantidad'];
 
-        $sqlP = "
-            SELECT id, pregunta, id_servicio, imagen
+        // Intentar seleccionar preguntas segun porcentajes por area de competencia
+        $preguntas = [];
+
+        $stmtAvail = $pdo->prepare("
+            SELECT areacomp, COUNT(*) AS total
             FROM ceo_formacion_preguntas_servicios
             WHERE id_servicio = :id_servicio
               AND id_agrupacion = :id_agrupacion
               AND estado = 'S'
-            ORDER BY RAND()
-            LIMIT :cantidad
-        ";
+              AND areacomp IS NOT NULL
+            GROUP BY areacomp
+        ");
+        $stmtAvail->execute([
+            ':id_servicio' => $data['id_servicio'],
+            ':id_agrupacion' => $data['id_agrupacion']
+        ]);
+        $availableRows = $stmtAvail->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmtP = $pdo->prepare($sqlP);
-        $stmtP->bindValue(':id_servicio', $data['id_servicio'], PDO::PARAM_INT);
-        $stmtP->bindValue(':id_agrupacion', $data['id_agrupacion'], PDO::PARAM_INT);
-        $stmtP->bindValue(':cantidad', $cantidadPreguntas, PDO::PARAM_INT);
-        $stmtP->execute();
+        $availableMap = [];
+        foreach ($availableRows as $row) {
+            $availableMap[(int)$row['areacomp']] = (int)$row['total'];
+        }
 
-        $preguntas = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+        $stmtCfg = $pdo->prepare("
+            SELECT id_area, porcentaje
+            FROM ceo_formacion_areacompetencias_pct
+            WHERE id_servicio = :id_servicio
+        ");
+        $stmtCfg->execute([':id_servicio' => $data['id_servicio']]);
+        $configRows = $stmtCfg->fetchAll(PDO::FETCH_ASSOC);
+
+        $useConfig = !empty($configRows) && !empty($availableMap);
+
+        if ($useConfig) {
+            $areas = [];
+            $sumPercent = 0.0;
+
+            foreach ($configRows as $cfg) {
+                $areaId = (int)$cfg['id_area'];
+                $pct = (float)$cfg['porcentaje'];
+                if ($pct <= 0 || empty($availableMap[$areaId])) {
+                    continue;
+                }
+                $areas[] = [
+                    'area' => $areaId,
+                    'pct' => $pct,
+                    'available' => $availableMap[$areaId],
+                    'assigned' => 0,
+                    'rem' => 0.0
+                ];
+                $sumPercent += $pct;
+            }
+
+            if ($sumPercent > 0 && !empty($areas)) {
+                $assignedTotal = 0;
+                foreach ($areas as $idx => $area) {
+                    $exact = ($cantidadPreguntas * $area['pct']) / $sumPercent;
+                    $base = (int)floor($exact);
+                    $assign = min($base, $area['available']);
+                    $areas[$idx]['assigned'] = $assign;
+                    $areas[$idx]['rem'] = $exact - $base;
+                    $assignedTotal += $assign;
+                }
+
+                $remaining = max(0, $cantidadPreguntas - $assignedTotal);
+                while ($remaining > 0) {
+                    $bestIdx = null;
+                    $bestRem = -1.0;
+                    foreach ($areas as $idx => $area) {
+                        $cap = $area['available'] - $area['assigned'];
+                        if ($cap <= 0) {
+                            continue;
+                        }
+                        if ($area['rem'] > $bestRem) {
+                            $bestRem = $area['rem'];
+                            $bestIdx = $idx;
+                        }
+                    }
+                    if ($bestIdx === null) {
+                        break;
+                    }
+                    $areas[$bestIdx]['assigned']++;
+                    $remaining--;
+                }
+
+                foreach ($areas as $area) {
+                    if ($area['assigned'] <= 0) {
+                        continue;
+                    }
+                    $stmtAreaQ = $pdo->prepare("
+                        SELECT id, pregunta, id_servicio, imagen
+                        FROM ceo_formacion_preguntas_servicios
+                        WHERE id_servicio = :id_servicio
+                          AND id_agrupacion = :id_agrupacion
+                          AND estado = 'S'
+                          AND areacomp = :areacomp
+                        ORDER BY RAND()
+                        LIMIT :cantidad
+                    ");
+                    $stmtAreaQ->bindValue(':id_servicio', $data['id_servicio'], PDO::PARAM_INT);
+                    $stmtAreaQ->bindValue(':id_agrupacion', $data['id_agrupacion'], PDO::PARAM_INT);
+                    $stmtAreaQ->bindValue(':areacomp', $area['area'], PDO::PARAM_INT);
+                    $stmtAreaQ->bindValue(':cantidad', $area['assigned'], PDO::PARAM_INT);
+                    $stmtAreaQ->execute();
+                    $preguntas = array_merge($preguntas, $stmtAreaQ->fetchAll(PDO::FETCH_ASSOC));
+                }
+            }
+        }
+
+        if (count($preguntas) < $cantidadPreguntas) {
+            $faltantes = $cantidadPreguntas - count($preguntas);
+            $ids = array_map(static fn($q) => (int)$q['id'], $preguntas);
+            $sqlExtra = "
+                SELECT id, pregunta, id_servicio, imagen
+                FROM ceo_formacion_preguntas_servicios
+                WHERE id_servicio = ?
+                  AND id_agrupacion = ?
+                  AND estado = 'S'
+            ";
+            if (!empty($ids)) {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $sqlExtra .= " AND id NOT IN ($placeholders) ";
+            }
+            $sqlExtra .= " ORDER BY RAND() LIMIT ?";
+
+            $stmtExtra = $pdo->prepare($sqlExtra);
+            $params = [$data['id_servicio'], $data['id_agrupacion']];
+            if (!empty($ids)) {
+                $params = array_merge($params, $ids);
+            }
+            $params[] = $faltantes;
+            $stmtExtra->execute($params);
+            $stmtExtra->execute();
+            $preguntas = array_merge($preguntas, $stmtExtra->fetchAll(PDO::FETCH_ASSOC));
+        }
         $totalPreguntas = count($preguntas);
 
         if ($totalPreguntas === 0) {
@@ -585,6 +721,7 @@ $csrfToken = Csrf::token();
             <input type="hidden" name="nsolicitud" value="<?= (int)$data['nsolicitud'] ?>">
             <input type="hidden" id="tiempo_restante" name="tiempo_restante" value="<?= (int)$tiempoTotalSegundos ?>">
             <input type="hidden" name="proceso" value="<?= (int)$data['proceso'] ?>">
+            <input type="hidden" id="cierre_modo" name="cierre_modo" value="MANUAL">
             <?php foreach ($preguntas as $preg): ?>
                 <input type="hidden" name="preguntas[]" value="<?= (int)$preg['id'] ?>">
             <?php endforeach; ?>
@@ -702,6 +839,13 @@ $csrfToken = Csrf::token();
     const inputTiempo   = document.getElementById('tiempo_restante');
     const formPrueba    = document.getElementById('form-prueba');
     const btnFinalizar  = document.getElementById('btn-finalizar');
+    const inputCierre   = document.getElementById('cierre_modo');
+
+    function setCierreModo(modo) {
+        if (inputCierre) {
+            inputCierre.value = modo;
+        }
+    }
 
     function formatoTiempo(segundos) {
         const m = String(Math.floor(segundos / 60)).padStart(2, '0');
@@ -725,6 +869,7 @@ $csrfToken = Csrf::token();
             const radios = document.querySelectorAll('.respuesta-radio');
             radios.forEach(r => r.disabled = true);
 
+            setCierreModo('TIEMPO');
             if (formPrueba) formPrueba.submit();
             return;
         }
@@ -740,6 +885,7 @@ $csrfToken = Csrf::token();
     if (btnFinalizar && formPrueba) {
         btnFinalizar.addEventListener('click', function () {
             if (confirm('¿Seguro que deseas finalizar la prueba? Una vez enviada no podrás modificar las respuestas.')) {
+                setCierreModo('MANUAL');
                 formPrueba.submit();
             }
         });
@@ -884,6 +1030,10 @@ function finalizarPruebaPorSalida() {
     pruebaFinalizada = true;
 
     const form = document.getElementById("form-prueba");
+    const cierreModo = document.getElementById("cierre_modo");
+    if (cierreModo) {
+        cierreModo.value = 'SALIDA';
+    }
 
     const input = document.createElement("input");
     input.type = "hidden";

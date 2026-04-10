@@ -30,6 +30,20 @@ $stmtSrv = $pdo->query("
 $servicios = $stmtSrv->fetchAll(PDO::FETCH_ASSOC);
 
 /* ============================================================
+   PORCENTAJES FORMACIONES (por servicio/area)
+   ============================================================ */
+$stmtPct = $pdo->query("
+    SELECT id_servicio, id_area, porcentaje
+    FROM ceo_formacion_areacompetencias_pct
+");
+$pctRows = $stmtPct->fetchAll(PDO::FETCH_ASSOC);
+$pctMap = [];
+foreach ($pctRows as $row) {
+    $key = (int)$row['id_servicio'] . ':' . (int)$row['id_area'];
+    $pctMap[$key] = (float)$row['porcentaje'];
+}
+
+/* ============================================================
    CRUD
    ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -38,9 +52,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id          = trim($_POST['id'] ?? '');
     $descripcion = trim($_POST['descripcion'] ?? '');
     $id_servicio = (int)($_POST['id_servicio'] ?? 0);
+    $porcentaje  = trim($_POST['porcentaje'] ?? '');
+
+    // GUARDAR PORCENTAJE FORMACIONES
+    if ($accion === 'guardar_pct') {
+        $idArea = (int)($_POST['id_area'] ?? 0);
+        $idServicioPct = (int)($_POST['id_servicio_pct'] ?? 0);
+        $pct = (float)str_replace(',', '.', $porcentaje);
+
+        if ($idArea <= 0 || $idServicioPct <= 0) {
+            $msg = "❌ Debes seleccionar un área y servicio válidos.";
+        } elseif ($pct < 0 || $pct > 100) {
+            $msg = "❌ El porcentaje debe estar entre 0 y 100.";
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO ceo_formacion_areacompetencias_pct (id_servicio, id_area, porcentaje)
+                VALUES (:id_servicio, :id_area, :porcentaje)
+                ON DUPLICATE KEY UPDATE porcentaje = VALUES(porcentaje)
+            ");
+            $stmt->execute([
+                ':id_servicio' => $idServicioPct,
+                ':id_area' => $idArea,
+                ':porcentaje' => $pct
+            ]);
+            $msg = "✅ Porcentaje de formaciones actualizado.";
+        }
 
     // CREAR
-    if ($accion === 'crear') {
+    } elseif ($accion === 'crear') {
 
         if ($id === '' || $descripcion === '' || $id_servicio <= 0) {
             $msg = "❌ Todos los campos son obligatorios.";
@@ -187,6 +226,7 @@ table th, table td { vertical-align: middle; }
           <th>ID</th>
           <th>Descripción</th>
           <th>Servicio</th>
+          <th>Pct Formaciones</th>
           <th>Acción</th>
         </tr>
       </thead>
@@ -196,6 +236,19 @@ table th, table td { vertical-align: middle; }
           <td><?= htmlspecialchars($a['id']) ?></td>
           <td><?= htmlspecialchars($a['descripcion']) ?></td>
           <td><?= htmlspecialchars($a['servicio']) ?></td>
+          <td>
+            <?php $pctKey = (int)$a['id_servicio'] . ':' . (int)$a['id']; ?>
+            <form method="post" class="d-flex gap-2 align-items-center">
+              <input type="hidden" name="accion" value="guardar_pct">
+              <input type="hidden" name="id_area" value="<?= (int)$a['id'] ?>">
+              <input type="hidden" name="id_servicio_pct" value="<?= (int)$a['id_servicio'] ?>">
+              <input type="number" step="0.01" min="0" max="100" name="porcentaje"
+                     class="form-control form-control-sm" style="max-width:110px"
+                     value="<?= isset($pctMap[$pctKey]) ? htmlspecialchars((string)$pctMap[$pctKey]) : '' ?>"
+                     placeholder="%">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Guardar</button>
+            </form>
+          </td>
           <td>
             <button class="btn btn-sm btn-info btnEditar"
               data-id="<?= htmlspecialchars($a['id']) ?>"

@@ -39,12 +39,15 @@ try {
             p.rut,
             p.nombre,
             p.apellidos,
-            ep.resultado,
-            ri.notafinal,
-            ri.puntaje_total,
-            ri.correctas,
-            ri.incorrectas,
-            ri.ncontestadas
+        ep.resultado,
+        ep.fecha_inicio,
+        ep.fecha_termino,
+        ep.cierre_modo,
+        ri.notafinal,
+        ri.puntaje_total,
+        ri.correctas,
+        ri.incorrectas,
+        ri.ncontestadas
         FROM ceo_formacion_participantes p
         LEFT JOIN (
             SELECT ep1.*
@@ -97,12 +100,28 @@ function estadoResultado(?string $resultado): string
     return $res;
 }
 
+function formatDuracion(?string $inicio, ?string $termino): string
+{
+    if (!$inicio || !$termino) {
+        return '';
+    }
+    try {
+        $dtInicio = new DateTime($inicio);
+        $dtTermino = new DateTime($termino);
+        $diff = $dtInicio->diff($dtTermino);
+        $mins = ($diff->days * 24 * 60) + ($diff->h * 60) + $diff->i;
+        return (string)$mins . ' min';
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
 $spreadsheet = new Spreadsheet();
 $sheet = $spreadsheet->getActiveSheet();
 $sheet->setTitle('Formaciones');
 
 $sheet->fromArray([
-    ['RUT', 'Nombre', 'Apellido', 'Nota', 'Porcentaje', 'Correctas', 'Incorrectas', 'No contestadas', 'Estado']
+    ['RUT', 'Nombre', 'Apellido', 'Nota', 'Porcentaje', 'Correctas', 'Incorrectas', 'No contestadas', 'Inicio', 'Termino', 'Duracion', 'Motivo', 'Estado']
 ], null, 'A1');
 
 $rowNum = 2;
@@ -115,11 +134,15 @@ foreach ($rows as $r) {
     $sheet->setCellValue("F{$rowNum}", $r['correctas'] ?? '');
     $sheet->setCellValue("G{$rowNum}", $r['incorrectas'] ?? '');
     $sheet->setCellValue("H{$rowNum}", $r['ncontestadas'] ?? '');
-    $sheet->setCellValue("I{$rowNum}", estadoResultado($r['resultado'] ?? null));
+    $sheet->setCellValue("I{$rowNum}", $r['fecha_inicio'] ?? '');
+    $sheet->setCellValue("J{$rowNum}", $r['fecha_termino'] ?? '');
+    $sheet->setCellValue("K{$rowNum}", formatDuracion($r['fecha_inicio'] ?? null, $r['fecha_termino'] ?? null));
+    $sheet->setCellValue("L{$rowNum}", $r['cierre_modo'] ?? '');
+    $sheet->setCellValue("M{$rowNum}", estadoResultado($r['resultado'] ?? null));
     $rowNum++;
 }
 
-foreach (range('A', 'I') as $col) {
+foreach (range('A', 'M') as $col) {
     $sheet->getColumnDimension($col)->setAutoSize(true);
 }
 

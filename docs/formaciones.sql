@@ -124,6 +124,9 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion_programadas` (
   `tipo` enum('PRUEBA') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `cuadrilla` int(11) NOT NULL,
   `fecha_programacion` datetime DEFAULT current_timestamp(),
+  `fecha_inicio` datetime DEFAULT NULL,
+  `fecha_termino` datetime DEFAULT NULL,
+  `cierre_modo` varchar(20) DEFAULT NULL,
   `usuario_programa` int(11) NOT NULL,
   `estado` enum('PENDIENTE','EJECUTADA','ANULADA') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'PENDIENTE',
   `intento` int(11) NOT NULL DEFAULT 1,
@@ -184,6 +187,15 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion_agrupacion` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS `ceo_formacion_areacompetencias_pct` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `id_servicio` int(11) NOT NULL,
+  `id_area` int(11) NOT NULL,
+  `porcentaje` decimal(5,2) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_formacion_area_servicio` (`id_servicio`,`id_area`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS `ceo_formaciontipo` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `desc_tipo` varchar(50) NOT NULL,
@@ -242,3 +254,9 @@ INSERT INTO `ceo_formacion_alternativas_preguntas`
 SELECT `id`, `alternativa`, `id_pregunta`, `estado`, `imagen`, `correcta`
 FROM `ceo_alternativas_preguntas`
 WHERE NOT EXISTS (SELECT 1 FROM `ceo_formacion_alternativas_preguntas` LIMIT 1);
+
+-- Ajustes para bases existentes
+ALTER TABLE `ceo_formacion_programadas`
+  ADD COLUMN `fecha_inicio` DATETIME NULL,
+  ADD COLUMN `fecha_termino` DATETIME NULL,
+  ADD COLUMN `cierre_modo` VARCHAR(20) NULL;
