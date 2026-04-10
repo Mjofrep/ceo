@@ -45,6 +45,8 @@ try {
         ep.cierre_modo,
         ri.notafinal,
         ri.puntaje_total,
+        ri.puntaje_obtenido,
+        ri.puntaje_maximo,
         ri.correctas,
         ri.incorrectas,
         ri.ncontestadas
@@ -121,7 +123,7 @@ $sheet = $spreadsheet->getActiveSheet();
 $sheet->setTitle('Formaciones');
 
 $sheet->fromArray([
-    ['RUT', 'Nombre', 'Apellido', 'Nota', 'Porcentaje', 'Correctas', 'Incorrectas', 'No contestadas', 'Inicio', 'Termino', 'Duracion', 'Motivo', 'Estado']
+    ['RUT', 'Nombre', 'Apellido', 'Nota', 'Porcentaje', 'Puntaje', 'Correctas', 'Incorrectas', 'No contestadas', 'Inicio', 'Termino', 'Duracion', 'Motivo', 'Estado']
 ], null, 'A1');
 
 $rowNum = 2;
@@ -131,18 +133,19 @@ foreach ($rows as $r) {
     $sheet->setCellValue("C{$rowNum}", $r['apellidos'] ?? '');
     $sheet->setCellValue("D{$rowNum}", $r['notafinal'] ?? '');
     $sheet->setCellValue("E{$rowNum}", $r['puntaje_total'] ?? '');
-    $sheet->setCellValue("F{$rowNum}", $r['correctas'] ?? '');
-    $sheet->setCellValue("G{$rowNum}", $r['incorrectas'] ?? '');
-    $sheet->setCellValue("H{$rowNum}", $r['ncontestadas'] ?? '');
-    $sheet->setCellValue("I{$rowNum}", $r['fecha_inicio'] ?? '');
-    $sheet->setCellValue("J{$rowNum}", $r['fecha_termino'] ?? '');
-    $sheet->setCellValue("K{$rowNum}", formatDuracion($r['fecha_inicio'] ?? null, $r['fecha_termino'] ?? null));
-    $sheet->setCellValue("L{$rowNum}", $r['cierre_modo'] ?? '');
-    $sheet->setCellValue("M{$rowNum}", estadoResultado($r['resultado'] ?? null));
+    $sheet->setCellValue("F{$rowNum}", ($r['puntaje_obtenido'] ?? '') . ' / ' . ($r['puntaje_maximo'] ?? ''));
+    $sheet->setCellValue("G{$rowNum}", $r['correctas'] ?? '');
+    $sheet->setCellValue("H{$rowNum}", $r['incorrectas'] ?? '');
+    $sheet->setCellValue("I{$rowNum}", $r['ncontestadas'] ?? '');
+    $sheet->setCellValue("J{$rowNum}", $r['fecha_inicio'] ?? '');
+    $sheet->setCellValue("K{$rowNum}", $r['fecha_termino'] ?? '');
+    $sheet->setCellValue("L{$rowNum}", formatDuracion($r['fecha_inicio'] ?? null, $r['fecha_termino'] ?? null));
+    $sheet->setCellValue("M{$rowNum}", $r['cierre_modo'] ?? '');
+    $sheet->setCellValue("N{$rowNum}", estadoResultado($r['resultado'] ?? null));
     $rowNum++;
 }
 
-foreach (range('A', 'M') as $col) {
+foreach (range('A', 'N') as $col) {
     $sheet->getColumnDimension($col)->setAutoSize(true);
 }
 

@@ -230,7 +230,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         SUM(CASE WHEN rpt.validacion = 1  THEN 1 ELSE 0 END) AS correctas,
                         SUM(CASE WHEN rpt.validacion = 0  THEN 1 ELSE 0 END) AS incorrectas,
                         SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS ncontestadas,
-                        COUNT(*) AS total
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN rpt.validacion = 1 THEN COALESCE(ps.peso,1) ELSE 0 END) AS puntaje_obtenido,
+                        SUM(COALESCE(ps.peso,1)) AS puntaje_maximo
                     FROM ceo_resultado_formacion_pruebat rpt
                     INNER JOIN ceo_formacion_preguntas_servicios ps
                         ON ps.id = rpt.id_pregunta
@@ -255,8 +257,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ncontestadas = (int)$cnt['ncontestadas'];
                 $total        = (int)$cnt['total'];
 
-                $porcentajeObtenido = ($total > 0)
-                    ? round(($correctas / $total) * 100, 2)
+                $puntajeObtenido = (float)$cnt['puntaje_obtenido'];
+                $puntajeMaximo = (float)$cnt['puntaje_maximo'];
+
+                $porcentajeObtenido = ($puntajeMaximo > 0)
+                    ? round(($puntajeObtenido / $puntajeMaximo) * 100, 2)
                     : 0.0;
 
                 $resultado = ($porcentajeObtenido >= $porcentajeMinimo)
@@ -280,6 +285,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         fecha_rendicion,
                         hora_rendicion,
                         puntaje_total,
+                        puntaje_obtenido,
+                        puntaje_maximo,
                         correctas,
                         incorrectas,
                         ncontestadas,
@@ -294,6 +301,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         CURDATE(),
                         CURTIME(),
                         :puntaje,
+                        :puntaje_obtenido,
+                        :puntaje_maximo,
                         :correctas,
                         :incorrectas,
                         :ncontestadas,
@@ -308,6 +317,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':id_servicio'  => $data['id_servicio'],
                     ':id_evaluador' => $evaluadorId,
                     ':puntaje'      => $porcentajeObtenido,
+                    ':puntaje_obtenido' => $puntajeObtenido,
+                    ':puntaje_maximo' => $puntajeMaximo,
                     ':correctas'    => $correctas,
                     ':incorrectas'  => $incorrectas,
                     ':ncontestadas' => $ncontestadas,
@@ -513,7 +524,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
                         continue;
                     }
                     $stmtAreaQ = $pdo->prepare("
-                        SELECT id, pregunta, id_servicio, imagen
+                        SELECT id, pregunta, id_servicio, imagen, peso
                         FROM ceo_formacion_preguntas_servicios
                         WHERE id_servicio = :id_servicio
                           AND id_agrupacion = :id_agrupacion
@@ -536,7 +547,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             $faltantes = $cantidadPreguntas - count($preguntas);
             $ids = array_map(static fn($q) => (int)$q['id'], $preguntas);
             $sqlExtra = "
-                SELECT id, pregunta, id_servicio, imagen
+                SELECT id, pregunta, id_servicio, imagen, peso
                 FROM ceo_formacion_preguntas_servicios
                 WHERE id_servicio = ?
                   AND id_agrupacion = ?
@@ -555,7 +566,6 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             }
             $params[] = $faltantes;
             $stmtExtra->execute($params);
-            $stmtExtra->execute();
             $preguntas = array_merge($preguntas, $stmtExtra->fetchAll(PDO::FETCH_ASSOC));
         }
         $totalPreguntas = count($preguntas);

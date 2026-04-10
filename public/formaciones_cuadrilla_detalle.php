@@ -56,6 +56,8 @@ if ($id <= 0 && $cuadrilla <= 0) {
                     ep.cierre_modo,
                     ri.notafinal,
                     ri.puntaje_total,
+                    ri.puntaje_obtenido,
+                    ri.puntaje_maximo,
                     ri.correctas,
                     ri.incorrectas,
                     ri.ncontestadas
@@ -196,6 +198,7 @@ body {background:#f7f9fc;}
             <th>Apellido</th>
             <th>Nota</th>
             <th>Porcentaje</th>
+            <th>Puntaje</th>
             <th>Correctas</th>
             <th>Incorrectas</th>
             <th>No contestadas</th>
@@ -208,7 +211,7 @@ body {background:#f7f9fc;}
         </thead>
         <tbody>
         <?php if (empty($participantes)): ?>
-          <tr><td colspan="6" class="text-center text-muted">Sin participantes</td></tr>
+          <tr><td colspan="11" class="text-center text-muted">Sin participantes</td></tr>
         <?php else: ?>
           <?php foreach ($participantes as $p): ?>
             <?php
@@ -222,6 +225,7 @@ body {background:#f7f9fc;}
               <td><?= esc((string)$p['apellidos']) ?></td>
               <td><?= esc($nota) ?></td>
               <td><?= esc($porcentaje) ?></td>
+              <td><?= esc((string)($p['puntaje_obtenido'] ?? '')) ?> / <?= esc((string)($p['puntaje_maximo'] ?? '')) ?></td>
               <td><?= esc((string)($p['correctas'] ?? '')) ?></td>
               <td><?= esc((string)($p['incorrectas'] ?? '')) ?></td>
               <td><?= esc((string)($p['ncontestadas'] ?? '')) ?></td>

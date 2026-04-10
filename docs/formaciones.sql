@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS `ceo_resultado_formacion_intento` (
   `fecha_rendicion` date NOT NULL,
   `hora_rendicion` time NOT NULL,
   `puntaje_total` decimal(5,2) DEFAULT NULL,
+  `puntaje_obtenido` decimal(10,2) DEFAULT NULL,
+  `puntaje_maximo` decimal(10,2) DEFAULT NULL,
   `correctas` int(11) DEFAULT NULL,
   `incorrectas` int(11) DEFAULT NULL,
   `ncontestadas` int(11) DEFAULT NULL,
@@ -212,6 +214,7 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion_preguntas_servicios` (
   `retropos` varchar(1000) DEFAULT NULL,
   `retroneg` varchar(1000) DEFAULT NULL,
   `areacomp` int(11) DEFAULT NULL,
+  `peso` int(11) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id`),
   KEY `fk_formacion_preguntas_servicios` (`id_servicio`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -260,3 +263,10 @@ ALTER TABLE `ceo_formacion_programadas`
   ADD COLUMN `fecha_inicio` DATETIME NULL,
   ADD COLUMN `fecha_termino` DATETIME NULL,
   ADD COLUMN `cierre_modo` VARCHAR(20) NULL;
+
+ALTER TABLE `ceo_formacion_preguntas_servicios`
+  ADD COLUMN `peso` INT NOT NULL DEFAULT 1;
+
+ALTER TABLE `ceo_resultado_formacion_intento`
+  ADD COLUMN `puntaje_obtenido` DECIMAL(10,2) NULL,
+  ADD COLUMN `puntaje_maximo` DECIMAL(10,2) NULL;

@@ -32,6 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $texto = $_POST['pregunta_texto'] ?? '';
       $retroPos = $_POST['retropos'] ?? '';
       $retroNeg = $_POST['retroneg'] ?? '';
+      $peso = (int)($_POST['peso_' . $idPregunta] ?? 1);
+      if ($peso <= 0) {
+          $peso = 1;
+      }
       $correctaAlt = $_POST['correcta_alt'] ?? '';
 
       $uploadDir = __DIR__ . '/../uploads/';
@@ -52,9 +56,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $retroNeg = html_entity_decode(strip_tags($retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
       $pdo->prepare("UPDATE ceo_formacion_preguntas_servicios 
-                       SET pregunta=?, imagen=?, retropos=?, retroneg=? 
+                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, peso=? 
                      WHERE id=?")
-          ->execute([$texto, $imagen, $retroPos, $retroNeg, $idPregunta]);
+          ->execute([$texto, $imagen, $retroPos, $retroNeg, $peso, $idPregunta]);
 
       // === Actualizar alternativas existentes ===
       foreach ($_POST as $k => $v) {
@@ -158,7 +162,7 @@ $idSel = (int)($_GET['id_agrupacion'] ?? ($_POST['id_agrupacion'] ?? 0));
 $preguntas = [];
 if ($idSel > 0) {
   $stmt = $pdo->prepare("
-    SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg,
+    SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg, p.peso,
            (SELECT JSON_ARRAYAGG(JSON_OBJECT(
               'id', a.id,
               'alternativa', a.alternativa,
@@ -322,7 +326,11 @@ body{background:#f7f9fc;font-size:0.9rem;}
       </fieldset>
       <fieldset class="mb-3">
         <legend>Retroalimentación Incorrecta</legend>
-        <textarea name="retroneg" id="retroneg_<?= $p['id'] ?>"><?= $p['retroneg'] ?></textarea>
+      <textarea name="retroneg" id="retroneg_<?= $p['id'] ?>"><?= $p['retroneg'] ?></textarea>
+      <div class="mt-2" style="max-width:120px;">
+        <label class="form-label">Peso</label>
+        <input type="number" name="peso_<?= $p['id'] ?>" class="form-control" min="1" max="10" value="<?= (int)($p['peso'] ?? 1) ?>" required>
+      </div>
       </fieldset>
 
       <div class="text-end">

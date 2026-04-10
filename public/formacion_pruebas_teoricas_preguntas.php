@@ -86,6 +86,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $retroPos = html_entity_decode(strip_tags($retroPos), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $retroNeg = html_entity_decode(strip_tags($retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $areaComp = (int)($_POST['areacomp'] ?? 0);
+    $peso = (int)($_POST['peso'] ?? 1);
+    if ($peso <= 0) {
+        $peso = 1;
+    }
     
     if ($areaComp <= 0) {
         throw new Exception("Debe seleccionar un Área de Competencia.");
@@ -104,8 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $stmt = $pdo->prepare("INSERT INTO ceo_formacion_preguntas_servicios 
-      (pregunta, id_servicio, imagen, estado, id_agrupacion, retropos, retroneg, areacomp)
-      VALUES (:pregunta, :id_servicio, :imagen, 'S', :id_agrupacion, :retropos, :retroneg, :areacomp)");
+      (pregunta, id_servicio, imagen, estado, id_agrupacion, retropos, retroneg, areacomp, peso)
+      VALUES (:pregunta, :id_servicio, :imagen, 'S', :id_agrupacion, :retropos, :retroneg, :areacomp, :peso)");
     $stmt->execute([
       ':pregunta' => $textoPregunta,
       ':id_servicio' => $idServicio,
@@ -113,7 +117,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ':id_agrupacion' => $idAgrup,
       ':retropos' => $retroPos,
       ':retroneg' => $retroNeg,
-      ':areacomp'       => $areaComp
+      ':areacomp'       => $areaComp,
+      ':peso'           => $peso
     ]);
     $idPregunta = (int)$pdo->lastInsertId();
 
@@ -272,16 +277,21 @@ legend {font-size:0.9rem; font-weight:600; color:#0d6efd;}
             </select>
           </div>
           <div class="col-md-4">
-  <label class="form-label">Área de Competencia</label>
-  <select name="areacomp" class="form-select" required>
-    <option value="">-- Seleccione --</option>
-    <?php foreach ($areasCompetencia as $ac): ?>
-      <option value="<?= (int)$ac['id'] ?>">
-        <?= htmlspecialchars($ac['descripcion']) ?>
-      </option>
-    <?php endforeach; ?>
-  </select>
-</div>
+            <label class="form-label">Área de Competencia</label>
+            <select name="areacomp" class="form-select" required>
+              <option value="">-- Seleccione --</option>
+              <?php foreach ($areasCompetencia as $ac): ?>
+                <option value="<?= (int)$ac['id'] ?>">
+                  <?= htmlspecialchars($ac['descripcion']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Peso</label>
+            <input type="number" name="peso" class="form-control" min="1" max="10" value="1" required>
+          </div>
 
         </div>
 
