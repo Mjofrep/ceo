@@ -955,6 +955,24 @@ $csrfToken = Csrf::token();
     const btnFinalizar  = document.getElementById('btn-finalizar');
     const inputCierre   = document.getElementById('cierre_modo');
 
+    const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+    const keepaliveIntervalMs = 5 * 60 * 1000;
+    let keepaliveId = null;
+
+    function startKeepalive() {
+        if (keepaliveId) return;
+        keepaliveId = setInterval(() => {
+            fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+        }, keepaliveIntervalMs);
+    }
+
+    function stopKeepalive() {
+        if (keepaliveId) {
+            clearInterval(keepaliveId);
+            keepaliveId = null;
+        }
+    }
+
     function setCierreModo(modo) {
         if (inputCierre) {
             inputCierre.value = modo;
@@ -983,6 +1001,7 @@ $csrfToken = Csrf::token();
             const radios = document.querySelectorAll('.respuesta-radio');
             radios.forEach(r => r.disabled = true);
 
+            stopKeepalive();
             setCierreModo('TIEMPO');
             if (formPrueba) formPrueba.submit();
             return;
@@ -994,16 +1013,20 @@ $csrfToken = Csrf::token();
     if (formPrueba && timerSpan) {
         timerSpan.textContent = formatoTiempo(tiempoRestante);
         setTimeout(tick, 1000);
+        startKeepalive();
     }
 
     if (btnFinalizar && formPrueba) {
         btnFinalizar.addEventListener('click', function () {
             if (confirm('¿Seguro que deseas finalizar la prueba? Una vez enviada no podrás modificar las respuestas.')) {
+                stopKeepalive();
                 setCierreModo('MANUAL');
                 formPrueba.submit();
             }
         });
     }
+
+    window.addEventListener('beforeunload', stopKeepalive);
 
     const totalPreguntas = <?= (int)$totalPreguntas ?>;
     const radios         = document.querySelectorAll('.respuesta-radio');

@@ -53,6 +53,14 @@ $msg = '';
 $resultadoSim = [];
 $csrfToken = Csrf::token();
 
+$maxIdle = 2 * 60 * 60;
+$elapsedSession = 0;
+$remainingSession = $maxIdle;
+if (isset($_SESSION['LAST_ACTIVITY'])) {
+    $elapsedSession = max(0, time() - (int)$_SESSION['LAST_ACTIVITY']);
+    $remainingSession = max(0, $maxIdle - $elapsedSession);
+}
+
 try {
     $pdo->query('SELECT 1');
 } catch (Throwable $e) {
@@ -529,6 +537,11 @@ $csrfToken = Csrf::token();
             </div>
           </div>
         </div>
+        <div class="small text-muted mt-2" id="session-timer"
+             data-elapsed="<?= (int)$elapsedSession ?>"
+             data-remaining="<?= (int)$remainingSession ?>">
+          Sesion: -- restantes | -- transcurridos
+        </div>
       </div>
     </div>
 
@@ -623,6 +636,24 @@ $csrfToken = Csrf::token();
   const formPrueba    = document.getElementById('form-prueba');
   const btnFinalizar  = document.getElementById('btn-finalizar');
 
+  const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+  const keepaliveIntervalMs = 5 * 60 * 1000;
+  let keepaliveId = null;
+
+  function startKeepalive() {
+    if (keepaliveId) return;
+    keepaliveId = setInterval(() => {
+      fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+    }, keepaliveIntervalMs);
+  }
+
+  function stopKeepalive() {
+    if (keepaliveId) {
+      clearInterval(keepaliveId);
+      keepaliveId = null;
+    }
+  }
+
   function formatoTiempo(segundos) {
     const m = String(Math.floor(segundos / 60)).padStart(2, '0');
     const s = String(segundos % 60).padStart(2, '0');
@@ -645,6 +676,7 @@ $csrfToken = Csrf::token();
       const radios = document.querySelectorAll('.respuesta-radio');
       radios.forEach(r => r.disabled = true);
 
+      stopKeepalive();
       if (formPrueba) formPrueba.submit();
       return;
     }
@@ -655,15 +687,19 @@ $csrfToken = Csrf::token();
   if (formPrueba && timerSpan) {
     timerSpan.textContent = formatoTiempo(tiempoRestante);
     setTimeout(tick, 1000);
+    startKeepalive();
   }
 
   if (btnFinalizar && formPrueba) {
     btnFinalizar.addEventListener('click', function () {
       if (confirm('¿Seguro que deseas finalizar la simulación?')) {
+        stopKeepalive();
         formPrueba.submit();
       }
     });
   }
+
+  window.addEventListener('beforeunload', stopKeepalive);
 
   const totalPreguntas = <?= (int)$totalPreguntas ?>;
   const radios         = document.querySelectorAll('.respuesta-radio');
@@ -784,6 +820,33 @@ $csrfToken = Csrf::token();
   if (totalPreguntas > 0) {
     mostrarPregunta(1);
   }
+})();
+</script>
+
+<script>
+(function () {
+  const el = document.getElementById('session-timer');
+  if (!el) return;
+
+  let elapsed = parseInt(el.dataset.elapsed || '0', 10);
+  let remaining = parseInt(el.dataset.remaining || '0', 10);
+
+  function fmt(seg) {
+    const h = Math.floor(seg / 3600);
+    const m = Math.floor((seg % 3600) / 60);
+    return h + 'h ' + String(m).padStart(2, '0') + 'm';
+  }
+
+  function render() {
+    el.textContent = 'Sesion: ' + fmt(remaining) + ' restantes | ' + fmt(elapsed) + ' transcurridos';
+  }
+
+  render();
+  setInterval(() => {
+    elapsed += 60;
+    remaining = Math.max(0, remaining - 60);
+    render();
+  }, 60000);
 })();
 </script>
 

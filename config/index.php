@@ -9,6 +9,10 @@ require_once __DIR__.'/../config/db.php'; // conexión PDO
 require_once __DIR__.'/../config/functions.php';
 
 $err = '';
+$timeoutMsg = '';
+if (isset($_GET['timeout']) && $_GET['timeout'] === '1') {
+    $timeoutMsg = 'Sesion expirada por inactividad. Vuelve a iniciar sesion.';
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 1) Validación CSRF
@@ -221,7 +225,10 @@ $csrf = Csrf::token();
         <p class="text-secondary mb-0">Accede para gestionar habilitaciones, permisos y pruebas.</p>
       </div>
 
-      <?php if ($err): ?>
+<?php if ($timeoutMsg): ?>
+  <div class="alert alert-warning text-center"><?= htmlspecialchars($timeoutMsg) ?></div>
+<?php endif; ?>
+<?php if ($err): ?>
       <div class="alert alert-danger" role="alert">
         <?= htmlspecialchars($err, ENT_QUOTES, 'UTF-8'); ?>
       </div>
