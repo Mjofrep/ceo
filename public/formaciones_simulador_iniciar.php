@@ -415,12 +415,47 @@ $csrfToken = Csrf::token();
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <style>
-body {background:#f7f9fc;}
-.topbar {background:#fff; border-bottom:1px solid #e3e6ea;}
-.brand-title {color:#0065a4; font-weight:600;}
-.question-card {border:1px solid #e9ecef; border-radius:10px;}
-.btn-pregunta-circle{width:36px;height:36px;border-radius:50%;border:1px solid #cbd5e1;background:#fff;}
-.btn-pregunta-circle.active{background:#2563eb;color:#fff;border-color:#2563eb;}
+  body {
+    background-color: #f5f7fb;
+  }
+  .topbar {background:#fff; border-bottom:1px solid #e3e6ea;}
+  .brand-title {color:#0065a4; font-weight:600;}
+  .question-card {
+    border-radius: 0.75rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,.075);
+  }
+  .question-title {
+    font-weight: 600;
+    font-size: 1.05rem;
+  }
+  .timer-badge {
+    font-size: 1rem;
+  }
+  .opcion-label {
+    cursor: pointer;
+  }
+  .btn-pregunta-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 0.9rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background-color: #adb5bd;
+    color: #fff;
+  }
+  .btn-pregunta-circle.active {
+    background-color: #0d6efd;
+  }
+  .btn-pregunta-circle.answered {
+    background-color: #ffc107;
+    color: #212529;
+    font-size: 0.9rem;
+    font-weight: bold;
+  }
 </style>
 </head>
 <body>
@@ -465,6 +500,52 @@ body {background:#f7f9fc;}
     </div>
   <?php elseif ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST'): ?>
 
+    <div class="row mb-3">
+      <div class="col-lg-8">
+        <h1 class="h4 mb-1">
+          <?= $agrupacion ? esc((string)$agrupacion['titulo']) : 'Prueba Teorica' ?>
+        </h1>
+        <p class="text-muted mb-0">
+          Servicio: <strong>CEO / Evaluacion Teorica</strong>
+        </p>
+        <?php if ($data['rut_alumno']): ?>
+          <p class="text-muted mb-0">
+            Participante: <strong><?= esc($data['rut_alumno']) ?></strong>
+          </p>
+        <?php endif; ?>
+      </div>
+      <div class="col-lg-4 mt-3 mt-lg-0 text-lg-end">
+        <div class="card border-0 shadow-sm d-inline-block">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+            <div class="text-primary">
+              <i class="bi bi-clock-history"></i>
+            </div>
+            <div>
+              <div class="small text-muted">Tiempo restante</div>
+              <div class="fw-bold" id="timer">--:--</div>
+            </div>
+            <div class="ms-3 small text-muted">
+              La simulacion se cerrara al terminar
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <div class="d-flex justify-content-between mb-1">
+        <small><strong>Progreso de la prueba</strong></small>
+        <small><span id="progreso-texto">0 / <?= (int)$totalPreguntas ?> respondidas</span></small>
+      </div>
+      <div class="progress" style="height: 1.1rem;">
+        <div id="progreso-barra" class="progress-bar" role="progressbar"
+             style="width: 0%;" aria-valuenow="0"
+             aria-valuemin="0" aria-valuemax="<?= (int)$totalPreguntas ?>">
+          0%
+        </div>
+      </div>
+    </div>
+
     <form id="form-prueba" method="post" action="formaciones_simulador_iniciar.php">
       <input type="hidden" name="csrf" value="<?= esc($csrfToken) ?>">
       <input type="hidden" name="id_servicio" value="<?= (int)$data['id_servicio'] ?>">
@@ -475,14 +556,6 @@ body {background:#f7f9fc;}
       <?php foreach ($preguntas as $preg): ?>
         <input type="hidden" name="preguntas[]" value="<?= (int)$preg['id'] ?>">
       <?php endforeach; ?>
-
-      <div class="card mb-3">
-        <div class="card-body text-center">
-          <div class="fw-semibold">Tiempo restante</div>
-          <div class="display-6" id="timer">--:--</div>
-          <div class="small text-muted">La simulacion se cerrara al terminar</div>
-        </div>
-      </div>
 
       <div class="card mb-3">
         <div class="card-body text-center">
@@ -516,7 +589,7 @@ body {background:#f7f9fc;}
             <?php elseif (!empty($preg['alternativas'])): ?>
               <?php foreach ($preg['alternativas'] as $alt): ?>
                 <div class="form-check mb-2">
-                  <input class="form-check-input" type="radio" name="respuestas[<?= (int)$preg['id'] ?>]" id="alt_<?= (int)$preg['id'] ?>_<?= (int)$alt['id'] ?>" value="<?= (int)$alt['id'] ?>" data-index="<?= $indice ?>">
+                  <input class="form-check-input respuesta-radio" type="radio" name="respuestas[<?= (int)$preg['id'] ?>]" id="alt_<?= (int)$preg['id'] ?>_<?= (int)$alt['id'] ?>" value="<?= (int)$alt['id'] ?>" data-index="<?= $indice ?>">
                   <label class="form-check-label opcion-label" for="alt_<?= (int)$preg['id'] ?>_<?= (int)$alt['id'] ?>">
                     <?= esc((string)$alt['alternativa']) ?>
                   </label>
@@ -530,68 +603,186 @@ body {background:#f7f9fc;}
       <?php $indice++; endforeach; ?>
 
       <div class="d-flex justify-content-between mt-3">
-        <button type="button" id="btnAnterior" class="btn btn-outline-secondary">&larr; Anterior</button>
-        <button type="button" id="btnSiguiente" class="btn btn-primary">Siguiente &rarr;</button>
+        <button type="button" id="btnAnterior" class="btn btn-outline-secondary">← Anterior</button>
+        <button type="button" id="btnSiguiente" class="btn btn-primary">Siguiente →</button>
       </div>
       <div class="d-flex justify-content-center mt-4">
-        <button type="submit" class="btn btn-danger">Finalizar simulacion</button>
+        <button type="button" id="btn-finalizar" class="btn btn-danger">Finalizar simulacion</button>
       </div>
     </form>
   <?php endif; ?>
 </div>
 
 <script>
-const total = <?= (int)$totalPreguntas ?>;
-let current = 1;
-function showQuestion(index){
-  document.querySelectorAll('.pregunta-item').forEach(el=>{
-    el.style.display = (parseInt(el.dataset.index,10) === index) ? '' : 'none';
-  });
-  document.querySelectorAll('.pregunta-nav').forEach(btn=>{
-    btn.classList.toggle('active', parseInt(btn.dataset.index,10) === index);
-  });
-}
-document.getElementById('btnAnterior')?.addEventListener('click',()=>{
-  if (current > 1) { current--; showQuestion(current); }
-});
-document.getElementById('btnSiguiente')?.addEventListener('click',()=>{
-  if (current < total) { current++; showQuestion(current); }
-});
-document.querySelectorAll('.pregunta-nav').forEach(btn=>{
-  btn.addEventListener('click',()=>{ current = parseInt(btn.dataset.index,10); showQuestion(current); });
-});
-showQuestion(current);
-</script>
-
-<script>
 (function () {
-  const tiempoTotal = <?= (int)$tiempoTotalSegundos ?>;
-  let tiempoRestante = tiempoTotal;
-  const timerSpan = document.getElementById('timer');
-  const formPrueba = document.getElementById('form-prueba');
-  const inputTiempo = document.getElementById('tiempo_restante');
+  const tiempoTotal    = <?= (int)$tiempoTotalSegundos ?>;
+  let   tiempoRestante = tiempoTotal;
 
-  function formato(seg) {
-    const m = String(Math.floor(seg / 60)).padStart(2, '0');
-    const s = String(seg % 60).padStart(2, '0');
+  const timerSpan     = document.getElementById('timer');
+  const inputTiempo   = document.getElementById('tiempo_restante');
+  const formPrueba    = document.getElementById('form-prueba');
+  const btnFinalizar  = document.getElementById('btn-finalizar');
+
+  function formatoTiempo(segundos) {
+    const m = String(Math.floor(segundos / 60)).padStart(2, '0');
+    const s = String(segundos % 60).padStart(2, '0');
     return m + ':' + s;
   }
 
   function tick() {
     tiempoRestante--;
     if (tiempoRestante < 0) tiempoRestante = 0;
-    if (timerSpan) timerSpan.textContent = formato(tiempoRestante);
-    if (inputTiempo) inputTiempo.value = tiempoRestante;
+
+    if (timerSpan) {
+      timerSpan.textContent = formatoTiempo(tiempoRestante);
+    }
+    if (inputTiempo) {
+      inputTiempo.value = tiempoRestante;
+    }
+
     if (tiempoRestante <= 0) {
+      if (btnFinalizar) btnFinalizar.disabled = true;
+      const radios = document.querySelectorAll('.respuesta-radio');
+      radios.forEach(r => r.disabled = true);
+
       if (formPrueba) formPrueba.submit();
       return;
     }
+
     setTimeout(tick, 1000);
   }
 
-  if (timerSpan) {
-    timerSpan.textContent = formato(tiempoRestante);
+  if (formPrueba && timerSpan) {
+    timerSpan.textContent = formatoTiempo(tiempoRestante);
     setTimeout(tick, 1000);
+  }
+
+  if (btnFinalizar && formPrueba) {
+    btnFinalizar.addEventListener('click', function () {
+      if (confirm('¿Seguro que deseas finalizar la simulación?')) {
+        formPrueba.submit();
+      }
+    });
+  }
+
+  const totalPreguntas = <?= (int)$totalPreguntas ?>;
+  const radios         = document.querySelectorAll('.respuesta-radio');
+  const textos         = document.querySelectorAll('textarea[name^="respuestas_texto"]');
+  const progresoBarra  = document.getElementById('progreso-barra');
+  const progresoTexto  = document.getElementById('progreso-texto');
+
+  function actualizarProgreso() {
+    if (!totalPreguntas || !progresoBarra || !progresoTexto) return;
+
+    const contestadas = new Set();
+    radios.forEach(r => {
+      if (r.checked) {
+        contestadas.add(r.name);
+        const idx = parseInt(r.dataset.index || '0', 10);
+        if (idx > 0) {
+          const btn = document.querySelector('.btn-pregunta-circle[data-index="' + idx + '"]');
+          if (btn) btn.classList.add('answered');
+        }
+      }
+    });
+    textos.forEach(t => {
+      if (t.value.trim() !== '') {
+        contestadas.add(t.name);
+        const idx = parseInt((t.closest('.pregunta-item')?.dataset.index || '0'), 10);
+        if (idx > 0) {
+          const btn = document.querySelector('.btn-pregunta-circle[data-index="' + idx + '"]');
+          if (btn) btn.classList.add('answered');
+        }
+      }
+    });
+
+    const numContestadas = contestadas.size;
+    const porcentaje     = Math.round((numContestadas / totalPreguntas) * 100);
+
+    progresoBarra.style.width = porcentaje + '%';
+    progresoBarra.setAttribute('aria-valuenow', String(numContestadas));
+    progresoBarra.textContent = porcentaje + '%';
+    progresoTexto.textContent = numContestadas + ' / ' + totalPreguntas + ' respondidas';
+  }
+
+  radios.forEach(r => {
+    r.addEventListener('change', () => {
+      actualizarProgreso();
+
+      const idx = parseInt(r.dataset.index || '0', 10);
+      if (idx > 0) {
+        const btn = document.querySelector('.btn-pregunta-circle[data-index="' + idx + '"]');
+        if (btn) btn.classList.add('answered');
+      }
+    });
+  });
+
+  textos.forEach(t => {
+    t.addEventListener('input', () => {
+      actualizarProgreso();
+      const idx = parseInt((t.closest('.pregunta-item')?.dataset.index || '0'), 10);
+      if (idx > 0) {
+        const btn = document.querySelector('.btn-pregunta-circle[data-index="' + idx + '"]');
+        if (btn && t.value.trim() !== '') btn.classList.add('answered');
+      }
+    });
+  });
+
+  actualizarProgreso();
+
+  const preguntaItems = document.querySelectorAll('.pregunta-item');
+  const navButtons    = document.querySelectorAll('.pregunta-nav');
+  const btnAnterior   = document.getElementById('btnAnterior');
+  const btnSiguiente  = document.getElementById('btnSiguiente');
+
+  let preguntaActual = 1;
+
+  function mostrarPregunta(n) {
+    if (n < 1 || n > totalPreguntas) return;
+
+    preguntaItems.forEach(div => {
+      const idx = parseInt(div.dataset.index || '0', 10);
+      div.style.display = (idx === n) ? '' : 'none';
+    });
+
+    preguntaActual = n;
+    actualizarNav();
+    actualizarBotones();
+  }
+
+  function actualizarNav() {
+    navButtons.forEach(btn => {
+      const idx = parseInt(btn.dataset.index || '0', 10);
+      btn.classList.toggle('active', idx === preguntaActual);
+    });
+  }
+
+  function actualizarBotones() {
+    if (btnAnterior)  btnAnterior.disabled  = (preguntaActual === 1);
+    if (btnSiguiente) btnSiguiente.disabled = (preguntaActual === totalPreguntas);
+  }
+
+  if (btnAnterior) {
+    btnAnterior.addEventListener('click', () => {
+      mostrarPregunta(preguntaActual - 1);
+    });
+  }
+
+  if (btnSiguiente) {
+    btnSiguiente.addEventListener('click', () => {
+      mostrarPregunta(preguntaActual + 1);
+    });
+  }
+
+  navButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.index || '0', 10);
+      if (idx) mostrarPregunta(idx);
+    });
+  });
+
+  if (totalPreguntas > 0) {
+    mostrarPregunta(1);
   }
 })();
 </script>
