@@ -90,6 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($peso <= 0) {
         $peso = 1;
     }
+    $obligatoria = isset($_POST['obligatoria']) ? 1 : 0;
     
     if ($areaComp <= 0) {
         throw new Exception("Debe seleccionar un Área de Competencia.");
@@ -108,8 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $stmt = $pdo->prepare("INSERT INTO ceo_formacion_preguntas_servicios 
-      (pregunta, id_servicio, imagen, estado, id_agrupacion, retropos, retroneg, areacomp, peso)
-      VALUES (:pregunta, :id_servicio, :imagen, 'S', :id_agrupacion, :retropos, :retroneg, :areacomp, :peso)");
+      (pregunta, id_servicio, imagen, estado, id_agrupacion, retropos, retroneg, areacomp, peso, tipo_pregunta, obligatoria)
+      VALUES (:pregunta, :id_servicio, :imagen, 'S', :id_agrupacion, :retropos, :retroneg, :areacomp, :peso, :tipo_pregunta, :obligatoria)");
     $stmt->execute([
       ':pregunta' => $textoPregunta,
       ':id_servicio' => $idServicio,
@@ -118,11 +119,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ':retropos' => $retroPos,
       ':retroneg' => $retroNeg,
       ':areacomp'       => $areaComp,
-      ':peso'           => $peso
+      ':peso'           => $peso,
+      ':tipo_pregunta'  => $tipoPregunta,
+      ':obligatoria'    => $obligatoria
     ]);
     $idPregunta = (int)$pdo->lastInsertId();
 
-    if ($tipoPregunta === 'VF') {
+    if ($tipoPregunta === 'TEXTO_LIBRE') {
+      // Sin alternativas
+    } elseif ($tipoPregunta === 'VF') {
       $correcta = $_POST['correcta'] ?? '';
       $opciones = ['Verdadero', 'Falso'];
       for ($i = 1; $i <= 2; $i++) {
@@ -265,6 +270,7 @@ legend {font-size:0.9rem; font-weight:600; color:#0d6efd;}
               <option value="">-- Seleccione --</option>
               <option value="VF">Verdadero y Falso</option>
               <option value="ALT">Alternativas</option>
+              <option value="TEXTO_LIBRE">Texto libre</option>
             </select>
           </div>
           <div class="col-md-4">
@@ -291,6 +297,14 @@ legend {font-size:0.9rem; font-weight:600; color:#0d6efd;}
           <div class="col-md-2">
             <label class="form-label">Peso</label>
             <input type="number" name="peso" class="form-control" min="1" max="10" value="1" required>
+          </div>
+
+          <div class="col-md-2" id="campo_obligatoria" style="display:none;">
+            <label class="form-label">Obligatoria</label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="obligatoria" id="obligatoria" value="1">
+              <label class="form-check-label" for="obligatoria">Si</label>
+            </div>
           </div>
 
         </div>
@@ -430,9 +444,20 @@ document.getElementById('tipo_contenido').addEventListener('change',e=>{
   }
 });
 const contOpciones=document.getElementById('contenedor_opciones');
+const campoObligatoria=document.getElementById('campo_obligatoria');
+const inputObligatoria=document.getElementById('obligatoria');
 document.getElementById('tipo_pregunta').addEventListener('change',e=>{
   contOpciones.innerHTML='';
   const tipo=e.target.value;
+
+  if (tipo === 'TEXTO_LIBRE') {
+    contOpciones.innerHTML = `<div class="text-muted">La respuesta sera texto libre (sin alternativas).</div>`;
+    if (campoObligatoria) campoObligatoria.style.display = 'block';
+  } else {
+    if (campoObligatoria) campoObligatoria.style.display = 'none';
+    if (inputObligatoria) inputObligatoria.checked = false;
+  }
+
   if(tipo==='VF'){
     contOpciones.innerHTML=`<div class="mb-2"><input type="radio" name="correcta" value="1" required> Verdadero</div><div><input type="radio" name="correcta" value="2"> Falso</div>`;
   }

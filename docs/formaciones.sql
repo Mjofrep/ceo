@@ -160,6 +160,10 @@ CREATE TABLE IF NOT EXISTS `ceo_resultado_formacion_pruebat` (
   `rut` varchar(15) DEFAULT NULL,
   `id_pregunta` int(11) DEFAULT NULL,
   `respuesta` int(11) DEFAULT NULL,
+  `respuesta_texto` text DEFAULT NULL,
+  `puntaje_manual` int(11) DEFAULT NULL,
+  `revisada` tinyint(1) NOT NULL DEFAULT 0,
+  `observacion` text DEFAULT NULL,
   `fecha_rendicion` date DEFAULT NULL,
   `hora_rendicion` time DEFAULT NULL,
   `proceso` int(11) NOT NULL,
@@ -215,6 +219,8 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion_preguntas_servicios` (
   `retroneg` varchar(1000) DEFAULT NULL,
   `areacomp` int(11) DEFAULT NULL,
   `peso` int(11) NOT NULL DEFAULT 1,
+  `tipo_pregunta` varchar(20) NOT NULL DEFAULT 'ALT',
+  `obligatoria` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   KEY `fk_formacion_preguntas_servicios` (`id_servicio`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -265,8 +271,16 @@ ALTER TABLE `ceo_formacion_programadas`
   ADD COLUMN `cierre_modo` VARCHAR(20) NULL;
 
 ALTER TABLE `ceo_formacion_preguntas_servicios`
-  ADD COLUMN `peso` INT NOT NULL DEFAULT 1;
+  ADD COLUMN `peso` INT NOT NULL DEFAULT 1,
+  ADD COLUMN `tipo_pregunta` VARCHAR(20) NOT NULL DEFAULT 'ALT',
+  ADD COLUMN `obligatoria` TINYINT(1) NOT NULL DEFAULT 0;
 
 ALTER TABLE `ceo_resultado_formacion_intento`
   ADD COLUMN `puntaje_obtenido` DECIMAL(10,2) NULL,
   ADD COLUMN `puntaje_maximo` DECIMAL(10,2) NULL;
+
+ALTER TABLE `ceo_resultado_formacion_pruebat`
+  ADD COLUMN `respuesta_texto` TEXT NULL,
+  ADD COLUMN `puntaje_manual` INT NULL,
+  ADD COLUMN `revisada` TINYINT(1) NOT NULL DEFAULT 0,
+  ADD COLUMN `observacion` TEXT NULL;

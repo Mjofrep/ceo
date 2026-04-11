@@ -136,6 +136,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         rut,
                         id_pregunta,
                         respuesta,
+                        respuesta_texto,
+                        puntaje_manual,
+                        revisada,
+                        observacion,
                         fecha_rendicion,
                         Hora_rendicion,
                         proceso,
@@ -147,6 +151,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :rut,
                         :id_pregunta,
                         :id_alternativa,
+                        :respuesta_texto,
+                        :puntaje_manual,
+                        :revisada,
+                        :observacion,
                         CURDATE(),
                         CURTIME(),
                         :proceso,
@@ -166,29 +174,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ";
                 $stmtVal = $pdo->prepare($sqlVal);
 
+                $preguntasIds = array_map('intval', $preguntas);
+                $tiposMap = [];
+                if (!empty($preguntasIds)) {
+                    $placeholders = implode(',', array_fill(0, count($preguntasIds), '?'));
+                    $stmtTipo = $pdo->prepare("SELECT id, tipo_pregunta FROM ceo_formacion_preguntas_servicios WHERE id IN ($placeholders)");
+                    $stmtTipo->execute($preguntasIds);
+                    $rowsTipo = $stmtTipo->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($rowsTipo as $rt) {
+                        $tiposMap[(int)$rt['id']] = $rt['tipo_pregunta'] ?? 'ALT';
+                    }
+                }
+
                 foreach ($preguntas as $idPregunta) {
 
                     $idPregunta = (int)$idPregunta;
 
-                    if (isset($respuestas[$idPregunta])) {
-                        $idAlternativa = (int)$respuestas[$idPregunta];
+                    $tipoPregunta = $tiposMap[$idPregunta] ?? 'ALT';
 
-                        $stmtVal->execute([
-                            ':id_alternativa' => $idAlternativa,
-                            ':id_pregunta'    => $idPregunta
-                        ]);
-
-                        $correcta   = $stmtVal->fetchColumn();
-                        $validacion = ($correcta === 'S') ? 1 : 0;
-                    } else {
+                    if ($tipoPregunta === 'TEXTO_LIBRE') {
+                        $textoResp = trim((string)($_POST['respuestas_texto'][$idPregunta] ?? ''));
                         $idAlternativa = 0;
-                        $validacion    = -1;
+                        $validacion = -1;
+                        $respuestaTexto = $textoResp;
+                        $puntajeManual = null;
+                        $revisada = 0;
+                        $observacion = null;
+                    } else {
+                        if (isset($respuestas[$idPregunta])) {
+                            $idAlternativa = (int)$respuestas[$idPregunta];
+
+                            $stmtVal->execute([
+                                ':id_alternativa' => $idAlternativa,
+                                ':id_pregunta'    => $idPregunta
+                            ]);
+
+                            $correcta   = $stmtVal->fetchColumn();
+                            $validacion = ($correcta === 'S') ? 1 : 0;
+                        } else {
+                            $idAlternativa = 0;
+                            $validacion    = -1;
+                        }
+                        $respuestaTexto = null;
+                        $puntajeManual = null;
+                        $revisada = 0;
+                        $observacion = null;
                     }
 
                     $paramsInsert = [
                         ':rut'            => $data['rut_alumno'],
                         ':id_pregunta'    => $idPregunta,
                         ':id_alternativa' => $idAlternativa,
+                        ':respuesta_texto' => $respuestaTexto,
+                        ':puntaje_manual' => $puntajeManual,
+                        ':revisada'       => $revisada,
+                        ':observacion'    => $observacion,
                         ':validacion'     => $validacion,
                         ':proceso'        => $cuadrilla,
                         ':intento'        => $intentoActual
@@ -240,6 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                       AND rpt.proceso = :proceso
                       AND rpt.intento = :intento
                       AND ps.id_servicio = :id_servicio
+                      AND COALESCE(ps.tipo_pregunta,'ALT') <> 'TEXTO_LIBRE'
                 ";
 
                 $stmtCount = $pdo->prepare($sqlCount);
@@ -267,6 +308,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $resultado = ($porcentajeObtenido >= $porcentajeMinimo)
                     ? 'APROBADO'
                     : 'REPROBADO';
+
+                $stmtPend = $pdo->prepare("
+                    SELECT COUNT(*)
+                    FROM ceo_resultado_formacion_pruebat rpt
+                    INNER JOIN ceo_formacion_preguntas_servicios ps
+                        ON ps.id = rpt.id_pregunta
+                    WHERE rpt.rut = :rut
+                      AND rpt.proceso = :proceso
+                      AND rpt.intento = :intento
+                      AND ps.tipo_pregunta = 'TEXTO_LIBRE'
+                      AND (rpt.revisada = 0 OR rpt.revisada IS NULL)
+                ");
+                $stmtPend->execute([
+                    ':rut' => $data['rut_alumno'],
+                    ':proceso' => $cuadrilla,
+                    ':intento' => $intentoActual
+                ]);
+                $pendientes = (int)$stmtPend->fetchColumn();
+                if ($pendientes > 0) {
+                    $resultado = 'PENDIENTE';
+                }
 
                 $notaFinal = calcularNotaFinalDesdePorcentaje($porcentajeObtenido, $porcentajeMinimo);
 
@@ -434,8 +496,32 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
            =========================================================== */
         $cantidadPreguntas = (int)$agrupacion['cantidad'];
 
+        // Preguntas de texto libre obligatorias
+        $stmtOb = $pdo->prepare("
+            SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
+            FROM ceo_formacion_preguntas_servicios
+            WHERE id_servicio = :id_servicio
+              AND id_agrupacion = :id_agrupacion
+              AND estado = 'S'
+              AND tipo_pregunta = 'TEXTO_LIBRE'
+              AND obligatoria = 1
+        ");
+        $stmtOb->execute([
+            ':id_servicio' => $data['id_servicio'],
+            ':id_agrupacion' => $data['id_agrupacion']
+        ]);
+        $preguntasObligatorias = $stmtOb->fetchAll(PDO::FETCH_ASSOC);
+
+        if (count($preguntasObligatorias) > $cantidadPreguntas) {
+            $err = "La cantidad de preguntas obligatorias supera el total de la prueba.";
+        }
+
         // Intentar seleccionar preguntas segun porcentajes por area de competencia
-        $preguntas = [];
+        $preguntas = $preguntasObligatorias;
+
+        if ($err !== '') {
+            $totalPreguntas = 0;
+        } else {
 
         $stmtAvail = $pdo->prepare("
             SELECT areacomp, COUNT(*) AS total
@@ -465,7 +551,12 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
         $stmtCfg->execute([':id_servicio' => $data['id_servicio']]);
         $configRows = $stmtCfg->fetchAll(PDO::FETCH_ASSOC);
 
-        $useConfig = !empty($configRows) && !empty($availableMap);
+        $cantidadRest = $cantidadPreguntas - count($preguntas);
+        if ($cantidadRest < 0) {
+            $cantidadRest = 0;
+        }
+
+        $useConfig = $cantidadRest > 0 && !empty($configRows) && !empty($availableMap);
 
         if ($useConfig) {
             $areas = [];
@@ -490,7 +581,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             if ($sumPercent > 0 && !empty($areas)) {
                 $assignedTotal = 0;
                 foreach ($areas as $idx => $area) {
-                    $exact = ($cantidadPreguntas * $area['pct']) / $sumPercent;
+                    $exact = ($cantidadRest * $area['pct']) / $sumPercent;
                     $base = (int)floor($exact);
                     $assign = min($base, $area['available']);
                     $areas[$idx]['assigned'] = $assign;
@@ -498,7 +589,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
                     $assignedTotal += $assign;
                 }
 
-                $remaining = max(0, $cantidadPreguntas - $assignedTotal);
+                $remaining = max(0, $cantidadRest - $assignedTotal);
                 while ($remaining > 0) {
                     $bestIdx = null;
                     $bestRem = -1.0;
@@ -523,21 +614,28 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
                     if ($area['assigned'] <= 0) {
                         continue;
                     }
-                    $stmtAreaQ = $pdo->prepare("
-                        SELECT id, pregunta, id_servicio, imagen, peso
+                    $sqlArea = "
+                        SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
                         FROM ceo_formacion_preguntas_servicios
-                        WHERE id_servicio = :id_servicio
-                          AND id_agrupacion = :id_agrupacion
+                        WHERE id_servicio = ?
+                          AND id_agrupacion = ?
                           AND estado = 'S'
-                          AND areacomp = :areacomp
-                        ORDER BY RAND()
-                        LIMIT :cantidad
-                    ");
-                    $stmtAreaQ->bindValue(':id_servicio', $data['id_servicio'], PDO::PARAM_INT);
-                    $stmtAreaQ->bindValue(':id_agrupacion', $data['id_agrupacion'], PDO::PARAM_INT);
-                    $stmtAreaQ->bindValue(':areacomp', $area['area'], PDO::PARAM_INT);
-                    $stmtAreaQ->bindValue(':cantidad', $area['assigned'], PDO::PARAM_INT);
-                    $stmtAreaQ->execute();
+                          AND areacomp = ?
+                    ";
+                    $excludeIds = array_map(static fn($q) => (int)$q['id'], $preguntas);
+                    if (!empty($excludeIds)) {
+                        $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                        $sqlArea .= " AND id NOT IN ($placeholders) ";
+                    }
+                    $sqlArea .= " ORDER BY RAND() LIMIT ?";
+
+                    $params = [$data['id_servicio'], $data['id_agrupacion'], $area['area']];
+                    if (!empty($excludeIds)) {
+                        $params = array_merge($params, $excludeIds);
+                    }
+                    $params[] = $area['assigned'];
+                    $stmtAreaQ = $pdo->prepare($sqlArea);
+                    $stmtAreaQ->execute($params);
                     $preguntas = array_merge($preguntas, $stmtAreaQ->fetchAll(PDO::FETCH_ASSOC));
                 }
             }
@@ -547,7 +645,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             $faltantes = $cantidadPreguntas - count($preguntas);
             $ids = array_map(static fn($q) => (int)$q['id'], $preguntas);
             $sqlExtra = "
-                SELECT id, pregunta, id_servicio, imagen, peso
+                SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
                 FROM ceo_formacion_preguntas_servicios
                 WHERE id_servicio = ?
                   AND id_agrupacion = ?
@@ -569,6 +667,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             $preguntas = array_merge($preguntas, $stmtExtra->fetchAll(PDO::FETCH_ASSOC));
         }
         $totalPreguntas = count($preguntas);
+        }
 
         if ($totalPreguntas === 0) {
             $err = "No hay preguntas configuradas.";
@@ -778,7 +877,12 @@ $csrfToken = Csrf::token();
                             </div>
                         <?php endif; ?>
 
-                        <?php if (!empty($preg['alternativas'])): ?>
+                        <?php if (($preg['tipo_pregunta'] ?? '') === 'TEXTO_LIBRE'): ?>
+                            <div class="mb-2">
+                                <textarea name="respuestas_texto[<?= (int)$preg['id'] ?>]" class="form-control" rows="4" maxlength="4000" placeholder="Escriba su respuesta..."></textarea>
+                                <div class="small text-muted mt-1">Respuesta libre (max 4000 caracteres)</div>
+                            </div>
+                        <?php elseif (!empty($preg['alternativas'])): ?>
                             <?php foreach ($preg['alternativas'] as $alt): ?>
                                 <div class="form-check mb-2">
                                     <input

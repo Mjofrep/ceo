@@ -36,6 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($peso <= 0) {
           $peso = 1;
       }
+      $tipoPregunta = $_POST['tipo_pregunta_' . $idPregunta] ?? 'ALT';
+      $obligatoria = isset($_POST['obligatoria_' . $idPregunta]) ? 1 : 0;
       $correctaAlt = $_POST['correcta_alt'] ?? '';
 
       $uploadDir = __DIR__ . '/../uploads/';
@@ -56,9 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $retroNeg = html_entity_decode(strip_tags($retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
       $pdo->prepare("UPDATE ceo_formacion_preguntas_servicios 
-                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, peso=? 
+                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, peso=?, tipo_pregunta=?, obligatoria=? 
                      WHERE id=?")
-          ->execute([$texto, $imagen, $retroPos, $retroNeg, $peso, $idPregunta]);
+          ->execute([$texto, $imagen, $retroPos, $retroNeg, $peso, $tipoPregunta, $obligatoria, $idPregunta]);
 
       // === Actualizar alternativas existentes ===
       foreach ($_POST as $k => $v) {
@@ -162,7 +164,7 @@ $idSel = (int)($_GET['id_agrupacion'] ?? ($_POST['id_agrupacion'] ?? 0));
 $preguntas = [];
 if ($idSel > 0) {
   $stmt = $pdo->prepare("
-    SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg, p.peso,
+    SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg, p.peso, p.tipo_pregunta, p.obligatoria,
            (SELECT JSON_ARRAYAGG(JSON_OBJECT(
               'id', a.id,
               'alternativa', a.alternativa,
@@ -255,6 +257,24 @@ body{background:#f7f9fc;font-size:0.9rem;}
 
       <textarea name="pregunta_texto" id="pregunta_<?= $p['id'] ?>"><?= $p['pregunta'] ?></textarea>
 
+      <div class="row g-3 mt-2">
+        <div class="col-md-4">
+          <label class="form-label">Tipo de Pregunta</label>
+          <select name="tipo_pregunta_<?= $p['id'] ?>" class="form-select form-select-sm">
+            <option value="ALT" <?= ($p['tipo_pregunta'] ?? '') === 'ALT' ? 'selected' : '' ?>>Alternativas</option>
+            <option value="VF" <?= ($p['tipo_pregunta'] ?? '') === 'VF' ? 'selected' : '' ?>>Verdadero/Falso</option>
+            <option value="TEXTO_LIBRE" <?= ($p['tipo_pregunta'] ?? '') === 'TEXTO_LIBRE' ? 'selected' : '' ?>>Texto libre</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Obligatoria</label>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="obligatoria_<?= $p['id'] ?>" id="obligatoria_<?= $p['id'] ?>" value="1" <?= !empty($p['obligatoria']) ? 'checked' : '' ?>>
+            <label class="form-check-label" for="obligatoria_<?= $p['id'] ?>">Si</label>
+          </div>
+        </div>
+      </div>
+
       <?php if ($p['imagen']): ?>
         <div class="my-2">
           <label class="form-label">Contenido actual:</label>
@@ -272,7 +292,7 @@ body{background:#f7f9fc;font-size:0.9rem;}
       <label class="form-label">O URL de video</label>
       <input type="url" name="pregunta_video" class="form-control mb-3" placeholder="https://...">
 
-      <?php if (!empty($alts)): ?>
+      <?php if (($p['tipo_pregunta'] ?? '') !== 'TEXTO_LIBRE' && !empty($alts)): ?>
         <fieldset class="mb-3">
           <legend>Alternativas</legend>
           <div id="alt_container_<?= $p['id'] ?>">
