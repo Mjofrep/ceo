@@ -998,8 +998,6 @@ $csrfToken = Csrf::token();
 
         if (tiempoRestante <= 0) {
             if (btnFinalizar) btnFinalizar.disabled = true;
-            const radios = document.querySelectorAll('.respuesta-radio');
-            radios.forEach(r => r.disabled = true);
 
             stopKeepalive();
             setCierreModo('TIEMPO');
