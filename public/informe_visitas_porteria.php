@@ -45,6 +45,7 @@ SELECT
       pr.desc_proceso                         AS proceso,
       ht.desc_tipo              AS habilitacion,
       pa.desc_patios                          AS patio
+      ,s.observacion                          AS observacion
     FROM ceo_participantes_solicitud p
     INNER JOIN ceo_solicitudes s ON s.id = p.id_solicitud
     INNER JOIN ceo_usuarios us ON us.id= s.solicitante
@@ -210,15 +211,16 @@ body{background:#f7f9fc}
         <th>Proceso</th>
         <th>Habilitación</th>
         <th>Patio</th>
+        <th>Observaciones</th>
       </tr>
     </thead>
     <tbody>
 
     <?php if (empty($registros)): ?>
       <tr>
-        <td colspan="10" class="text-center text-muted">
-          Sin personas autorizadas para la fecha seleccionada.
-        </td>
+         <td colspan="11" class="text-center text-muted">
+           Sin personas autorizadas para la fecha seleccionada.
+         </td>
       </tr>
     <?php else: foreach ($registros as $r): ?>
       <tr>
@@ -232,6 +234,7 @@ body{background:#f7f9fc}
         <td><?= esc($r['proceso']) ?></td>
         <td><?= esc($r['habilitacion']) ?></td>
         <td><?= esc($r['patio']) ?></td>
+        <td><?= esc($r['observacion']) ?></td>
       </tr>
     <?php endforeach; endif; ?>
 
