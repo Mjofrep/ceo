@@ -250,6 +250,8 @@ body {background:#f7f9fc;}
                     data-bs-toggle="modal"
                     data-bs-target="#modalAreas"
                     data-rut="<?= esc((string)$p['rut']) ?>"
+                    data-nombre="<?= esc((string)$p['nombre']) ?>"
+                    data-apellidos="<?= esc((string)$p['apellidos']) ?>"
                     data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
                     data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
                     title="Ver detalle por areas">
@@ -269,7 +271,10 @@ body {background:#f7f9fc;}
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Detalle por areas de competencia</h5>
+        <div>
+          <h5 class="modal-title mb-1">Detalle por areas de competencia</h5>
+          <div id="modalAreasPersona" class="small text-muted"></div>
+        </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
@@ -284,6 +289,7 @@ body {background:#f7f9fc;}
 <script>
 (function () {
   const modalBody = document.getElementById('modalAreasBody');
+  const modalPersona = document.getElementById('modalAreasPersona');
 
   function escapeHtml(str) {
     return String(str)
@@ -341,8 +347,17 @@ body {background:#f7f9fc;}
   document.querySelectorAll('.btn-area-detalle').forEach(btn => {
     btn.addEventListener('click', () => {
       const rut = btn.getAttribute('data-rut');
+      const nombre = btn.getAttribute('data-nombre');
+      const apellidos = btn.getAttribute('data-apellidos');
       const cuadrilla = btn.getAttribute('data-cuadrilla');
       const idServicio = btn.getAttribute('data-id-servicio');
+
+      if (modalPersona) {
+        const nombreCompleto = [nombre, apellidos].filter(Boolean).join(' ').trim();
+        modalPersona.innerHTML = 'RUT: <strong>' + escapeHtml(rut || '') + '</strong>'
+          + ' | ' + escapeHtml(nombreCompleto)
+          + ' | Areas de competencia';
+      }
 
       if (modalBody) {
         modalBody.innerHTML = '<div class="text-muted">Cargando...</div>';
