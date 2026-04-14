@@ -84,7 +84,15 @@ if ($id <= 0 && $cuadrilla <= 0) {
                           AND CONCAT(ri1.fecha_rendicion,' ',ri1.hora_rendicion) = ri2.max_fecha
                 ) ri ON ri.rut = p.rut AND ri.id_servicio = :servicio2
                 WHERE p.id_cuadrilla = :cuadrilla3
-                ORDER BY p.apellidos ASC, p.nombre ASC
+                ORDER BY
+                  CASE UPPER(TRIM(ep.resultado))
+                    WHEN 'PENDIENTE' THEN 1
+                    WHEN 'REPROBADO' THEN 2
+                    WHEN 'APROBADO' THEN 3
+                    ELSE 4
+                  END ASC,
+                  p.nombre ASC,
+                  p.apellidos ASC
             ");
             $stmt->execute([
                 ':cuadrilla' => (int)$formacion['cuadrilla'],
@@ -207,6 +215,7 @@ body {background:#f7f9fc;}
             <th>Duracion</th>
             <th>Motivo</th>
             <th>Estado</th>
+            <th>Areas</th>
           </tr>
         </thead>
         <tbody>
@@ -234,6 +243,19 @@ body {background:#f7f9fc;}
               <td><?= esc(formatDuracion($p['fecha_inicio'] ?? null, $p['fecha_termino'] ?? null)) ?></td>
               <td><?= esc((string)($p['cierre_modo'] ?? '')) ?></td>
               <td><?= esc($estado) ?></td>
+              <td>
+                <button
+                    type="button"
+                    class="btn btn-outline-primary btn-sm btn-area-detalle"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modalAreas"
+                    data-rut="<?= esc((string)$p['rut']) ?>"
+                    data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
+                    data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
+                    title="Ver detalle por areas">
+                  <i class="bi bi-pie-chart"></i>
+                </button>
+              </td>
             </tr>
           <?php endforeach; ?>
         <?php endif; ?>
@@ -242,6 +264,111 @@ body {background:#f7f9fc;}
     </div>
   <?php endif; ?>
 </div>
+
+<div class="modal fade" id="modalAreas" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Detalle por areas de competencia</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAreasBody" class="small text-muted">Cargando...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+(function () {
+  const modalBody = document.getElementById('modalAreasBody');
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function renderTable(data) {
+    if (!data || !data.length) {
+      return '<div class="text-muted">Sin datos para esta persona.</div>';
+    }
+
+    let html = '';
+    html += '<div class="table-responsive">';
+    html += '<table class="table table-sm align-middle">';
+    html += '<thead><tr>';
+    html += '<th>Area</th>';
+    html += '<th>Objetivo %</th>';
+    html += '<th>Correctas</th>';
+    html += '<th>Incorrectas</th>';
+    html += '<th>No contestadas</th>';
+    html += '<th>% Cumplimiento</th>';
+    html += '<th>Reforzar</th>';
+    html += '</tr></thead><tbody>';
+
+    data.forEach(row => {
+      const porcentaje = Number(row.porcentaje || 0).toFixed(2);
+      const objetivo = Number(row.objetivo || 0).toFixed(2);
+      const reforzar = row.reforzar ? 'Si' : 'No';
+      const barClass = row.reforzar ? 'bg-danger' : 'bg-success';
+
+      html += '<tr>';
+      html += '<td>' + escapeHtml(row.area || '') + '</td>';
+      html += '<td>' + objetivo + '</td>';
+      html += '<td>' + escapeHtml(row.correctas) + '</td>';
+      html += '<td>' + escapeHtml(row.incorrectas) + '</td>';
+      html += '<td>' + escapeHtml(row.ncontestadas) + '</td>';
+      html += '<td>';
+      html += '<div class="progress" style="height:8px;">';
+      html += '<div class="progress-bar ' + barClass + '" role="progressbar" style="width:' + porcentaje + '%"></div>';
+      html += '</div>';
+      html += '<div class="small text-muted mt-1">' + porcentaje + '%</div>';
+      html += '</td>';
+      html += '<td>' + reforzar + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  document.querySelectorAll('.btn-area-detalle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const rut = btn.getAttribute('data-rut');
+      const cuadrilla = btn.getAttribute('data-cuadrilla');
+      const idServicio = btn.getAttribute('data-id-servicio');
+
+      if (modalBody) {
+        modalBody.innerHTML = '<div class="text-muted">Cargando...</div>';
+      }
+
+      const url = 'ajax_formacion_area_stats.php?rut=' + encodeURIComponent(rut)
+        + '&cuadrilla=' + encodeURIComponent(cuadrilla)
+        + '&id_servicio=' + encodeURIComponent(idServicio);
+
+      fetch(url, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(r => {
+          if (!r || !r.ok) {
+            const msg = r && r.error ? r.error : 'No se pudo cargar el detalle.';
+            modalBody.innerHTML = '<div class="text-danger">' + escapeHtml(msg) + '</div>';
+            return;
+          }
+          modalBody.innerHTML = renderTable(r.data || []);
+        })
+        .catch(() => {
+          modalBody.innerHTML = '<div class="text-danger">No se pudo cargar el detalle.</div>';
+        });
+    });
+  });
+})();
+</script>
 
 </body>
 </html>

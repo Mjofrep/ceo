@@ -766,6 +766,26 @@ $csrfToken = Csrf::token();
     const formPrueba    = document.getElementById('form-prueba');
     const btnFinalizar  = document.getElementById('btn-finalizar');
 
+    const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+    const keepaliveIntervalMs = 5 * 60 * 1000;
+    let keepaliveId = null;
+
+    function startKeepalive() {
+        if (keepaliveId) return;
+        keepaliveId = setInterval(() => {
+            fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+        }, keepaliveIntervalMs);
+    }
+
+    function stopKeepalive() {
+        if (keepaliveId) {
+            clearInterval(keepaliveId);
+            keepaliveId = null;
+        }
+    }
+
+    window.ceoStopKeepalive = stopKeepalive;
+
     function formatoTiempo(segundos) {
         const m = String(Math.floor(segundos / 60)).padStart(2, '0');
         const s = String(segundos % 60).padStart(2, '0');
@@ -785,9 +805,7 @@ $csrfToken = Csrf::token();
 
         if (tiempoRestante <= 0) {
             if (btnFinalizar) btnFinalizar.disabled = true;
-            const radios = document.querySelectorAll('.respuesta-radio');
-            radios.forEach(r => r.disabled = true);
-
+            stopKeepalive();
             if (formPrueba) formPrueba.submit();
             return;
         }
@@ -798,15 +816,19 @@ $csrfToken = Csrf::token();
     if (formPrueba && timerSpan) {
         timerSpan.textContent = formatoTiempo(tiempoRestante);
         setTimeout(tick, 1000);
+        startKeepalive();
     }
 
     if (btnFinalizar && formPrueba) {
         btnFinalizar.addEventListener('click', function () {
             if (confirm('¿Seguro que deseas finalizar la prueba? Una vez enviada no podrás modificar las respuestas.')) {
+                stopKeepalive();
                 formPrueba.submit();
             }
         });
     }
+
+    window.addEventListener('beforeunload', stopKeepalive);
 
     const totalPreguntas = <?= (int)$totalPreguntas ?>;
     const radios         = document.querySelectorAll('.respuesta-radio');
@@ -952,6 +974,10 @@ function finalizarPruebaPorSalida() {
 
     const form = document.getElementById("form-prueba");
 
+    if (window.ceoStopKeepalive) {
+        window.ceoStopKeepalive();
+    }
+
     const input = document.createElement("input");
     input.type = "hidden";
     input.name = "finalizado_por_salida";
@@ -963,6 +989,9 @@ function finalizarPruebaPorSalida() {
 
 window.addEventListener("beforeunload", function (e) {
     if (typeof tiempoRestante !== "undefined" && tiempoRestante > 0 && !pruebaFinalizada) {
+        if (window.ceoStopKeepalive) {
+            window.ceoStopKeepalive();
+        }
         e.preventDefault();
         e.returnValue = '';
     }

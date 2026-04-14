@@ -375,6 +375,27 @@ $jsIdsEvaluacion = $idEvaluaciones;
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
+const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+const keepaliveIntervalMs = 5 * 60 * 1000;
+let keepaliveId = null;
+
+function startKeepalive() {
+    if (keepaliveId) return;
+    keepaliveId = setInterval(() => {
+        fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+    }, keepaliveIntervalMs);
+}
+
+function stopKeepalive() {
+    if (keepaliveId) {
+        clearInterval(keepaliveId);
+        keepaliveId = null;
+    }
+}
+
+startKeepalive();
+window.addEventListener('beforeunload', stopKeepalive);
+
 // Exclusividad SI/NO/NA
 document.querySelectorAll('.chk').forEach(chk => {
     chk.addEventListener('change', () => {
@@ -454,6 +475,8 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
         }
     }
 
+    stopKeepalive();
+
     fetch("guardar_terreno.php", {
         method: "POST",
         body: JSON.stringify({
@@ -466,13 +489,15 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     })
     .then(r => r.json())
 .then(r => {
-    if (r.ok) {
+     if (r.ok) {
         alert("✔ Evaluación guardada correctamente.");
         window.location.href = "evaluador_home_terreno.php";
     } else {
         alert("❌ Error: " + r.error);
     }
-});
+ }).catch(() => {
+     startKeepalive();
+ });
 
 
 });
