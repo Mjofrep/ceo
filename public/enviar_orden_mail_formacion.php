@@ -24,8 +24,8 @@ if (empty($_SESSION['auth'])) {
 // ------------------------
 // RECIBIR POST
 // ------------------------
-$para       = 'marcelo.jofre94@gmail.com';
-$cc         = '';
+$para       = trim((string)($_POST['para'] ?? ''));
+$cc         = trim((string)($_POST['cc'] ?? ''));
 $asunto     = trim((string)($_POST['asunto'] ?? ''));
 $cuerpo     = (string)($_POST['cuerpo'] ?? '');
 $htmlExtra  = (string)($_POST['html_participantes'] ?? '');

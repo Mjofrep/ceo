@@ -241,7 +241,7 @@ body { background:#f7f9fc; }
               <label class="form-label fw-semibold text-dark d-block">
                 Para <span class="text-muted">(Destinatario principal)</span>
               </label>
-              <input type="email" name="para" class="form-control" value="marcelo.jofre94@gmail.com" readonly>
+              <input type="email" name="para" class="form-control">
             </div>
 
             <div class="col-md-6">
