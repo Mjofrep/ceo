@@ -288,6 +288,11 @@ h4, h5, h6 {font-weight:500;}
           <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['resp_uo_nombre']) ?>" readonly>
         </div>
 
+        <div class="col-md-4">
+          <label class="form-label">Capacitación</label>
+          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['charla_nombre'] ?? '') ?>" readonly>
+        </div>
+
         <div class="col-12">
           <label class="form-label">Observación</label>
           <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['observacion'] ?? '') ?>" readonly>

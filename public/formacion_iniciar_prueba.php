@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // RESOLVER CUADRILLA REAL DESDE EL PROCESO PROGRAMADO
                 // =====================================================
                 $sqlProc = "
-                    SELECT cuadrilla, intento, tipo, id_servicio
+                    SELECT cuadrilla, intento, tipo, id_servicio, id_agrupacion
                     FROM ceo_formacion_programadas
                     WHERE id = :id_programada
                       AND rut = :rut
@@ -125,6 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $cuadrilla     = (int)$procRow['cuadrilla'];
                 $intentoActual = (int)$procRow['intento'];
+                if ((int)($procRow['id_agrupacion'] ?? 0) > 0) {
+                    $data['id_agrupacion'] = (int)$procRow['id_agrupacion'];
+                }
 
 
                 // =====================================================
@@ -435,6 +438,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($err === '' && $data['proceso'] > 0) {
+        $stmtProgramada = $pdo->prepare("
+            SELECT id_agrupacion
+            FROM ceo_formacion_programadas
+            WHERE id = :id
+              AND rut = :rut
+            LIMIT 1
+        ");
+        $stmtProgramada->execute([
+            ':id' => $data['proceso'],
+            ':rut' => $data['rut_alumno']
+        ]);
+        $programada = $stmtProgramada->fetch(PDO::FETCH_ASSOC);
+        if ($programada && (int)($programada['id_agrupacion'] ?? 0) > 0) {
+            $data['id_agrupacion'] = (int)$programada['id_agrupacion'];
+        }
+
         $stmtInicio = $pdo->prepare("
             UPDATE ceo_formacion_programadas
             SET fecha_inicio = NOW()

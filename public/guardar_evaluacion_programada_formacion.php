@@ -30,6 +30,28 @@ try {
     $pdo = db();
     $userId = (int)($_SESSION['auth']['id'] ?? 0);
 
+    $stmtFormacion = $pdo->prepare("
+        SELECT id_servicio, id_agrupacion
+        FROM ceo_formacion
+        WHERE cuadrilla = :cuadrilla
+        LIMIT 1
+    ");
+    $stmtFormacion->execute([':cuadrilla' => $cuadrilla]);
+    $formacion = $stmtFormacion->fetch(PDO::FETCH_ASSOC);
+
+    if (!$formacion) {
+        throw new RuntimeException('No se encontró la cuadrilla de formación.');
+    }
+
+    if ((int)$formacion['id_servicio'] !== $servicio) {
+        throw new RuntimeException('La cuadrilla no corresponde al servicio informado.');
+    }
+
+    $idAgrupacion = (int)($formacion['id_agrupacion'] ?? 0);
+    if ($idAgrupacion <= 0) {
+        throw new RuntimeException('La cuadrilla no tiene una prueba asociada.');
+    }
+
     // Buscar SI YA EXISTE un registro para esta combinación,
     // sin importar si está PENDIENTE o ANULADA.
     $stmtExiste = $pdo->prepare("
@@ -60,6 +82,7 @@ try {
                 SET estado = 'PENDIENTE',
                     resultado = 'PENDIENTE',
                     fecha_resultado = NULL,
+                    id_agrupacion = :id_agrupacion,
                     usuario_programa = :usuario,
                     fecha_programacion = NOW(),
                     cobrado = 0
@@ -67,6 +90,7 @@ try {
                 LIMIT 1
             ");
             $stmtUpd->execute([
+                ':id_agrupacion' => $idAgrupacion,
                 ':usuario' => ($userId > 0 ? $userId : 1),
                 ':id' => (int)$registro['id']
             ]);
@@ -78,13 +102,14 @@ try {
         // Si no existe, insertar nuevo
         $stmtIns = $pdo->prepare("
             INSERT INTO ceo_formacion_programadas
-                (rut, id_servicio, tipo, cuadrilla, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
+                (rut, id_servicio, id_agrupacion, tipo, cuadrilla, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
             VALUES
-                (:rut, :servicio, :tipo, :cuadrilla, NOW(), :usuario, 'PENDIENTE', 1, 'PENDIENTE', NULL, 0)
+                (:rut, :servicio, :id_agrupacion, :tipo, :cuadrilla, NOW(), :usuario, 'PENDIENTE', 1, 'PENDIENTE', NULL, 0)
         ");
         $stmtIns->execute([
             ':rut' => $rut,
             ':servicio' => $servicio,
+            ':id_agrupacion' => $idAgrupacion,
             ':tipo' => $tipo,
             ':cuadrilla' => $cuadrilla,
             ':usuario' => ($userId > 0 ? $userId : 1)

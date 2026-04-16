@@ -80,12 +80,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     /**
                      * 2) VALIDAMOS RUT DEL ALUMNO EN ceo_formacion_participantes_solicitud
                      */
-                    $sql = "SELECT * 
-                            FROM ceo_formacion_programadas
-                            WHERE rut = :rut
-                            and estado like 'PENDIENTE'
-                            and resultado like 'PENDIENTE'
-                            and tipo = 'PRUEBA'";
+                    $sql = "
+                            SELECT fp.*, a.titulo AS titulo_prueba
+                            FROM ceo_formacion_programadas fp
+                            LEFT JOIN ceo_formacion_agrupacion a ON a.id = fp.id_agrupacion
+                            WHERE fp.rut = :rut
+                              AND fp.estado LIKE 'PENDIENTE'
+                              AND fp.resultado LIKE 'PENDIENTE'
+                              AND fp.tipo = 'PRUEBA'";
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(['rut' => $rutAlumno]);
                     $pruebas = $stmt->fetchall(PDO::FETCH_ASSOC);
@@ -198,6 +200,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $_SESSION['evaluado']['pruebas'][] = [
                                 'id_programada' => (int)$p['id'],
                                 'id_servicio'   => $idServicio,
+                                'id_agrupacion' => (int)($p['id_agrupacion'] ?? 0),
+                                'titulo_prueba' => (string)($p['titulo_prueba'] ?? ''),
                                 'servicio'      => $nombreServicio,
                                 'nsolicitud'    => $p['nsolicitud'] ?? null,
                                 'cuadrilla'     => $p['cuadrilla'] ?? null,

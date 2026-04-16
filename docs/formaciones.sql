@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion` (
   `fecha` date NOT NULL,
   `jornada` varchar(30) NOT NULL,
   `id_servicio` int(11) NOT NULL,
+  `id_agrupacion` int(11) DEFAULT NULL,
   `cuadrilla` int(11) NOT NULL,
   `empresa` int(11) DEFAULT NULL,
   `uo` int(11) DEFAULT NULL,
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS `ceo_formacion_programadas` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rut` varchar(15) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `id_servicio` int(11) NOT NULL,
+  `id_agrupacion` int(11) DEFAULT NULL,
   `tipo` enum('PRUEBA') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `cuadrilla` int(11) NOT NULL,
   `fecha_programacion` datetime DEFAULT current_timestamp(),
@@ -266,9 +268,13 @@ WHERE NOT EXISTS (SELECT 1 FROM `ceo_formacion_alternativas_preguntas` LIMIT 1);
 
 -- Ajustes para bases existentes
 ALTER TABLE `ceo_formacion_programadas`
+  ADD COLUMN `id_agrupacion` INT(11) NULL,
   ADD COLUMN `fecha_inicio` DATETIME NULL,
   ADD COLUMN `fecha_termino` DATETIME NULL,
   ADD COLUMN `cierre_modo` VARCHAR(20) NULL;
+
+ALTER TABLE `ceo_formacion`
+  ADD COLUMN `id_agrupacion` INT(11) NULL;
 
 ALTER TABLE `ceo_formacion_preguntas_servicios`
   ADD COLUMN `peso` INT NOT NULL DEFAULT 1,

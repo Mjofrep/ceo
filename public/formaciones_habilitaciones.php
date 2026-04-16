@@ -26,13 +26,30 @@ $empresas = $pdo->query("
     ORDER BY nombre
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+$agrupacionesRows = $pdo->query("
+    SELECT id, titulo, id_servicio
+    FROM ceo_formacion_agrupacion
+    ORDER BY id_servicio ASC, id ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$agrupacionesPorServicio = [];
+foreach ($agrupacionesRows as $agrupacionRow) {
+    $servicioId = (int)$agrupacionRow['id_servicio'];
+    if (!isset($agrupacionesPorServicio[$servicioId])) {
+        $agrupacionesPorServicio[$servicioId] = [];
+    }
+    $agrupacionesPorServicio[$servicioId][] = $agrupacionRow;
+}
+
 /* =========================================================
    HABILITACIONES (GRILLA)
 ========================================================= */
 $sql = "
 SELECT
     h.cuadrilla,
-     h.estado,
+    h.estado,
+    h.id_servicio,
+    h.id_agrupacion,
     h.empresa,
     ce.nombre AS empresa_nombre,
     cu.desc_uo AS uo,
@@ -134,6 +151,7 @@ body { background:#f7f9fc; }
           <tr>
             <th style="width:40px;"><input type="checkbox" id="chkAll"></th>
             <th>Cuadrilla</th>
+            <th>Prueba</th>
             <th>Empresa</th>
             <th>UO</th>
             <th>Servicio</th>
@@ -150,6 +168,8 @@ body { background:#f7f9fc; }
             ?>
             <tr
               data-cuadrilla="<?= (int)$r['cuadrilla'] ?>"
+              data-id-servicio="<?= (int)$r['id_servicio'] ?>"
+              data-id-agrupacion="<?= (int)($r['id_agrupacion'] ?? 0) ?>"
               data-empresa="<?= (int)$r['empresa'] ?>"
               data-uo="<?= (int)$r['uo_id'] ?>"
               data-fecha="<?= esc($r['fecha']) ?>"
@@ -165,7 +185,20 @@ body { background:#f7f9fc; }
                   C<?= (int)$r['cuadrilla'] ?>
                 </span>
               </td>
-            
+
+              <td style="min-width:260px;">
+                <select class="form-select form-select-sm sel-prueba" <?= $cerrado ? 'disabled' : '' ?>>
+                  <option value="">-- Seleccione prueba --</option>
+                  <?php foreach ($agrupacionesPorServicio[(int)$r['id_servicio']] ?? [] as $agrupacion): ?>
+                    <option
+                      value="<?= (int)$agrupacion['id'] ?>"
+                      <?= ((int)($r['id_agrupacion'] ?? 0) === (int)$agrupacion['id']) ? 'selected' : '' ?>>
+                      <?= esc((string)$agrupacion['id'] . ' - ' . trim(strip_tags((string)$agrupacion['titulo']))) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              </td>
+
               <td><?= esc($r['empresa_nombre']) ?></td>
               <td><?= esc($r['uo']) ?></td>
               <td><?= esc($r['servicio']) ?></td>
@@ -280,6 +313,42 @@ Saludos cordiales.</textarea>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
+  document.querySelectorAll('.sel-prueba').forEach(sel => {
+    sel.addEventListener('change', function () {
+      const tr = this.closest('tr');
+      const cuadrilla = tr?.dataset.cuadrilla || '';
+      const idAgrupacion = this.value;
+      const valorAnterior = tr?.dataset.idAgrupacion || '';
+
+      if (!cuadrilla) {
+        return;
+      }
+
+      fetch('ajax_formacion_asignar_prueba.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuadrilla: Number(cuadrilla),
+          id_agrupacion: idAgrupacion === '' ? 0 : Number(idAgrupacion)
+        })
+      })
+      .then(r => r.json())
+      .then(resp => {
+        if (!resp.ok) {
+          this.value = valorAnterior;
+          alert(resp.msg || 'No fue posible guardar la prueba asociada.');
+          return;
+        }
+
+        tr.dataset.idAgrupacion = idAgrupacion === '' ? '0' : String(idAgrupacion);
+      })
+      .catch(() => {
+        this.value = valorAnterior;
+        alert('Error de comunicación al guardar la prueba asociada.');
+      });
+    });
+  });
+
   // CHECK ALL
   document.getElementById('chkAll').addEventListener('change', function () {
     document.querySelectorAll('.chkFila').forEach(c => c.checked = this.checked);
@@ -312,6 +381,12 @@ function formatFecha(fechaISO) {
 
     if (filas.length === 0) {
       alert('Debe seleccionar al menos una cuadrilla.');
+      return;
+    }
+
+    const sinPrueba = filas.find(tr => !Number(tr.dataset.idAgrupacion || 0));
+    if (sinPrueba) {
+      alert('Todas las cuadrillas seleccionadas deben tener una prueba asociada.');
       return;
     }
 

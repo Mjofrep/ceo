@@ -30,10 +30,95 @@ try {
     if ($action === 'create') {
       $titulo = trim($_POST['titulo'] ?? '');
       $id_servicio = (int)($_POST['id_servicio'] ?? 0);
+      $id_agrupacion_base = (int)($_POST['id_agrupacion_base'] ?? 0);
       if ($titulo !== '' && $id_servicio > 0) {
+        $pdo->beginTransaction();
+
+        if ($id_agrupacion_base > 0) {
+          $stmtBase = $pdo->prepare("SELECT id, id_servicio FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
+          $stmtBase->execute([':id' => $id_agrupacion_base]);
+          $agrupacionBase = $stmtBase->fetch(PDO::FETCH_ASSOC);
+
+          if (!$agrupacionBase) {
+            throw new RuntimeException('La prueba base seleccionada no existe.');
+          }
+
+          if ((int)$agrupacionBase['id_servicio'] !== $id_servicio) {
+            throw new RuntimeException('La prueba base debe pertenecer al mismo servicio seleccionado.');
+          }
+        }
+
         $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio) VALUES (:titulo, :id_servicio)");
         $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio]);
-        $msg = "<div class='alert alert-success mt-3'>✅ Agrupación registrada correctamente.</div>";
+        $idNuevaAgrupacion = (int)$pdo->lastInsertId();
+
+        if ($id_agrupacion_base > 0) {
+          $stmtPreguntas = $pdo->prepare("
+            SELECT id, pregunta, id_servicio, imagen, estado, retropos, retroneg, areacomp, peso, tipo_pregunta, obligatoria
+            FROM ceo_formacion_preguntas_servicios
+            WHERE id_agrupacion = :id_agrupacion
+            ORDER BY id ASC
+          ");
+          $stmtPreguntas->execute([':id_agrupacion' => $id_agrupacion_base]);
+          $preguntasBase = $stmtPreguntas->fetchAll(PDO::FETCH_ASSOC);
+
+          $stmtInsertPregunta = $pdo->prepare("
+            INSERT INTO ceo_formacion_preguntas_servicios
+              (pregunta, id_servicio, imagen, estado, id_agrupacion, retropos, retroneg, areacomp, peso, tipo_pregunta, obligatoria)
+            VALUES
+              (:pregunta, :id_servicio, :imagen, :estado, :id_agrupacion, :retropos, :retroneg, :areacomp, :peso, :tipo_pregunta, :obligatoria)
+          ");
+
+          $stmtAlternativas = $pdo->prepare("
+            SELECT alternativa, correcta, estado, imagen
+            FROM ceo_formacion_alternativas_preguntas
+            WHERE id_pregunta = :id_pregunta
+            ORDER BY id ASC
+          ");
+
+          $stmtInsertAlternativa = $pdo->prepare("
+            INSERT INTO ceo_formacion_alternativas_preguntas
+              (alternativa, correcta, estado, id_pregunta, imagen)
+            VALUES
+              (:alternativa, :correcta, :estado, :id_pregunta, :imagen)
+          ");
+
+          foreach ($preguntasBase as $preguntaBase) {
+            $stmtInsertPregunta->execute([
+              ':pregunta' => $preguntaBase['pregunta'],
+              ':id_servicio' => $id_servicio,
+              ':imagen' => $preguntaBase['imagen'],
+              ':estado' => $preguntaBase['estado'],
+              ':id_agrupacion' => $idNuevaAgrupacion,
+              ':retropos' => $preguntaBase['retropos'],
+              ':retroneg' => $preguntaBase['retroneg'],
+              ':areacomp' => $preguntaBase['areacomp'],
+              ':peso' => $preguntaBase['peso'],
+              ':tipo_pregunta' => $preguntaBase['tipo_pregunta'],
+              ':obligatoria' => $preguntaBase['obligatoria']
+            ]);
+
+            $idNuevaPregunta = (int)$pdo->lastInsertId();
+
+            $stmtAlternativas->execute([':id_pregunta' => (int)$preguntaBase['id']]);
+            $alternativasBase = $stmtAlternativas->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($alternativasBase as $alternativaBase) {
+              $stmtInsertAlternativa->execute([
+                ':alternativa' => $alternativaBase['alternativa'],
+                ':correcta' => $alternativaBase['correcta'],
+                ':estado' => $alternativaBase['estado'],
+                ':id_pregunta' => $idNuevaPregunta,
+                ':imagen' => $alternativaBase['imagen']
+              ]);
+            }
+          }
+        }
+
+        $pdo->commit();
+        $msg = $id_agrupacion_base > 0
+          ? "<div class='alert alert-success mt-3'>✅ Agrupación registrada correctamente a partir de la prueba base seleccionada.</div>"
+          : "<div class='alert alert-success mt-3'>✅ Agrupación registrada correctamente.</div>";
       } else {
         $msg = "<div class='alert alert-warning mt-3'>⚠️ Complete los campos requeridos.</div>";
       }
@@ -60,6 +145,9 @@ try {
     }
   }
 } catch (Throwable $e) {
+  if ($pdo->inTransaction()) {
+    $pdo->rollBack();
+  }
   $msg = "<div class='alert alert-danger mt-3'>❌ Error: ".htmlspecialchars($e->getMessage())."</div>";
 }
 
@@ -124,10 +212,21 @@ body {background:#f7f9fc; font-size:0.9rem;}
         </div>
         <div class="col-md-6">
           <label class="form-label">Servicio Asociado</label>
-          <select name="id_servicio" class="form-select" required>
+          <select name="id_servicio" id="id_servicio_create" class="form-select" required>
             <option value="">-- Seleccione un servicio --</option>
             <?php foreach ($servicios as $s): ?>
               <option value="<?= $s['id'] ?>"><?= htmlspecialchars($s['servicio']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Prueba base</label>
+          <select name="id_agrupacion_base" id="id_agrupacion_base" class="form-select" disabled>
+            <option value="">Seleccione primero un servicio</option>
+            <?php foreach ($agrup as $a): ?>
+              <option value="<?= $a['id'] ?>" data-servicio="<?= $a['id_servicio'] ?>" data-template="1">
+                <?= htmlspecialchars($a['id'] . ' - ' . short_clean($a['titulo'])) ?>
+              </option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -312,12 +411,59 @@ document.querySelectorAll('.btn-del').forEach(btn => {
 
   // Asegura CKEDITOR del alta vuelque datos al enviar (redundante por robustez)
   const formCreate = document.getElementById('form-create');
+  const servicioCreate = document.getElementById('id_servicio_create');
+  const pruebaBaseCreate = document.getElementById('id_agrupacion_base');
+  const pruebaBaseTemplates = pruebaBaseCreate
+    ? Array.from(pruebaBaseCreate.querySelectorAll('option[data-template="1"]')).map(option => ({
+        value: option.value,
+        servicio: option.dataset.servicio || '',
+        text: option.textContent || ''
+      }))
+    : [];
+
+  function syncPruebaBaseOptions() {
+    if (!servicioCreate || !pruebaBaseCreate) return;
+
+    const servicioId = servicioCreate.value;
+    pruebaBaseCreate.innerHTML = '';
+
+    if (!servicioId) {
+      pruebaBaseCreate.disabled = true;
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Seleccione primero un servicio';
+      pruebaBaseCreate.appendChild(option);
+      return;
+    }
+
+    pruebaBaseCreate.disabled = false;
+
+    const opcionNinguna = document.createElement('option');
+    opcionNinguna.value = '0';
+    opcionNinguna.textContent = 'Ninguna';
+    pruebaBaseCreate.appendChild(opcionNinguna);
+
+    pruebaBaseTemplates
+      .filter(option => option.servicio === servicioId)
+      .forEach(option => {
+        const item = document.createElement('option');
+        item.value = option.value;
+        item.textContent = option.text;
+        pruebaBaseCreate.appendChild(item);
+      });
+  }
+
   if (formCreate){
     formCreate.addEventListener('submit', function(){
       if (window.CKEDITOR && CKEDITOR.instances.titulo) {
         CKEDITOR.instances.titulo.updateElement();
       }
     });
+  }
+
+  if (servicioCreate && pruebaBaseCreate) {
+    servicioCreate.addEventListener('change', syncPruebaBaseOptions);
+    syncPruebaBaseOptions();
   }
 
   // Instancia editor de edición al mostrar el modal (1 sola vez)

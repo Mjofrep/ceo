@@ -43,13 +43,15 @@ $rutAlumno  = trim($alumno['rut'] ?? '');
 if ($rutAlumno !== '') {
     $pdo = db();
     $stmt = $pdo->prepare("
-        SELECT id, id_servicio, cuadrilla, fecha_programacion, intento, resultado, estado
-        FROM ceo_formacion_programadas
-        WHERE rut = :rut
-          AND estado = 'PENDIENTE'
-          AND resultado = 'PENDIENTE'
-          AND tipo = 'PRUEBA'
-        ORDER BY fecha_programacion ASC, id ASC
+        SELECT fp.id, fp.id_servicio, fp.id_agrupacion, fp.cuadrilla, fp.fecha_programacion, fp.intento, fp.resultado, fp.estado,
+               a.titulo AS titulo_prueba
+        FROM ceo_formacion_programadas fp
+        LEFT JOIN ceo_formacion_agrupacion a ON a.id = fp.id_agrupacion
+        WHERE fp.rut = :rut
+          AND fp.estado = 'PENDIENTE'
+          AND fp.resultado = 'PENDIENTE'
+          AND fp.tipo = 'PRUEBA'
+        ORDER BY fp.fecha_programacion ASC, fp.id ASC
     ");
     $stmt->execute([':rut' => $rutAlumno]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -62,6 +64,8 @@ if ($rutAlumno !== '') {
             $pruebas[] = [
                 'id_programada' => (int)$row['id'],
                 'id_servicio'   => (int)$row['id_servicio'],
+                'id_agrupacion' => (int)($row['id_agrupacion'] ?? 0),
+                'titulo_prueba' => (string)($row['titulo_prueba'] ?? ''),
                 'servicio'      => $nombreServicio,
                 'nsolicitud'    => null,
                 'cuadrilla'     => $row['cuadrilla'] ?? null,
@@ -225,10 +229,11 @@ body{
                 <!-- Botón para iniciar prueba teórica -->
 <?php if (!empty($pruebas) && $rutAlumno !== ''): ?>
     <?php foreach ($pruebas as $p): ?>
-        <a href="formacion_iniciar_prueba.php?id_servicio=<?= urlencode((string)$p['id_servicio']) ?>&rut_alumno=<?= urlencode($rutAlumno) ?>&id_programada=<?= urlencode((string)$p['id_programada']) ?>&nsolicitud=<?= urlencode((string)($p['nsolicitud'] ?? '')) ?>"
+        <?php $tituloPrueba = trim((string)($p['titulo_prueba'] ?? '')); ?>
+        <a href="formacion_iniciar_prueba.php?id_servicio=<?= urlencode((string)$p['id_servicio']) ?>&rut_alumno=<?= urlencode($rutAlumno) ?>&id_programada=<?= urlencode((string)$p['id_programada']) ?>&id_agrupacion=<?= urlencode((string)($p['id_agrupacion'] ?? 0)) ?>&nsolicitud=<?= urlencode((string)($p['nsolicitud'] ?? '')) ?>"
            class="btn btn-primary menu-btn">
-           📝 Iniciar Prueba Teórica — <?= htmlspecialchars($p['servicio']) ?>
-        </a>
+           📝 Iniciar Prueba Teórica — <?= htmlspecialchars($tituloPrueba !== '' ? $tituloPrueba : $p['servicio']) ?>
+          </a>
     <?php endforeach; ?>
 <?php else: ?>
     <button type="button" class="btn btn-secondary menu-btn" disabled>
