@@ -34,8 +34,9 @@ try {
       if ($titulo !== '' && $id_servicio > 0) {
         $pdo->beginTransaction();
 
+        $agrupacionBase = null;
         if ($id_agrupacion_base > 0) {
-          $stmtBase = $pdo->prepare("SELECT id, id_servicio FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
+          $stmtBase = $pdo->prepare("SELECT id, id_servicio, tiempo, cantidad, total FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
           $stmtBase->execute([':id' => $id_agrupacion_base]);
           $agrupacionBase = $stmtBase->fetch(PDO::FETCH_ASSOC);
 
@@ -48,8 +49,19 @@ try {
           }
         }
 
-        $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio) VALUES (:titulo, :id_servicio)");
-        $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio]);
+        if ($agrupacionBase) {
+          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, tiempo, cantidad, total) VALUES (:titulo, :id_servicio, :tiempo, :cantidad, :total)");
+          $stmt->execute([
+            ':titulo' => $titulo,
+            ':id_servicio' => $id_servicio,
+            ':tiempo' => $agrupacionBase['tiempo'],
+            ':cantidad' => $agrupacionBase['cantidad'],
+            ':total' => $agrupacionBase['total'],
+          ]);
+        } else {
+          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio) VALUES (:titulo, :id_servicio)");
+          $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio]);
+        }
         $idNuevaAgrupacion = (int)$pdo->lastInsertId();
 
         if ($id_agrupacion_base > 0) {
