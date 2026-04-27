@@ -179,7 +179,16 @@ try {
         <a href="mapa_interactivo.php" target="_blank" class="btn btn-outline-success btn-sm" title="Abrir Mapa Interactivo">
           <i class="bi bi-map"></i>
         </a>
-        <div class="input-group" style="max-width:280px;">
+        <div class="input-group" style="max-width:420px;">
+          <select id="filtroBuscar" class="form-select form-select-sm" style="max-width:150px;">
+            <option value="general">General</option>
+            <option value="nsolicitud">N° Solicitud</option>
+            <option value="solicitante">Solicitante</option>
+            <option value="patio">Patio</option>
+            <option value="estado">Estado</option>
+            <option value="contratista">Contratista</option>
+            <option value="proceso">Proceso</option>
+          </select>
           <input type="text" id="buscar" class="form-control form-control-sm" placeholder="Buscar solicitud...">
           <span class="input-group-text"><i class="bi bi-search"></i></span>
         </div>
@@ -268,12 +277,52 @@ try {
   });
 
   // === Buscador ===
-  document.getElementById('buscar').addEventListener('keyup', function(){
-    const q = this.value.toLowerCase();
+  const inputBuscar = document.getElementById('buscar');
+  const filtroBuscar = document.getElementById('filtroBuscar');
+
+  function actualizarPlaceholder() {
+    const placeholders = {
+      general: 'Buscar solicitud...',
+      nsolicitud: 'Buscar por N° Solicitud...',
+      solicitante: 'Buscar por solicitante...',
+      patio: 'Buscar por patio...',
+      estado: 'Buscar por estado...',
+      contratista: 'Buscar por contratista...',
+      proceso: 'Buscar por proceso...'
+    };
+    inputBuscar.placeholder = placeholders[filtroBuscar.value] || placeholders.general;
+  }
+
+  function obtenerTextoBusqueda(cells, filtro) {
+    const mapa = {
+      nsolicitud: [1],
+      solicitante: [2],
+      patio: [3],
+      estado: [7],
+      contratista: [8],
+      proceso: [9],
+      general: [1, 2, 3, 7, 8, 9]
+    };
+    const indices = mapa[filtro] || mapa.general;
+    return indices.map(idx => cells[idx]?.textContent || '').join(' ').toLowerCase();
+  }
+
+  function aplicarFiltroBusqueda(){
+    const q = inputBuscar.value.toLowerCase();
+    const filtro = filtroBuscar.value;
     document.querySelectorAll('#tablaSolicitudes tbody tr').forEach(tr=>{
-      tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+      const cells = tr.querySelectorAll('td');
+      const textoBusqueda = obtenerTextoBusqueda(cells, filtro);
+      tr.style.display = textoBusqueda.includes(q) ? '' : 'none';
     });
+  }
+
+  inputBuscar.addEventListener('keyup', aplicarFiltroBusqueda);
+  filtroBuscar.addEventListener('change', () => {
+    actualizarPlaceholder();
+    aplicarFiltroBusqueda();
   });
+  actualizarPlaceholder();
 
   // === Acciones con íconos ===
   document.getElementById('btnNuevaSolicitud').onclick = () => {

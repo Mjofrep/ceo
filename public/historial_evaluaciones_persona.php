@@ -89,6 +89,10 @@ if ($rut !== '') {
 body { background:#f7f9fc; }
 .topbar { background:#fff; border-bottom:1px solid #e3e6ea; }
 .table thead th { background:#eaf2fb; }
+.search-feedback { font-size:.82rem; color:#dc3545; margin-top:.35rem; display:none; }
+.search-results-box { display:none; }
+.search-results-box .table td,
+.search-results-box .table th { vertical-align:middle; }
 </style>
 </head>
 
@@ -129,16 +133,22 @@ body { background:#f7f9fc; }
 
 <div class="card shadow-sm mb-3">
   <div class="card-body">
-    <form class="row g-2">
-      <div class="col-md-3">
-        <input type="text" name="rut" value="<?= esc($rut) ?>" class="form-control" placeholder="RUT persona" required>
+    <form class="row g-2" id="formBusquedaHistorialEvaluaciones" autocomplete="off">
+      <div class="col-md-5">
+        <input type="hidden" name="rut" id="rutSeleccionadoEvaluaciones" value="<?= esc($rut) ?>">
+        <input type="text" id="buscadorAlumnoEvaluaciones" value="<?= esc($rut) ?>" class="form-control" placeholder="Buscar alumno por RUT, nombre o apellido" required>
+        <div id="feedbackAlumnoEvaluaciones" class="search-feedback">Seleccione un alumno de la lista.</div>
       </div>
-      <div class="col-md-2">
-        <button class="btn btn-primary">
-          <i class="bi bi-search"></i> Buscar
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-primary" type="button" id="btnBuscarAlumnoEvaluaciones">
+          <i class="bi bi-search"></i> Buscar coincidencias
+        </button>
+        <button class="btn btn-primary" type="submit">
+          <i class="bi bi-journal-text"></i> Ver historial
         </button>
       </div>
     </form>
+    <div id="resultadosAlumnoEvaluacionesBox" class="search-results-box mt-3"></div>
   </div>
 </div>
 
@@ -146,39 +156,165 @@ body { background:#f7f9fc; }
 <div class="card shadow-sm">
   <div class="card-body">
     <div class="table-responsive">
-      <table class="table table-sm table-hover align-middle">
-        <thead class="text-center">
-          <tr>
-            <th>Tipo</th>
-            <th>Servicio</th>
-            <th>Fecha</th>
-            <th>Resultado</th>
-            <th>Nota</th>
-            <th>Empresa</th>
-            <th>Cargo</th>
-            <th>Evaluador</th>
-          </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($rows as $r): ?>
-          <tr>
-            <td><?= esc($r['tipo_evaluacion']) ?></td>
-            <td><?= esc($r['servicio']) ?></td>
-            <td><?= esc($r['fecha_hora']) ?></td>
-            <td><?= esc($r['resultado_mostrado']) ?></td>
-            <td><?= esc($r['nota_mostrada']) ?></td>
-            <td><?= esc($r['empresa']) ?></td>
-            <td><?= esc($r['cargo']) ?></td>
-            <td><?= esc($r['evaluador']) ?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
+      <?php if (empty($rows)): ?>
+        <div class="text-muted">No hay historial de evaluaciones para este RUT.</div>
+      <?php else: ?>
+        <table class="table table-sm table-hover align-middle">
+          <thead class="text-center">
+            <tr>
+              <th>Tipo</th>
+              <th>Servicio</th>
+              <th>Fecha</th>
+              <th>Resultado</th>
+              <th>Nota</th>
+              <th>Empresa</th>
+              <th>Cargo</th>
+              <th>Evaluador</th>
+            </tr>
+          </thead>
+          <tbody>
+          <?php foreach ($rows as $r): ?>
+            <tr>
+              <td><?= esc($r['tipo_evaluacion']) ?></td>
+              <td><?= esc($r['servicio']) ?></td>
+              <td><?= esc($r['fecha_hora']) ?></td>
+              <td><?= esc($r['resultado_mostrado']) ?></td>
+              <td><?= esc($r['nota_mostrada']) ?></td>
+              <td><?= esc($r['empresa']) ?></td>
+              <td><?= esc($r['cargo']) ?></td>
+              <td><?= esc($r['evaluador']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
     </div>
   </div>
 </div>
 <?php endif; ?>
 
 </div>
+<script>
+(() => {
+  const form = document.getElementById('formBusquedaHistorialEvaluaciones');
+  const input = document.getElementById('buscadorAlumnoEvaluaciones');
+  const hidden = document.getElementById('rutSeleccionadoEvaluaciones');
+  const btnBuscar = document.getElementById('btnBuscarAlumnoEvaluaciones');
+  const resultsBox = document.getElementById('resultadosAlumnoEvaluacionesBox');
+  const feedback = document.getElementById('feedbackAlumnoEvaluaciones');
+  let selectedRut = hidden.value.trim();
+
+  function hideResults() {
+    resultsBox.style.display = 'none';
+    resultsBox.innerHTML = '';
+  }
+
+  function hideFeedback() {
+    feedback.style.display = 'none';
+  }
+
+  function showFeedback(message) {
+    feedback.textContent = message;
+    feedback.style.display = 'block';
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function renderItems(items) {
+    if (!items.length) {
+      resultsBox.innerHTML = '<div class="alert alert-light border mb-0">No se encontraron alumnos.</div>';
+      resultsBox.style.display = 'block';
+      return;
+    }
+
+    let html = '';
+    html += '<div class="small text-muted mb-2">Se encontraron ' + items.length + ' resultado(s).</div>';
+    html += '<div class="table-responsive">';
+    html += '<table class="table table-sm table-hover align-middle mb-0">';
+    html += '<thead class="table-light"><tr>';
+    html += '<th>RUT</th><th>Nombre</th><th>Apellido</th><th>Estado</th><th></th>';
+    html += '</tr></thead><tbody>';
+    items.forEach((item) => {
+      const estadoClass = item.tiene_historial ? 'success' : 'secondary';
+      html += '<tr>';
+      html += '<td>' + escapeHtml(item.rut) + '</td>';
+      html += '<td>' + escapeHtml(item.nombre || '') + '</td>';
+      html += '<td>' + escapeHtml(item.apellido || '') + '</td>';
+      html += '<td><span class="badge text-bg-' + estadoClass + '">' + escapeHtml(item.estado) + '</span></td>';
+      html += '<td class="text-end"><button type="button" class="btn btn-primary btn-sm btn-select-resultado" data-rut="' + escapeHtml(item.rut) + '" data-label="' + escapeHtml(item.label) + '">Seleccionar</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    resultsBox.innerHTML = html;
+    resultsBox.style.display = 'block';
+
+    resultsBox.querySelectorAll('.btn-select-resultado').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectedRut = btn.dataset.rut || '';
+        hidden.value = selectedRut;
+        input.value = btn.dataset.label || selectedRut;
+        hideFeedback();
+        form.requestSubmit();
+      });
+    });
+  }
+
+  async function search() {
+    const q = input.value.trim();
+    if (q.length < 2) {
+      hideResults();
+      showFeedback('Ingrese al menos 2 caracteres para buscar.');
+      return;
+    }
+
+    hideFeedback();
+    resultsBox.innerHTML = '<div class="text-muted">Buscando alumnos...</div>';
+    resultsBox.style.display = 'block';
+
+    try {
+      const resp = await fetch(`ajax_buscar_alumno_historial.php?tipo=evaluaciones&q=${encodeURIComponent(q)}`);
+      const data = await resp.json();
+      if (!data.ok) {
+        hideResults();
+        showFeedback('No se pudieron cargar las coincidencias.');
+        return;
+      }
+      renderItems(data.items || []);
+    } catch (err) {
+      hideResults();
+      showFeedback('No se pudieron cargar las coincidencias.');
+    }
+  }
+
+  input.addEventListener('input', () => {
+    selectedRut = '';
+    hidden.value = '';
+    hideFeedback();
+    hideResults();
+  });
+
+  btnBuscar.addEventListener('click', search);
+
+  form.addEventListener('submit', (e) => {
+    const q = input.value.trim();
+    if (!q) {
+      e.preventDefault();
+      showFeedback('Ingrese un RUT, nombre o apellido.');
+      return;
+    }
+    if (!selectedRut || !hidden.value || hidden.value !== selectedRut) {
+      e.preventDefault();
+      showFeedback('Seleccione un alumno de la lista.');
+    }
+  });
+})();
+</script>
 </body>
 </html>

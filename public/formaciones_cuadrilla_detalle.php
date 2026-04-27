@@ -12,6 +12,7 @@ if (empty($_SESSION['auth'])) {
 }
 
 $pdo = db();
+$esAdmin = ((int)($_SESSION['auth']['id_rol'] ?? 0) === 1);
 
 $id = (int)($_GET['id'] ?? 0);
 $cuadrilla = (int)($_GET['cuadrilla'] ?? 0);
@@ -244,19 +245,33 @@ body {background:#f7f9fc;}
               <td><?= esc((string)($p['cierre_modo'] ?? '')) ?></td>
               <td><?= esc($estado) ?></td>
               <td>
-                <button
-                    type="button"
-                    class="btn btn-outline-primary btn-sm btn-area-detalle"
-                    data-bs-toggle="modal"
-                    data-bs-target="#modalAreas"
-                    data-rut="<?= esc((string)$p['rut']) ?>"
-                    data-nombre="<?= esc((string)$p['nombre']) ?>"
-                    data-apellidos="<?= esc((string)$p['apellidos']) ?>"
-                    data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
-                    data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
-                    title="Ver detalle por areas">
-                  <i class="bi bi-pie-chart"></i>
-                </button>
+                <div class="d-flex gap-1">
+                  <button
+                      type="button"
+                      class="btn btn-outline-primary btn-sm btn-area-detalle"
+                      data-bs-toggle="modal"
+                      data-bs-target="#modalAreas"
+                      data-rut="<?= esc((string)$p['rut']) ?>"
+                      data-nombre="<?= esc((string)$p['nombre']) ?>"
+                      data-apellidos="<?= esc((string)$p['apellidos']) ?>"
+                      data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
+                      data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
+                      title="Ver detalle por areas">
+                    <i class="bi bi-pie-chart"></i>
+                  </button>
+                  <?php if ($esAdmin && $estado !== 'PENDIENTE'): ?>
+                    <button
+                        type="button"
+                        class="btn btn-outline-danger btn-sm btn-reiniciar-prueba"
+                        data-rut="<?= esc((string)$p['rut']) ?>"
+                        data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
+                        data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
+                        data-nombre="<?= esc(trim((string)$p['nombre'] . ' ' . (string)$p['apellidos'])) ?>"
+                        title="Eliminar prueba y dejar pendiente">
+                      <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                  <?php endif; ?>
+                </div>
               </td>
             </tr>
           <?php endforeach; ?>
@@ -380,6 +395,51 @@ body {background:#f7f9fc;}
         .catch(() => {
           modalBody.innerHTML = '<div class="text-danger">No se pudo cargar el detalle.</div>';
         });
+    });
+  });
+
+  document.querySelectorAll('.btn-reiniciar-prueba').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rut = btn.getAttribute('data-rut') || '';
+      const cuadrilla = btn.getAttribute('data-cuadrilla') || '';
+      const idServicio = btn.getAttribute('data-id-servicio') || '';
+      const nombre = btn.getAttribute('data-nombre') || rut;
+
+      const ok = window.confirm(
+        'Se eliminará completamente el intento anterior y sus respuestas para ' + nombre + '.\n\n' +
+        'El alumno quedará pendiente para rendir nuevamente.\n\n¿Continuar?'
+      );
+      if (!ok) {
+        return;
+      }
+
+      btn.disabled = true;
+
+      try {
+        const resp = await fetch('ajax_formacion_reiniciar_prueba.php', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            rut: rut,
+            cuadrilla: Number(cuadrilla),
+            id_servicio: Number(idServicio)
+          })
+        });
+
+        const data = await resp.json();
+        if (!data || !data.ok) {
+          const msg = data && data.msg ? data.msg : 'No se pudo reiniciar la prueba.';
+          window.alert(msg);
+          btn.disabled = false;
+          return;
+        }
+
+        window.alert(data.msg || 'Prueba reiniciada correctamente.');
+        window.location.reload();
+      } catch (err) {
+        window.alert('No se pudo reiniciar la prueba.');
+        btn.disabled = false;
+      }
     });
   });
 })();
