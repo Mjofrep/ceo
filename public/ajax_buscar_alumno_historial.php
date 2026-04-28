@@ -71,30 +71,52 @@ try {
     } elseif ($tipo === 'evaluaciones') {
         $stmt = $pdo->prepare("
             SELECT
-                c.rut,
-                c.nombre,
-                TRIM(COALESCE(c.apellidos, '')) AS apellidos,
-                CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM vw_ceo_historial_evaluaciones_persona v
-                        WHERE v.rut = c.rut
-                    ) THEN 1 ELSE 0
-                END AS tiene_historial
-            FROM ceo_contratistas c
+                base.rut,
+                MAX(base.nombre) AS nombre,
+                MAX(base.apellidos) AS apellidos,
+                MAX(base.tiene_historial) AS tiene_historial
+            FROM (
+                SELECT
+                    c.rut,
+                    c.nombre,
+                    TRIM(COALESCE(c.apellidos, '')) AS apellidos,
+                    1 AS tiene_historial
+                FROM ceo_contratistas c
+
+                UNION ALL
+
+                SELECT
+                    rpi.rut,
+                    COALESCE(c2.nombre, '') AS nombre,
+                    TRIM(COALESCE(c2.apellidos, '')) AS apellidos,
+                    1 AS tiene_historial
+                FROM ceo_resultado_prueba_intento rpi
+                LEFT JOIN ceo_contratistas c2 ON c2.rut = rpi.rut
+
+                UNION ALL
+
+                SELECT
+                    et.rut,
+                    COALESCE(c3.nombre, '') AS nombre,
+                    TRIM(COALESCE(c3.apellidos, '')) AS apellidos,
+                    1 AS tiene_historial
+                FROM ceo_evaluacion_terreno et
+                LEFT JOIN ceo_contratistas c3 ON c3.rut = et.rut
+            ) base
             WHERE (
-                UPPER(c.rut) LIKE :like_rut
-                OR UPPER(c.nombre) LIKE :like_nombre
-                OR UPPER(c.apellidos) LIKE :like_apellidos
-                OR UPPER(CONCAT(c.nombre, ' ', c.apellidos)) LIKE :like_nombre_completo
+                UPPER(base.rut) LIKE :like_rut
+                OR UPPER(base.nombre) LIKE :like_nombre
+                OR UPPER(base.apellidos) LIKE :like_apellidos
+                OR UPPER(CONCAT(base.nombre, ' ', base.apellidos)) LIKE :like_nombre_completo
             )
+            GROUP BY base.rut
             ORDER BY
-                CASE WHEN UPPER(c.rut) = :exacto_rut THEN 0 ELSE 1 END,
-                CASE WHEN UPPER(c.rut) LIKE :prefijo_rut THEN 0 ELSE 1 END,
+                CASE WHEN UPPER(base.rut) = :exacto_rut THEN 0 ELSE 1 END,
+                CASE WHEN UPPER(base.rut) LIKE :prefijo_rut THEN 0 ELSE 1 END,
                 tiene_historial DESC,
-                c.nombre ASC,
-                c.apellidos ASC,
-                c.rut ASC
+                nombre ASC,
+                apellidos ASC,
+                base.rut ASC
             LIMIT 15
         ");
         $stmt->execute([

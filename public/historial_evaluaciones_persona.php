@@ -22,9 +22,20 @@ $idEmpresaUser = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 $esContratista = ($rolUsuario === 'contratista');
 
 $rut = trim($_GET['rut'] ?? '');
+$rutNormalizado = preg_replace('/\s+/', '', $rut);
 $rows = [];
+$persona = null;
 
-if ($rut !== '') {
+if ($rutNormalizado !== '') {
+
+    $stmtPersona = $pdo->prepare("
+        SELECT rut, nombre, apellidos
+        FROM ceo_contratistas
+        WHERE rut = :rut
+        LIMIT 1
+    ");
+    $stmtPersona->execute([':rut' => $rutNormalizado]);
+    $persona = $stmtPersona->fetch(PDO::FETCH_ASSOC) ?: null;
 
     /* 🔐 Seguridad: contratista solo ve lo propio */
     if ($esContratista) {
@@ -34,7 +45,7 @@ if ($rut !== '') {
             WHERE rut = :rut AND id_empresa = :empresa
         ");
         $stmt->execute([
-            ':rut'     => $rut,
+            ':rut'     => $rutNormalizado,
             ':empresa' => $idEmpresaUser
         ]);
         if (!$stmt->fetch()) {
@@ -43,35 +54,64 @@ if ($rut !== '') {
     }
 
  $stmt = $pdo->prepare("
-    SELECT 
-        tipo_evaluacion,
-        servicio,
-        fecha as fecha_hora,
+    SELECT *
+    FROM (
+        SELECT
+            'TEORICA' AS tipo_evaluacion,
+            sp.servicio AS servicio,
+            CONCAT(rpi.fecha_rendicion, ' ', rpi.hora_rendicion) AS fecha_hora,
+            CASE
+                WHEN rpi.puntaje_total >= 80 THEN 'APROBADO'
+                ELSE 'REPROBADO'
+            END AS resultado_mostrado,
+            rpi.notafinal AS nota_mostrada,
+            emp.nombre AS empresa,
+            cargo.cargo AS cargo,
+            CASE
+                WHEN rpi.id_evaluador IS NULL THEN 'Carga histórica'
+                ELSE TRIM(CONCAT(COALESCE(usr.nombres, ''), ' ', COALESCE(usr.apellidos, '')))
+            END AS evaluador,
+            uo.desc_uo AS uo,
+            '' AS region
+        FROM ceo_resultado_prueba_intento rpi
+        INNER JOIN ceo_servicios_pruebas sp ON sp.id = rpi.id_servicio
+        LEFT JOIN ceo_contratistas ct ON ct.rut = rpi.rut
+        LEFT JOIN ceo_empresas emp ON emp.id = ct.id_empresa
+        LEFT JOIN ceo_cargo_contratistas cargo ON cargo.id = ct.id_cargo
+        LEFT JOIN ceo_uo uo ON uo.id = ct.uo
+        LEFT JOIN ceo_usuarios usr ON usr.id = rpi.id_evaluador
+        WHERE rpi.rut = :rut_teorica
 
-        CASE 
-            WHEN tipo_evaluacion COLLATE utf8mb4_general_ci = 'TEORICA' THEN resultado
-            WHEN tipo_evaluacion COLLATE utf8mb4_general_ci = 'PRACTICA' THEN 
-                CASE 
-                    WHEN resultado >= 70 THEN 'APROBADO'
-                    ELSE 'REPROBADO'
-                END
-        END AS resultado_mostrado,
+        UNION ALL
 
-        CASE 
-            WHEN tipo_evaluacion COLLATE utf8mb4_general_ci = 'TEORICA' THEN notafinal
-            WHEN tipo_evaluacion COLLATE utf8mb4_general_ci = 'PRACTICA' THEN resultado
-        END AS nota_mostrada,
-
-        empresa,
-        cargo,
-        evaluador,
-        uo,
-        region
-    FROM vw_ceo_historial_evaluaciones_persona
-    WHERE rut = :rut
+        SELECT
+            'PRACTICA' AS tipo_evaluacion,
+            sp2.servicio AS servicio,
+            et.fecha_evaluacion AS fecha_hora,
+            CASE
+                WHEN CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) >= 70 THEN 'APROBADO'
+                ELSE 'REPROBADO'
+            END AS resultado_mostrado,
+            CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) AS nota_mostrada,
+            emp2.nombre AS empresa,
+            COALESCE(et.cargo, cargo2.cargo) AS cargo,
+            COALESCE(et.evaluador, '') AS evaluador,
+            uo2.desc_uo AS uo,
+            '' AS region
+        FROM ceo_evaluacion_terreno et
+        INNER JOIN ceo_servicios_pruebas sp2 ON sp2.id = et.id_servicio
+        LEFT JOIN ceo_contratistas ct2 ON ct2.rut = et.rut
+        LEFT JOIN ceo_empresas emp2 ON emp2.id = ct2.id_empresa
+        LEFT JOIN ceo_cargo_contratistas cargo2 ON cargo2.id = ct2.id_cargo
+        LEFT JOIN ceo_uo uo2 ON uo2.id = ct2.uo
+        WHERE et.rut = :rut_terreno
+    ) historial
     ORDER BY fecha_hora DESC
-");
-    $stmt->execute([':rut' => $rut]);
+ ");
+    $stmt->execute([
+        ':rut_teorica' => $rutNormalizado,
+        ':rut_terreno' => $rutNormalizado,
+    ]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 ?>
@@ -155,6 +195,15 @@ body { background:#f7f9fc; }
 <?php if ($rut): ?>
 <div class="card shadow-sm">
   <div class="card-body">
+    <div class="mb-3">
+      <h6 class="text-primary mb-2"><i class="bi bi-person me-2"></i>Persona consultada</h6>
+      <div><strong>RUT:</strong> <?= esc($rutNormalizado) ?></div>
+      <?php if ($persona): ?>
+        <div><strong>Nombre:</strong> <?= esc(trim((string)$persona['nombre'] . ' ' . (string)$persona['apellidos'])) ?></div>
+      <?php else: ?>
+        <div class="text-muted">Nombre no disponible en ceo_contratistas.</div>
+      <?php endif; ?>
+    </div>
     <div class="table-responsive">
       <?php if (empty($rows)): ?>
         <div class="text-muted">No hay historial de evaluaciones para este RUT.</div>
@@ -203,6 +252,10 @@ body { background:#f7f9fc; }
   const resultsBox = document.getElementById('resultadosAlumnoEvaluacionesBox');
   const feedback = document.getElementById('feedbackAlumnoEvaluaciones');
   let selectedRut = hidden.value.trim();
+
+  function normalizarRut(value) {
+    return String(value || '').replace(/\s+/g, '');
+  }
 
   function hideResults() {
     resultsBox.style.display = 'none';
@@ -257,7 +310,7 @@ body { background:#f7f9fc; }
 
     resultsBox.querySelectorAll('.btn-select-resultado').forEach((btn) => {
       btn.addEventListener('click', () => {
-        selectedRut = btn.dataset.rut || '';
+        selectedRut = normalizarRut(btn.dataset.rut || '');
         hidden.value = selectedRut;
         input.value = btn.dataset.label || selectedRut;
         hideFeedback();
@@ -304,9 +357,16 @@ body { background:#f7f9fc; }
 
   form.addEventListener('submit', (e) => {
     const q = input.value.trim();
+    const qNormalizado = normalizarRut(q);
     if (!q) {
       e.preventDefault();
       showFeedback('Ingrese un RUT, nombre o apellido.');
+      return;
+    }
+    if (/^\d{7,8}-[\dkK]$/.test(qNormalizado)) {
+      selectedRut = qNormalizado.toUpperCase();
+      hidden.value = selectedRut;
+      hideFeedback();
       return;
     }
     if (!selectedRut || !hidden.value || hidden.value !== selectedRut) {

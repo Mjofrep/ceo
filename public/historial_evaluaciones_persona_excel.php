@@ -12,15 +12,68 @@ if (empty($_SESSION['auth'])) {
 $pdo = db();
 
 $rut = trim($_GET['rut'] ?? '');
-if ($rut === '') exit('RUT requerido');
+$rutNormalizado = preg_replace('/\s+/', '', $rut);
+if ($rutNormalizado === '') exit('RUT requerido');
 
 $stmt = $pdo->prepare("
     SELECT *
-    FROM vw_ceo_historial_evaluaciones_persona
-    WHERE rut = :rut
+    FROM (
+        SELECT
+            'TEORICA' AS tipo_evaluacion,
+            sp.servicio AS servicio,
+            CONCAT(rpi.fecha_rendicion, ' ', rpi.hora_rendicion) AS fecha_hora,
+            CASE
+                WHEN rpi.puntaje_total >= 80 THEN 'APROBADO'
+                ELSE 'REPROBADO'
+            END AS resultado_mostrado,
+            rpi.notafinal AS nota_mostrada,
+            emp.nombre AS empresa,
+            cargo.cargo AS cargo,
+            CASE
+                WHEN rpi.id_evaluador IS NULL THEN 'Carga histórica'
+                ELSE TRIM(CONCAT(COALESCE(usr.nombres, ''), ' ', COALESCE(usr.apellidos, '')))
+            END AS evaluador,
+            uo.desc_uo AS uo,
+            '' AS region
+        FROM ceo_resultado_prueba_intento rpi
+        INNER JOIN ceo_servicios_pruebas sp ON sp.id = rpi.id_servicio
+        LEFT JOIN ceo_contratistas ct ON ct.rut = rpi.rut
+        LEFT JOIN ceo_empresas emp ON emp.id = ct.id_empresa
+        LEFT JOIN ceo_cargo_contratistas cargo ON cargo.id = ct.id_cargo
+        LEFT JOIN ceo_uo uo ON uo.id = ct.uo
+        LEFT JOIN ceo_usuarios usr ON usr.id = rpi.id_evaluador
+        WHERE rpi.rut = :rut_teorica
+
+        UNION ALL
+
+        SELECT
+            'PRACTICA' AS tipo_evaluacion,
+            sp2.servicio AS servicio,
+            et.fecha_evaluacion AS fecha_hora,
+            CASE
+                WHEN CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) >= 70 THEN 'APROBADO'
+                ELSE 'REPROBADO'
+            END AS resultado_mostrado,
+            CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) AS nota_mostrada,
+            emp2.nombre AS empresa,
+            COALESCE(et.cargo, cargo2.cargo) AS cargo,
+            COALESCE(et.evaluador, '') AS evaluador,
+            uo2.desc_uo AS uo,
+            '' AS region
+        FROM ceo_evaluacion_terreno et
+        INNER JOIN ceo_servicios_pruebas sp2 ON sp2.id = et.id_servicio
+        LEFT JOIN ceo_contratistas ct2 ON ct2.rut = et.rut
+        LEFT JOIN ceo_empresas emp2 ON emp2.id = ct2.id_empresa
+        LEFT JOIN ceo_cargo_contratistas cargo2 ON cargo2.id = ct2.id_cargo
+        LEFT JOIN ceo_uo uo2 ON uo2.id = ct2.uo
+        WHERE et.rut = :rut_terreno
+    ) historial
     ORDER BY fecha_hora DESC
 ");
-$stmt->execute([':rut' => $rut]);
+$stmt->execute([
+    ':rut_teorica' => $rutNormalizado,
+    ':rut_terreno' => $rutNormalizado,
+]);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 header('Content-Type: application/vnd.ms-excel');
@@ -38,8 +91,8 @@ foreach ($rows as $r) {
     <td>{$r['tipo_evaluacion']}</td>
     <td>{$r['servicio']}</td>
     <td>{$r['fecha_hora']}</td>
-    <td>{$r['resultado']}</td>
-    <td>{$r['notafinal']}</td>
+    <td>{$r['resultado_mostrado']}</td>
+    <td>{$r['nota_mostrada']}</td>
     <td>{$r['empresa']}</td>
     <td>{$r['cargo']}</td>
     <td>{$r['evaluador']}</td>
