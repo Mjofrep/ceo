@@ -28,8 +28,17 @@ $pdo = db();
    1) PARTICIPANTES POR CUADRILLA
    ======================================================== */
 $sqlPart = "
-SELECT 
+SELECT
     p.id_cuadrilla n_cuadrilla,
+    (
+        SELECT GROUP_CONCAT(DISTINCT ph.numero_proceso ORDER BY ph.numero_proceso SEPARATOR ', ')
+        FROM ceo_evaluaciones_programadas ep
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
+        WHERE ep.rut = p.rut
+          AND ep.cuadrilla = p.id_cuadrilla
+          AND ep.id_servicio = cs.id_servicio
+          AND ep.estado <> 'ANULADA'
+    ) AS numeros_proceso,
     1 AS reevaluacion,
     p.rut,
     p.nombre,
@@ -330,6 +339,7 @@ function filtrarParticipantes() {
             <thead>
               <tr class="text-center">
                 <th>N° Cuadrilla</th>
+                <th>N° Proceso</th>
                 <th>Reeval.</th>
                 <th>RUT</th>
                 <th>Nombre</th>
@@ -344,6 +354,7 @@ function filtrarParticipantes() {
             <?php foreach($participantes as $p): ?>
               <tr>
                 <td><?= $p['n_cuadrilla'] ?></td>
+                <td><?= esc($p['numeros_proceso'] ?: '') ?></td>
                 <td><?= $p['reevaluacion'] ?></td>
                 <td><?= $p['rut'] ?></td>
                 <td><?= $p['nombre'] ?></td>
@@ -655,7 +666,8 @@ function filtrarParticipantes() {
           <table class="table table-sm table-hover align-middle">
             <thead class="table-light">
               <tr>
-                <th style="width:80px;">N°</th>
+                <th style="width:90px;">N° Cuadrilla</th>
+                <th style="width:100px;">N° Proceso</th>
                 <th>Empresa</th>
                 <th style="width:120px;">Participantes</th>
                 <th style="width:160px;">Acciones</th>
@@ -899,7 +911,7 @@ document.addEventListener('click', function (e) {
 
     // Limpiar tabla
     const tbody = document.getElementById('listaCuadrillasCelda');
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Cargando...</td></tr>';
 
     // Llamar a backend
     fetch(`../public/get_cuadrillas_celda.php?fecha=${encodeURIComponent(fecha)}&jornada=${encodeURIComponent(jornada)}&servicio=${encodeURIComponent(servicio)}`)
@@ -908,12 +920,12 @@ document.addEventListener('click', function (e) {
             tbody.innerHTML = '';
 
             if (!data.ok) {
-                tbody.innerHTML = `<tr><td colspan="4" class="text-danger text-center">${data.msg}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="text-danger text-center">${data.msg}</td></tr>`;
                 return;
             }
 
             if (!data.cuadrillas || data.cuadrillas.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Sin cuadrillas aún.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Sin cuadrillas aún.</td></tr>';
                 return;
             }
 
@@ -921,6 +933,7 @@ document.addEventListener('click', function (e) {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td><span class="badge bg-success">C${c.cuadrilla}</span></td>
+                    <td>${c.numeros_proceso || 'Sin proceso'}</td>
                     <td>${c.nombre_empresa || '—'}</td>
                     <td>${c.total_participantes || 0}</td>
                     <td>
@@ -936,7 +949,7 @@ document.addEventListener('click', function (e) {
         })
         .catch(err => {
             console.error(err);
-            tbody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">Error al cargar cuadrillas.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-danger text-center">Error al cargar cuadrillas.</td></tr>';
         });
 
     const modal = new bootstrap.Modal(document.getElementById('modalCuadrillasCelda'));

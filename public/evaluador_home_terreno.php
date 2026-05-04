@@ -30,9 +30,10 @@ try {
     $pdo = db();
 
     $sql = "
-SELECT 
+SELECT
     A.id,
     A.cuadrilla,
+    ph.numero_proceso,
     B.fecha,
     A.id_servicio,
     C.servicio,
@@ -45,8 +46,10 @@ INNER JOIN ceo_habilitacion B
     ON A.cuadrilla = B.cuadrilla
 INNER JOIN ceo_servicios_pruebas C 
     ON C.id = A.id_servicio
-INNER JOIN ceo_empresas D 
+INNER JOIN ceo_empresas D
     ON D.id = B.empresa
+LEFT JOIN ceo_proceso_habilitacion ph
+    ON ph.id = A.id_proceso_habilitacion
 WHERE A.tipo = 'TERRENO'
   AND A.estado = 'PENDIENTE';
     ";
@@ -124,6 +127,7 @@ body{
                 <th>Sel.</th>
                 <th>ID Eval.</th>
                 <th>N° Proceso</th>
+                <th>N° Cuadrilla</th>
                 <th>Fecha</th>
                 <th>Servicio</th>
                 <th>Nombre</th>
@@ -136,6 +140,7 @@ body{
                         <input type="checkbox" name="id_evaluacion[]" value="<?= (int)$s['id'] ?>">
                     </td>
                     <td><?= (int)$s['id'] ?></td>
+                    <td><?= htmlspecialchars($s['numero_proceso'] !== null ? (string)$s['numero_proceso'] : 'Sin proceso') ?></td>
                     <td><?= htmlspecialchars($s['cuadrilla']) ?></td>
                     <td><?= date('d/m/Y', strtotime($s['fecha'])) ?></td>
                     <td><?= htmlspecialchars($s['servicio']) ?></td>

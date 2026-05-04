@@ -39,6 +39,8 @@ $nombreAlumno = trim($alumno['nombre'] ?? '');
 //$idServicio = isset($alumno['id_servicio']) ? (int)$alumno['id_servicio'] : 0;
 $pruebas = $alumno['pruebas'] ?? [];
 $rutAlumno  = trim($alumno['rut'] ?? '');
+$numerosProcesoAlumno = array_values(array_unique(array_filter(array_map(static fn($p) => (string)($p['numero_proceso'] ?? ''), $pruebas))));
+$cuadrillasAlumno = array_values(array_unique(array_filter(array_map(static fn($p) => (string)($p['cuadrilla'] ?? ''), $pruebas))));
 
 ?>
 <!DOCTYPE html>
@@ -165,10 +167,16 @@ body{
                         <?= htmlspecialchars($alumno['uo']['desc_uo'] ?? '') ?>
                     </div>
 
-                    <div class="mb-3">
-                        <strong>N° Solicitud:</strong><br>
-                        <?= htmlspecialchars($alumno['id_solicitud'] ?? '') ?>
-                    </div>
+                    <?php if (!empty($pruebas)): ?>
+                        <div class="mb-3">
+                            <strong>N° Proceso:</strong><br>
+                            <?= !empty($numerosProcesoAlumno) ? htmlspecialchars(implode(', ', $numerosProcesoAlumno)) : 'Sin proceso' ?>
+                        </div>
+                        <div class="mb-3">
+                            <strong>N° Cuadrilla:</strong><br>
+                            <?= !empty($cuadrillasAlumno) ? htmlspecialchars(implode(', ', $cuadrillasAlumno)) : 'Sin cuadrilla' ?>
+                        </div>
+                    <?php endif; ?>
 
                     <div class="mb-4">
                         <strong>Fecha:</strong>
@@ -196,6 +204,9 @@ body{
         <a href="evaluador_iniciar_prueba.php?id_servicio=<?= urlencode((string)$p['id_servicio']) ?>&rut_alumno=<?= urlencode($rutAlumno) ?>&id_programada=<?= urlencode((string)$p['id_programada']) ?>&nsolicitud=<?= urlencode((string)($p['nsolicitud'] ?? '')) ?>"
            class="btn btn-primary menu-btn">
            📝 Iniciar Prueba Teórica — <?= htmlspecialchars($p['servicio']) ?>
+           <?php if (!empty($p['numero_proceso'])): ?>
+             <span class="d-block small">Proceso <?= htmlspecialchars((string)$p['numero_proceso']) ?> - Cuadrilla <?= htmlspecialchars((string)($p['cuadrilla'] ?? '')) ?></span>
+           <?php endif; ?>
         </a>
     <?php endforeach; ?>
 <?php else: ?>

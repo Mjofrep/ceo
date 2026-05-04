@@ -80,12 +80,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     /**
                      * 2) VALIDAMOS RUT DEL ALUMNO EN ceo_participantes_solicitud
                      */
-                    $sql = "SELECT * 
-                            FROM ceo_evaluaciones_programadas
-                            WHERE rut = :rut
-                            and estado like 'PENDIENTE'
-                            and resultado like 'PENDIENTE'
-                            and tipo = 'PRUEBA'";
+                    $sql = "SELECT ep.*, ph.numero_proceso
+                            FROM ceo_evaluaciones_programadas ep
+                            LEFT JOIN ceo_proceso_habilitacion ph
+                                ON ph.id = ep.id_proceso_habilitacion
+                            WHERE ep.rut = :rut
+                            and ep.estado like 'PENDIENTE'
+                            and ep.resultado like 'PENDIENTE'
+                            and ep.tipo = 'PRUEBA'";
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(['rut' => $rutAlumno]);
                     $pruebas = $stmt->fetchall(PDO::FETCH_ASSOC);
@@ -222,6 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'servicio'      => $nombreServicio,
                                     'nsolicitud'    => $p['nsolicitud'] ?? null,      // si existe columna
                                     'cuadrilla'     => $p['cuadrilla'] ?? null,
+                                    'numero_proceso'=> $p['numero_proceso'] ?? null,
                                     'fecha_prog'    => $p['fecha_programacion'] ?? null,
                                     'intento'       => $p['intento'] ?? null
                                 ];

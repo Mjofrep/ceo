@@ -39,11 +39,14 @@ $stmt = $db->prepare("
     SELECT
         A.id,
         A.cuadrilla AS nsolicitud,
+        ph.numero_proceso,
         A.id_servicio AS servicio,
         DATE(A.fecha_programacion) AS fecha,
         '00:00' AS horainicio,
         '23:59' AS horatermino
     FROM ceo_evaluaciones_programadas A
+    LEFT JOIN ceo_proceso_habilitacion ph
+        ON ph.id = A.id_proceso_habilitacion
     WHERE A.id IN ($placeholders)
       AND A.tipo = 'TERRENO'
       AND A.estado = 'PENDIENTE'
@@ -58,6 +61,7 @@ if (empty($rows)) {
 }
 
 $cuadrillas = array_values(array_unique(array_column($rows, 'nsolicitud')));
+$procesos = array_values(array_unique(array_filter(array_map(static fn($r) => $r['numero_proceso'] ?? null, $rows), static fn($v) => $v !== null && $v !== '')));
 $servicios  = array_values(array_unique(array_map('intval', array_column($rows, 'servicio'))));
 
 if (count($servicios) !== 1) {
@@ -162,8 +166,9 @@ foreach ($rows as $r) {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<?php $labelSolicitud = implode(', ', $cuadrillas); ?>
-<title>Evaluación Terreno — Solicitud <?= $labelSolicitud ?></title>
+<?php $labelCuadrilla = implode(', ', $cuadrillas); ?>
+<?php $labelProceso = !empty($procesos) ? implode(', ', $procesos) : 'Sin proceso'; ?>
+<title>Evaluación Terreno — Proceso <?= htmlspecialchars($labelProceso) ?></title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
 <style>
@@ -249,7 +254,8 @@ body { background:#f7f9fc; }
 <div class="container mt-4 sticky-top-tabs">
 
 <h3 class="text-center mb-4">
-    Evaluación de Prueba de Terreno — Solicitudes <?= htmlspecialchars(implode(', ', $cuadrillas)) ?>
+    Evaluación de Prueba de Terreno — Proceso <?= htmlspecialchars($labelProceso) ?>
+    <div class="small text-muted mt-1">Cuadrilla <?= htmlspecialchars($labelCuadrilla) ?></div>
 </h3>
 
 <div class="d-flex justify-content-between btn-top">

@@ -124,7 +124,7 @@ if (empty($where)) {
 } else {
 
     $sql = "
-SELECT 
+SELECT
     p.rut,
     p.nombre,
     p.apellidos AS apellido,
@@ -133,6 +133,16 @@ SELECT
     e.nombre AS empresa,
     cs.cuadrilla AS n_cuadrilla,
     cs.id_servicio,
+    (
+        SELECT ph.numero_proceso
+        FROM ceo_evaluaciones_programadas ep
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
+        WHERE ep.rut = p.rut
+          AND ep.id_servicio = cs.id_servicio
+          AND ep.cuadrilla = cs.cuadrilla
+        ORDER BY ep.id DESC
+        LIMIT 1
+    ) AS numero_proceso,
     CASE 
         WHEN EXISTS (
             SELECT 1 
@@ -388,6 +398,8 @@ td input[type=checkbox]{
                             <th>UO</th>
                             <th>Cargo</th>
                             <th>Empresa</th>
+                            <th>N° Proceso</th>
+                            <th>N° Cuadrilla</th>
                             <th>Existe</th>
                             <th>Prueba</th>
                             <th>Terreno</th>
@@ -407,8 +419,10 @@ td input[type=checkbox]{
     <td><?= esc($d['uo']) ?></td>
     <td><?= esc($d['cargo']) ?></td>
     <td><?= esc($d['empresa']) ?></td>
+    <td class="text-center"><?= esc($d['numero_proceso'] !== null ? (string)$d['numero_proceso'] : '') ?></td>
+    <td class="text-center"><?= esc((string)$d['n_cuadrilla']) ?></td>
 
-<?php 
+<?php
 $cols = ['existe','prueba','terreno','eva_prueba','eva_terreno'];
 
 foreach ($cols as $c): 

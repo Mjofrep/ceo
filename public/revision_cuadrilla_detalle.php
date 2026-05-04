@@ -47,7 +47,17 @@ LEFT JOIN ceo_resultado_prueba_intento rpi
             WHERE a.rut = :rut
             LIMIT 1"; */
 
-        $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, d.cargo ,e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion
+        $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, d.cargo ,e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion,
+        (
+            SELECT ph.numero_proceso
+            FROM ceo_evaluaciones_programadas ep
+            LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
+            WHERE ep.rut = b.rut
+              AND ep.cuadrilla = a.cuadrilla
+              AND ep.id_servicio = a.id_servicio
+            ORDER BY ep.id DESC
+            LIMIT 1
+        ) AS numero_proceso
         FROM ceo_habilitacion a
         INNER JOIN ceo_habilitacion_participantes b ON a.cuadrilla = b.id_cuadrilla 
         LEFT JOIN ceo_contratistas c ON b.rut COLLATE utf8mb4_unicode_ci = c.rut COLLATE utf8mb4_unicode_ci
@@ -108,6 +118,8 @@ $vigenciaGeneral = null;
 $vigenciaDetalle = [];
 
 if ($rut && !empty($trabajador['id_servicio'])) {
+
+    $cuadrillaProceso = (int)($trabajador['cuadrilla'] ?? 0);
 
     $sqlPruebas = "
         SELECT
@@ -237,7 +249,7 @@ SELECT
     $stmtVG = $pdo->prepare($sqlVigGen);
     $stmtVG->execute([
         'rut'     => $rut,
-        'proceso' => $prog
+        'proceso' => $cuadrillaProceso
     ]);
     $vigenciaGeneral = $stmtVG->fetch(PDO::FETCH_ASSOC);
 
@@ -281,7 +293,7 @@ SELECT
     $stmtVD = $pdo->prepare($sqlVigDet);
     $stmtVD->execute([
         'rut'     => $rut,
-        'proceso' => $prog
+        'proceso' => $cuadrillaProceso
     ]);
     $vigenciaDetalle = $stmtVD->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -723,8 +735,13 @@ body {background:#f7f9fc;}
                 </div>
 
                 <div class="col-md-3">
-                    <div class="box-label">Proceso</div>
-                    <div class="data-box"><?= esc((string)$prog) ?></div>
+                    <div class="box-label">N° Proceso</div>
+                    <div class="data-box"><?= esc($trabajador['numero_proceso'] !== null ? (string)$trabajador['numero_proceso'] : 'Sin proceso') ?></div>
+                </div>
+
+                <div class="col-md-3">
+                    <div class="box-label">N° Cuadrilla</div>
+                    <div class="data-box"><?= esc((string)($trabajador['cuadrilla'] ?? '')) ?></div>
                 </div>
 
                 <div class="col-md-3">

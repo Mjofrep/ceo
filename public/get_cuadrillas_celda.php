@@ -33,12 +33,20 @@ try {
             h.cuadrilla,
             h.empresa,
             ce.nombre AS nombre_empresa,
-            COUNT(p.id) AS total_participantes
+            GROUP_CONCAT(DISTINCT ph.numero_proceso ORDER BY ph.numero_proceso SEPARATOR ', ') AS numeros_proceso,
+            COUNT(DISTINCT p.id) AS total_participantes
         FROM ceo_habilitacion h
         LEFT JOIN ceo_empresas ce 
                ON h.empresa = ce.id
         LEFT JOIN ceo_habilitacion_participantes p
                ON p.id_cuadrilla = h.cuadrilla
+        LEFT JOIN ceo_evaluaciones_programadas ep
+               ON ep.cuadrilla = h.cuadrilla
+              AND ep.id_servicio = h.id_servicio
+              AND ep.rut = p.rut
+              AND ep.estado <> 'ANULADA'
+        LEFT JOIN ceo_proceso_habilitacion ph
+               ON ph.id = ep.id_proceso_habilitacion
         WHERE h.fecha = :fecha
           AND h.jornada = :jornada
           AND h.id_servicio = :servicio

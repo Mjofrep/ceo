@@ -34,6 +34,7 @@ try {
             ep.id,
             ep.rut,
             ep.cuadrilla,
+            ph.numero_proceso,
             ep.id_servicio,
             sp.servicio,
             sp.descripcion,
@@ -45,6 +46,7 @@ try {
             ep.intento
         FROM ceo_evaluaciones_programadas ep
         INNER JOIN ceo_servicios_pruebas sp ON sp.id = ep.id_servicio
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
         WHERE ep.rut = :rut
           AND ep.cuadrilla = :cuadrilla
           AND ep.estado = 'PENDIENTE'

@@ -441,6 +441,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $agrupacion = null;
 $preguntas  = [];
 $totalPreguntas = 0;
+$procesoHabActual = null;
+
+if ($data['proceso'] > 0) {
+    $stmtProcesoActual = $pdo->prepare('
+        SELECT ep.cuadrilla, ph.numero_proceso
+        FROM ceo_evaluaciones_programadas ep
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
+        WHERE ep.id = :id
+        LIMIT 1
+    ');
+    $stmtProcesoActual->execute([':id' => $data['proceso']]);
+    $procesoHabActual = $stmtProcesoActual->fetch(PDO::FETCH_ASSOC) ?: null;
+}
 
 if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 
@@ -620,6 +633,12 @@ $csrfToken = Csrf::token();
             <?php if ($data['rut_alumno']): ?>
                 <p class="text-muted mb-0">
                     Participante: <strong><?= htmlspecialchars($data['rut_alumno']) ?></strong>
+                </p>
+            <?php endif; ?>
+            <?php if ($procesoHabActual): ?>
+                <p class="text-muted mb-0">
+                    Proceso: <strong><?= htmlspecialchars($procesoHabActual['numero_proceso'] !== null ? (string)$procesoHabActual['numero_proceso'] : 'Sin proceso') ?></strong>
+                    · Cuadrilla: <strong><?= htmlspecialchars((string)($procesoHabActual['cuadrilla'] ?? '')) ?></strong>
                 </p>
             <?php endif; ?>
         </div>
