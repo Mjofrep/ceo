@@ -227,17 +227,14 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
     // -----------------------------------------------------
     $sqlProcesoAbierto = "
         SELECT
-            COUNT(*) AS total_abiertos,
-            COALESCE(MAX(cuadrilla), 0) AS cuadrilla_ref
-        FROM ceo_evaluaciones_programadas
+            id,
+            numero_proceso
+        FROM ceo_proceso_habilitacion
         WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') = :rut
           AND id_servicio = :id_servicio
-          AND estado <> 'ANULADA'
-          AND (
-                estado = 'PENDIENTE'
-                OR resultado IS NULL
-                OR resultado = 'PENDIENTE'
-          )
+          AND estado = 'ABIERTO'
+        ORDER BY numero_proceso DESC, id DESC
+        LIMIT 1
     ";
 
     $stmt = $pdo->prepare($sqlProcesoAbierto);
@@ -248,15 +245,13 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
 
     $abierto = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $totalAbiertos = (int)($abierto['total_abiertos'] ?? 0);
-
-    if ($totalAbiertos > 0) {
-        $cuadrillaRef = !empty($abierto['cuadrilla_ref']) ? $abierto['cuadrilla_ref'] : 's/i';
+    if ($abierto) {
+        $procesoRef = !empty($abierto['numero_proceso']) ? $abierto['numero_proceso'] : 's/i';
 
         return [
             'bloquear' => true,
             'estado'   => 'en_proceso',
-            'mensaje'  => "el RUT {$rut} ya se encuentra en proceso de habilitación para este servicio (cuadrilla/proceso {$cuadrillaRef})"
+            'mensaje'  => "el RUT {$rut} ya se encuentra en proceso de habilitación para este servicio (proceso {$procesoRef})"
         ];
     }
 

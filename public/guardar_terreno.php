@@ -103,6 +103,7 @@ try {
             id,
             rut,
             cuadrilla,
+            id_proceso_habilitacion,
             id_servicio,
             tipo,
             estado
@@ -135,12 +136,30 @@ try {
     // Mapas exactos de la selección
     $mapRutCuadrilla = [];
     $mapRutEvalId    = [];
+    $mapRutProcesoHab = [];
     $cuadrillasSel   = [];
 
     foreach ($evaluacionesSeleccionadas as $ev) {
         $rutSel = (string)$ev['rut'];
         $idEval = (int)$ev['id'];
         $cuad   = (int)$ev['cuadrilla'];
+        $idProcesoHab = (int)($ev['id_proceso_habilitacion'] ?? 0);
+
+        if ($idProcesoHab <= 0) {
+            $procesoHab = obtenerOCrearProcesoHabilitacion($db, $rutSel, (int)$ev['id_servicio']);
+            $idProcesoHab = (int)$procesoHab['id'];
+
+            $stmtUpdProcesoHab = $db->prepare('
+                UPDATE ceo_evaluaciones_programadas
+                SET id_proceso_habilitacion = :id_proceso_habilitacion
+                WHERE id = :id
+                LIMIT 1
+            ');
+            $stmtUpdProcesoHab->execute([
+                ':id_proceso_habilitacion' => $idProcesoHab,
+                ':id' => $idEval,
+            ]);
+        }
 
         if (isset($mapRutCuadrilla[$rutSel])) {
             throw new Exception("El RUT $rutSel aparece más de una vez en la selección.");
@@ -148,6 +167,7 @@ try {
 
         $mapRutCuadrilla[$rutSel] = $cuad;
         $mapRutEvalId[$rutSel]    = $idEval;
+        $mapRutProcesoHab[$rutSel] = $idProcesoHab;
         $cuadrillasSel[]          = $cuad;
     }
 
@@ -173,6 +193,7 @@ try {
         (
             rut,
             id_servicio,
+            id_proceso_habilitacion,
             id_evaluador,
             fecha_rendicion,
             hora_rendicion,
@@ -187,6 +208,7 @@ try {
         (
             :rut,
             :id_servicio,
+            :id_proceso_habilitacion,
             :id_evaluador,
             :fecha,
             :hora,
@@ -226,9 +248,9 @@ try {
     // Insertar vigencia detalle (solo APROBADO y si NO hay general activa)
     $stmtInsVigDet = $db->prepare("
         INSERT INTO ceo_vigencia_detalle
-        (rut, id_servicio, fechavig_ini, fechavig_fin, id_proceso, tipo)
+        (rut, id_servicio, fechavig_ini, fechavig_fin, id_proceso, id_proceso_habilitacion, tipo)
         VALUES
-        (:rut, :id_servicio, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 3 YEAR), :id_proceso, 'TERRENO')
+        (:rut, :id_servicio, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 3 YEAR), :id_proceso, :id_proceso_habilitacion, 'TERRENO')
     ");
 
     /* ============================================================
@@ -263,8 +285,8 @@ try {
     $stmtEval = $db->prepare("
         INSERT INTO ceo_evaluacion_terreno
         (codigo_evaluacion, rut, nombre, cargo, contratista,
-         evaluador, usuario, resultado, id_servicio, fecha_evaluacion)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         evaluador, usuario, resultado, id_servicio, id_proceso_habilitacion, fecha_evaluacion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     // Actualizar resultado en planificación SOLO del id seleccionado
@@ -355,6 +377,7 @@ try {
 
         $cuadrillaRut = $mapRutCuadrilla[$rut];
         $idEvalRut    = $mapRutEvalId[$rut];
+        $idProcesoHab = (int)($mapRutProcesoHab[$rut] ?? 0);
 
         $ponderacion_total = 0.0;
         $ponderacion_ok    = 0.0;
@@ -444,6 +467,7 @@ try {
             $evaluadorNombre,    // usuario = evaluador
             $resultado,
             $id_servicio,
+            $idProcesoHab,
             date('Y-m-d')
         ]);
 
@@ -462,6 +486,7 @@ try {
         $stmtIntentoTerr->execute([
             ':rut'           => $rut,
             ':id_servicio'   => $id_servicio,
+            ':id_proceso_habilitacion' => $idProcesoHab,
             ':id_evaluador'  => ($evaluadorId > 0 ? $evaluadorId : null),
             ':fecha'         => $fecha,
             ':hora'          => $hora,
@@ -486,7 +511,8 @@ try {
                     $stmtInsVigDet->execute([
                         ':rut'         => $rut,
                         ':id_servicio' => $id_servicio,
-                        ':id_proceso'  => $cuadrillaRut
+                        ':id_proceso'  => $cuadrillaRut,
+                        ':id_proceso_habilitacion' => $idProcesoHab
                     ]);
 
                     // Intentar generar vigencia general (solo si ya corresponde)
@@ -505,7 +531,8 @@ try {
                 $id_servicio,
                 (int)$cuadrillaRut,
                 'GENERAL',
-                80.0
+                80.0,
+                $idProcesoHab
             );
 
             guardarResultadoFinalServicio($db, $resultadoFinalServicio);

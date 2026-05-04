@@ -25,6 +25,145 @@ $rut = trim($_GET['rut'] ?? '');
 $rutNormalizado = preg_replace('/\s+/', '', $rut);
 $rows = [];
 $persona = null;
+$resumenServicios = [];
+
+function resolverPesosPorCargo(?string $cargo, ?int $idCargo = null): ?array
+{
+    $operadorIds = [266, 268, 287];
+    $supervisorIds = [294];
+
+    if ($idCargo !== null) {
+        if (in_array($idCargo, $supervisorIds, true)) {
+            return ['teorica' => 0.6, 'terreno' => 0.4];
+        }
+        if (in_array($idCargo, $operadorIds, true)) {
+            return ['teorica' => 0.4, 'terreno' => 0.6];
+        }
+    }
+
+    $cargoNorm = strtoupper(trim((string)$cargo));
+    $cargoNorm = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $cargoNorm);
+    $cargoNorm = strtr($cargoNorm, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N']);
+    $cargoNorm = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $cargoNorm) ?: $cargoNorm;
+    $cargoNorm = preg_replace('/[^A-Z0-9]+/u', ' ', $cargoNorm) ?? $cargoNorm;
+    $cargoNorm = preg_replace('/\s+/', ' ', $cargoNorm) ?? $cargoNorm;
+    if ($cargoNorm === '') {
+        return null;
+    }
+    if (
+        str_contains($cargoNorm, 'SUPERVISOR') ||
+        str_contains($cargoNorm, 'LIDER') ||
+        str_contains($cargoNorm, 'CAPATAZ') ||
+        str_contains($cargoNorm, 'MAESTRO')
+    ) {
+        return ['teorica' => 0.6, 'terreno' => 0.4];
+    }
+    if (
+        str_contains($cargoNorm, 'OPERADOR') ||
+        str_contains($cargoNorm, 'ACOMPAN') ||
+        str_contains($cargoNorm, 'AYUDANTE')
+    ) {
+        return ['teorica' => 0.4, 'terreno' => 0.6];
+    }
+    return null;
+}
+
+function buildInferredStatusSummary(array $rows, array $terrainNotesByService, array $terrainThresholdsByService): array
+{
+    $summary = [];
+
+    foreach ($rows as $row) {
+        $servicio = trim((string)($row['servicio'] ?? ''));
+        if ($servicio === '') {
+            continue;
+        }
+
+        if (!isset($summary[$servicio])) {
+            $summary[$servicio] = [
+                'servicio' => $servicio,
+                'id_servicio' => isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0,
+                'numero_proceso' => null,
+                'cargo' => trim((string)($row['cargo'] ?? '')),
+                'id_cargo' => isset($row['id_cargo']) ? (int)$row['id_cargo'] : null,
+                'ultima_teorica_fecha' => null,
+                'ultima_teorica_resultado' => null,
+                'ultima_teorica_nota' => null,
+                'ultima_teorica_proceso' => null,
+                'ultima_practica_fecha' => null,
+                'ultima_practica_resultado' => null,
+                'ultima_practica_nota' => null,
+                'ultima_practica_porcentaje' => null,
+                'ultima_practica_proceso' => null,
+                'nota_final_ponderada' => null,
+                'fecha_habilitacion' => null,
+                'vigencia_hasta' => null,
+                'estado_inferido' => 'No Habilitado',
+            ];
+        } elseif ($summary[$servicio]['cargo'] === '' && trim((string)($row['cargo'] ?? '')) !== '') {
+            $summary[$servicio]['cargo'] = trim((string)$row['cargo']);
+            $summary[$servicio]['id_cargo'] = isset($row['id_cargo']) ? (int)$row['id_cargo'] : ($summary[$servicio]['id_cargo'] ?? null);
+        }
+
+        $fechaHora = trim((string)($row['fecha_hora'] ?? ''));
+        try {
+            $dt = new DateTimeImmutable($fechaHora);
+        } catch (Throwable $e) {
+            continue;
+        }
+
+        $tipo = strtoupper(trim((string)($row['tipo_evaluacion'] ?? '')));
+        $resultado = strtoupper(trim((string)($row['resultado_mostrado'] ?? '')));
+        $nota = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
+
+        if ($tipo === 'TEORICA') {
+            if ($summary[$servicio]['ultima_teorica_fecha'] === null || $dt > $summary[$servicio]['ultima_teorica_fecha']) {
+                $summary[$servicio]['ultima_teorica_fecha'] = $dt;
+                $summary[$servicio]['ultima_teorica_resultado'] = $resultado;
+                $summary[$servicio]['ultima_teorica_nota'] = $nota;
+                $summary[$servicio]['ultima_teorica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
+            }
+        } elseif ($tipo === 'PRACTICA') {
+            if ($summary[$servicio]['ultima_practica_fecha'] === null || $dt > $summary[$servicio]['ultima_practica_fecha']) {
+                $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
+                $notaTerreno = null;
+                $porcentajeTerreno = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
+                if ($serviceId > 0 && isset($terrainNotesByService[$serviceId])) {
+                    $notaTerreno = $terrainNotesByService[$serviceId]['nota'];
+                } elseif ($serviceId > 0) {
+                    $porcentajeMinimo = (float)($terrainThresholdsByService[$serviceId] ?? 80.0);
+                    if ($porcentajeTerreno !== null) {
+                        $notaTerreno = calcularNotaFinalDesdePorcentaje($porcentajeTerreno, $porcentajeMinimo);
+                    }
+                }
+                $summary[$servicio]['ultima_practica_fecha'] = $dt;
+                $summary[$servicio]['ultima_practica_resultado'] = $resultado;
+                $summary[$servicio]['ultima_practica_nota'] = $notaTerreno;
+                $summary[$servicio]['ultima_practica_porcentaje'] = $porcentajeTerreno;
+                $summary[$servicio]['ultima_practica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
+            }
+        }
+    }
+
+    $today = new DateTimeImmutable('today');
+
+    foreach ($summary as $servicio => $data) {
+        $summary[$servicio]['numero_proceso'] = $data['ultima_practica_proceso'] ?? ($data['ultima_teorica_proceso'] ?? null);
+        $pesos = resolverPesosPorCargo($data['cargo'] ?? '', isset($data['id_cargo']) ? (int)$data['id_cargo'] : null);
+        $notaTeorica = $data['ultima_teorica_nota'];
+        $notaTerreno = $data['ultima_practica_nota'];
+
+        if ($pesos !== null && $notaTeorica !== null && $notaTerreno !== null && $data['ultima_practica_fecha'] instanceof DateTimeImmutable) {
+            $notaFinal = round(($notaTeorica * $pesos['teorica']) + ($notaTerreno * $pesos['terreno']), 2);
+            $summary[$servicio]['nota_final_ponderada'] = $notaFinal;
+            $summary[$servicio]['fecha_habilitacion'] = $data['ultima_practica_fecha'];
+            $vigenciaHasta = $data['ultima_practica_fecha']->modify('+3 years');
+            $summary[$servicio]['vigencia_hasta'] = $vigenciaHasta;
+            $summary[$servicio]['estado_inferido'] = ($notaFinal >= 4.0 && $today <= $vigenciaHasta) ? 'Habilitado' : 'No Habilitado';
+        }
+    }
+
+    return array_values($summary);
+}
 
 if ($rutNormalizado !== '') {
 
@@ -59,12 +198,15 @@ if ($rutNormalizado !== '') {
         SELECT
             'TEORICA' AS tipo_evaluacion,
             sp.servicio AS servicio,
+            rpi.id_servicio AS id_servicio,
+            ph.numero_proceso AS numero_proceso,
             CONCAT(rpi.fecha_rendicion, ' ', rpi.hora_rendicion) AS fecha_hora,
             CASE
                 WHEN rpi.puntaje_total >= 80 THEN 'APROBADO'
                 ELSE 'REPROBADO'
             END AS resultado_mostrado,
             rpi.notafinal AS nota_mostrada,
+            ct.id_cargo AS id_cargo,
             emp.nombre AS empresa,
             cargo.cargo AS cargo,
             CASE
@@ -80,6 +222,7 @@ if ($rutNormalizado !== '') {
         LEFT JOIN ceo_cargo_contratistas cargo ON cargo.id = ct.id_cargo
         LEFT JOIN ceo_uo uo ON uo.id = ct.uo
         LEFT JOIN ceo_usuarios usr ON usr.id = rpi.id_evaluador
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = rpi.id_proceso_habilitacion
         WHERE rpi.rut = :rut_teorica
 
         UNION ALL
@@ -87,12 +230,15 @@ if ($rutNormalizado !== '') {
         SELECT
             'PRACTICA' AS tipo_evaluacion,
             sp2.servicio AS servicio,
+            et.id_servicio AS id_servicio,
+            ph2.numero_proceso AS numero_proceso,
             et.fecha_evaluacion AS fecha_hora,
             CASE
-                WHEN CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) >= 70 THEN 'APROBADO'
+                WHEN CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) >= 80 THEN 'APROBADO'
                 ELSE 'REPROBADO'
             END AS resultado_mostrado,
             CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) AS nota_mostrada,
+            ct2.id_cargo AS id_cargo,
             emp2.nombre AS empresa,
             COALESCE(et.cargo, cargo2.cargo) AS cargo,
             COALESCE(et.evaluador, '') AS evaluador,
@@ -104,6 +250,7 @@ if ($rutNormalizado !== '') {
         LEFT JOIN ceo_empresas emp2 ON emp2.id = ct2.id_empresa
         LEFT JOIN ceo_cargo_contratistas cargo2 ON cargo2.id = ct2.id_cargo
         LEFT JOIN ceo_uo uo2 ON uo2.id = ct2.uo
+        LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = et.id_proceso_habilitacion
         WHERE et.rut = :rut_terreno
     ) historial
     ORDER BY fecha_hora DESC
@@ -113,6 +260,41 @@ if ($rutNormalizado !== '') {
         ':rut_terreno' => $rutNormalizado,
     ]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmtTerrenoNotas = $pdo->prepare('
+        SELECT id_servicio, fecha_rendicion, hora_rendicion, notafinal
+        FROM ceo_resultado_terreno_intento
+        WHERE rut = :rut
+        ORDER BY id_servicio ASC, fecha_rendicion DESC, hora_rendicion DESC, id DESC
+    ');
+    $stmtTerrenoNotas->execute([':rut' => $rutNormalizado]);
+    $terrainNotesByService = [];
+    foreach ($stmtTerrenoNotas->fetchAll(PDO::FETCH_ASSOC) as $rowTerr) {
+        $sid = (int)$rowTerr['id_servicio'];
+        if ($sid <= 0 || isset($terrainNotesByService[$sid])) {
+            continue;
+        }
+        $terrainNotesByService[$sid] = [
+            'nota' => isset($rowTerr['notafinal']) ? (float)$rowTerr['notafinal'] : null,
+        ];
+    }
+
+    $stmtThresholds = $pdo->query('
+        SELECT a.id_servicio, p.porcentaje
+        FROM ceo_agrupacion_terreno a
+        INNER JOIN ceo_porcentaje_agrup_terreno p ON p.id_agrupacion = a.id
+        WHERE p.activo = "S"
+        ORDER BY a.id_servicio ASC, p.fechadesde DESC
+    ');
+    $terrainThresholdsByService = [];
+    foreach ($stmtThresholds->fetchAll(PDO::FETCH_ASSOC) as $thr) {
+        $sid = (int)$thr['id_servicio'];
+        if ($sid > 0 && !isset($terrainThresholdsByService[$sid])) {
+            $terrainThresholdsByService[$sid] = (float)$thr['porcentaje'];
+        }
+    }
+
+    $resumenServicios = buildInferredStatusSummary($rows, $terrainNotesByService, $terrainThresholdsByService);
 }
 ?>
 <!doctype html>
@@ -204,6 +386,59 @@ body { background:#f7f9fc; }
         <div class="text-muted">Nombre no disponible en ceo_contratistas.</div>
       <?php endif; ?>
     </div>
+    <?php if (!empty($resumenServicios)): ?>
+      <div class="mb-4">
+        <h6 class="text-primary mb-2"><i class="bi bi-shield-check me-2"></i>Estado inferido por servicio</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead class="text-center">
+              <tr>
+                <th>Servicio</th>
+                <th>Proceso</th>
+                <th>Cargo</th>
+                <th>Nota teórica</th>
+                <th>Última teórica</th>
+                <th>Resultado teórica</th>
+                <th>Nota terreno</th>
+                <th>Último terreno</th>
+                <th>Resultado terreno</th>
+                <th>Nota final</th>
+                <th>Fecha habilitación</th>
+                <th>Vigencia hasta</th>
+                <th>Estado inferido</th>
+              </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($resumenServicios as $resumen): ?>
+              <?php
+                $estadoBadge = 'secondary';
+                if ($resumen['estado_inferido'] === 'Habilitado') {
+                  $estadoBadge = 'success';
+                } elseif ($resumen['estado_inferido'] === 'No Habilitado') {
+                  $estadoBadge = 'danger';
+                }
+              ?>
+              <tr>
+                <td><?= esc((string)$resumen['servicio']) ?></td>
+                <td class="text-center"><?= esc($resumen['numero_proceso'] !== null ? (string)$resumen['numero_proceso'] : '') ?></td>
+                <td><?= esc((string)($resumen['cargo'] ?? '')) ?></td>
+                <td><?= esc($resumen['ultima_teorica_nota'] !== null ? number_format((float)$resumen['ultima_teorica_nota'], 2, '.', '') : '') ?></td>
+                <td><?= esc($resumen['ultima_teorica_fecha'] instanceof DateTimeImmutable ? $resumen['ultima_teorica_fecha']->format('Y-m-d H:i:s') : '') ?></td>
+                <td><?= esc((string)($resumen['ultima_teorica_resultado'] ?? '')) ?></td>
+                <td><?= esc($resumen['ultima_practica_porcentaje'] !== null ? number_format((float)$resumen['ultima_practica_porcentaje'], 2, '.', '') . '%' : '') ?></td>
+                <td><?= esc($resumen['ultima_practica_fecha'] instanceof DateTimeImmutable ? $resumen['ultima_practica_fecha']->format('Y-m-d H:i:s') : '') ?></td>
+                <td><?= esc((string)($resumen['ultima_practica_resultado'] ?? '')) ?></td>
+                <td><?= esc($resumen['nota_final_ponderada'] !== null ? number_format((float)$resumen['nota_final_ponderada'], 2, '.', '') : '') ?></td>
+                <td><?= esc($resumen['fecha_habilitacion'] instanceof DateTimeImmutable ? $resumen['fecha_habilitacion']->format('Y-m-d') : '') ?></td>
+                <td><?= esc($resumen['vigencia_hasta'] instanceof DateTimeImmutable ? $resumen['vigencia_hasta']->format('Y-m-d') : '') ?></td>
+                <td><span class="badge text-bg-<?= esc($estadoBadge) ?>"><?= esc((string)$resumen['estado_inferido']) ?></span></td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    <?php endif; ?>
     <div class="table-responsive">
       <?php if (empty($rows)): ?>
         <div class="text-muted">No hay historial de evaluaciones para este RUT.</div>
@@ -213,6 +448,7 @@ body { background:#f7f9fc; }
             <tr>
               <th>Tipo</th>
               <th>Servicio</th>
+              <th>Proceso</th>
               <th>Fecha</th>
               <th>Resultado</th>
               <th>Nota</th>
@@ -226,6 +462,7 @@ body { background:#f7f9fc; }
             <tr>
               <td><?= esc($r['tipo_evaluacion']) ?></td>
               <td><?= esc($r['servicio']) ?></td>
+              <td class="text-center"><?= esc($r['numero_proceso'] !== null ? (string)$r['numero_proceso'] : '') ?></td>
               <td><?= esc($r['fecha_hora']) ?></td>
               <td><?= esc($r['resultado_mostrado']) ?></td>
               <td><?= esc($r['nota_mostrada']) ?></td>

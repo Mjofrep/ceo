@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // RESOLVER CUADRILLA REAL DESDE EL PROCESO PROGRAMADO
                 // =====================================================
                 $sqlProc = "
-                    SELECT cuadrilla, intento, tipo, id_servicio
+                    SELECT cuadrilla, intento, tipo, id_servicio, id_proceso_habilitacion
                     FROM ceo_evaluaciones_programadas
                     WHERE id = :id_programada
                       AND rut = :rut
@@ -93,6 +93,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $cuadrilla     = (int)$procRow['cuadrilla'];
                 $intentoActual = (int)$procRow['intento'];
+                $idProcesoHab = (int)($procRow['id_proceso_habilitacion'] ?? 0);
+
+                if ($idProcesoHab <= 0) {
+                    $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $data['rut_alumno'], (int)$data['id_servicio']);
+                    $idProcesoHab = (int)$procesoHab['id'];
+
+                    $stmtUpdProcesoHab = $pdo->prepare('
+                        UPDATE ceo_evaluaciones_programadas
+                        SET id_proceso_habilitacion = :id_proceso_habilitacion
+                        WHERE id = :id
+                        LIMIT 1
+                    ');
+                    $stmtUpdProcesoHab->execute([
+                        ':id_proceso_habilitacion' => $idProcesoHab,
+                        ':id' => $data['proceso'],
+                    ]);
+                }
 
                 debug('CUADRILLA RESUELTA', $cuadrilla);
                 debug('PROCESO PROGRAMADO', $procRow);
@@ -259,6 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (
                         rut,
                         id_servicio,
+                        id_proceso_habilitacion,
                         id_evaluador,
                         fecha_rendicion,
                         hora_rendicion,
@@ -273,6 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (
                         :rut,
                         :id_servicio,
+                        :id_proceso_habilitacion,
                         :id_evaluador,
                         CURDATE(),
                         CURTIME(),
@@ -289,6 +308,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtIntento->execute([
                     ':rut'          => $data['rut_alumno'],
                     ':id_servicio'  => $data['id_servicio'],
+                    ':id_proceso_habilitacion' => $idProcesoHab,
                     ':id_evaluador' => $evaluadorId,
                     ':puntaje'      => $porcentajeObtenido,
                     ':correctas'    => $correctas,
@@ -331,6 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 fechavig_ini,
                                 fechavig_fin,
                                 id_proceso,
+                                id_proceso_habilitacion,
                                 tipo
                             )
                             VALUES
@@ -340,6 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 CURDATE(),
                                 DATE_ADD(CURDATE(), INTERVAL 3 YEAR),
                                 :id_proceso,
+                                :id_proceso_habilitacion,
                                 :tipo
                             )
                         ";
@@ -349,6 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':rut'         => $data['rut_alumno'],
                             ':id_servicio' => $data['id_servicio'],
                             ':id_proceso'  => $cuadrilla,
+                            ':id_proceso_habilitacion' => $idProcesoHab,
                             ':tipo'        => $procRow['tipo']
                         ]);
 
@@ -376,7 +399,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $data['id_servicio'],
                         $cuadrilla,
                         'GENERAL',
-                        80.0
+                        80.0,
+                        $idProcesoHab
                     );
 
                     guardarResultadoFinalServicio($pdo, $resultadoFinalServicio);

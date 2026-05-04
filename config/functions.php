@@ -134,6 +134,125 @@ if (!function_exists('calcularNotaFinalDesdePorcentaje')) {
 }
 
 /* ===========================================================
+   PROCESO DE HABILITACION
+   =========================================================== */
+if (!function_exists('obtenerProcesoHabilitacionAbierto')) {
+    function obtenerProcesoHabilitacionAbierto(\PDO $pdo, string $rut, int $idServicio): ?array
+    {
+        $sql = "
+            SELECT id, rut, id_servicio, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
+            FROM ceo_proceso_habilitacion
+            WHERE rut = :rut
+              AND id_servicio = :id_servicio
+              AND estado = 'ABIERTO'
+            ORDER BY numero_proceso DESC, id DESC
+            LIMIT 1
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            ':rut' => $rut,
+            ':id_servicio' => $idServicio,
+        ]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+}
+
+if (!function_exists('obtenerProcesoHabilitacionPorId')) {
+    function obtenerProcesoHabilitacionPorId(\PDO $pdo, int $idProcesoHabilitacion): ?array
+    {
+        if ($idProcesoHabilitacion <= 0) {
+            return null;
+        }
+
+        $stmt = $pdo->prepare('
+            SELECT id, rut, id_servicio, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
+            FROM ceo_proceso_habilitacion
+            WHERE id = :id
+            LIMIT 1
+        ');
+        $stmt->execute([':id' => $idProcesoHabilitacion]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+}
+
+if (!function_exists('obtenerOCrearProcesoHabilitacion')) {
+    function obtenerOCrearProcesoHabilitacion(\PDO $pdo, string $rut, int $idServicio, string $origen = 'CEONEXT'): array
+    {
+        $abierto = obtenerProcesoHabilitacionAbierto($pdo, $rut, $idServicio);
+        if ($abierto !== null) {
+            return $abierto;
+        }
+
+        $stmtNext = $pdo->prepare('
+            SELECT COALESCE(MAX(numero_proceso), 0) + 1
+            FROM ceo_proceso_habilitacion
+        ');
+        $stmtNext->execute();
+        $numeroProceso = (int)$stmtNext->fetchColumn();
+        if ($numeroProceso <= 0) {
+            $numeroProceso = 1;
+        }
+
+        $stmtIns = $pdo->prepare("
+            INSERT INTO ceo_proceso_habilitacion
+                (rut, id_servicio, numero_proceso, estado, origen, fecha_inicio)
+            VALUES
+                (:rut, :id_servicio, :numero_proceso, 'ABIERTO', :origen, NOW())
+        ");
+        $stmtIns->execute([
+            ':rut' => $rut,
+            ':id_servicio' => $idServicio,
+            ':numero_proceso' => $numeroProceso,
+            ':origen' => $origen,
+        ]);
+
+        $nuevo = obtenerProcesoHabilitacionPorId($pdo, (int)$pdo->lastInsertId());
+        if ($nuevo === null) {
+            throw new RuntimeException('No fue posible crear el proceso de habilitación.');
+        }
+
+        return $nuevo;
+    }
+}
+
+if (!function_exists('cerrarProcesoHabilitacion')) {
+    function cerrarProcesoHabilitacion(\PDO $pdo, int $idProcesoHabilitacion): void
+    {
+        if ($idProcesoHabilitacion <= 0) {
+            return;
+        }
+
+        $stmt = $pdo->prepare(""
+            . "UPDATE ceo_proceso_habilitacion "
+            . "SET estado = 'CERRADO', fecha_cierre = COALESCE(fecha_cierre, NOW()) "
+            . "WHERE id = :id AND estado = 'ABIERTO'"
+        );
+        $stmt->execute([':id' => $idProcesoHabilitacion]);
+    }
+}
+
+if (!function_exists('anularProcesoHabilitacion')) {
+    function anularProcesoHabilitacion(\PDO $pdo, int $idProcesoHabilitacion): void
+    {
+        if ($idProcesoHabilitacion <= 0) {
+            return;
+        }
+
+        $stmt = $pdo->prepare(""
+            . "UPDATE ceo_proceso_habilitacion "
+            . "SET estado = 'ANULADO', fecha_cierre = COALESCE(fecha_cierre, NOW()) "
+            . "WHERE id = :id AND estado = 'ABIERTO'"
+        );
+        $stmt->execute([':id' => $idProcesoHabilitacion]);
+    }
+}
+
+/* ===========================================================
    VALIDAR VIGENCIA GENERAL ACTIVA
    =========================================================== */
 if (!function_exists('existeVigenciaGeneralActiva')) {
@@ -364,8 +483,36 @@ if (!function_exists('obtenerReglaPonderacion')) {
    ULTIMA NOTA TEORICA
    =========================================================== */
 if (!function_exists('obtenerUltimaNotaTeorica')) {
-    function obtenerUltimaNotaTeorica(\PDO $pdo, string $rut, int $idServicio, int $idProceso): ?array
+    function obtenerUltimaNotaTeorica(\PDO $pdo, string $rut, int $idServicio, int $idProceso, ?int $idProcesoHabilitacion = null): ?array
     {
+        if ($idProcesoHabilitacion !== null && $idProcesoHabilitacion > 0) {
+            $sql = "
+                SELECT rpi.notafinal AS nota, rpi.puntaje_total AS porcentaje
+                FROM ceo_resultado_prueba_intento rpi
+                WHERE rpi.rut = :rut
+                  AND rpi.id_servicio = :id_servicio
+                  AND rpi.id_proceso_habilitacion = :id_proceso_habilitacion
+                ORDER BY rpi.fecha_rendicion DESC, rpi.hora_rendicion DESC, rpi.id DESC
+                LIMIT 1
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $idServicio,
+                ':id_proceso_habilitacion' => $idProcesoHabilitacion,
+            ]);
+
+            $fila = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$fila) {
+                return null;
+            }
+
+            return [
+                'nota'       => isset($fila['nota']) ? (float)$fila['nota'] : null,
+                'porcentaje' => isset($fila['porcentaje']) ? (float)$fila['porcentaje'] : null
+            ];
+        }
+
         $sql = "
             SELECT
                 rpi.notafinal AS nota,
@@ -408,8 +555,36 @@ if (!function_exists('obtenerUltimaNotaTeorica')) {
    ULTIMA NOTA TERRENO
    =========================================================== */
 if (!function_exists('obtenerUltimaNotaTerreno')) {
-    function obtenerUltimaNotaTerreno(\PDO $pdo, string $rut, int $idServicio, int $idProceso): ?array
+    function obtenerUltimaNotaTerreno(\PDO $pdo, string $rut, int $idServicio, int $idProceso, ?int $idProcesoHabilitacion = null): ?array
     {
+        if ($idProcesoHabilitacion !== null && $idProcesoHabilitacion > 0) {
+            $sql = "
+                SELECT rti.notafinal AS nota, rti.puntaje_total AS porcentaje
+                FROM ceo_resultado_terreno_intento rti
+                WHERE rti.rut = :rut
+                  AND rti.id_servicio = :id_servicio
+                  AND rti.id_proceso_habilitacion = :id_proceso_habilitacion
+                ORDER BY rti.fecha_rendicion DESC, rti.hora_rendicion DESC, rti.id DESC
+                LIMIT 1
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $idServicio,
+                ':id_proceso_habilitacion' => $idProcesoHabilitacion,
+            ]);
+
+            $fila = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$fila) {
+                return null;
+            }
+
+            return [
+                'nota'       => isset($fila['nota']) ? (float)$fila['nota'] : null,
+                'porcentaje' => isset($fila['porcentaje']) ? (float)$fila['porcentaje'] : null
+            ];
+        }
+
         $sql = "
             SELECT
                 rti.notafinal AS nota,
@@ -464,7 +639,8 @@ if (!function_exists('recalcularResultadoServicio')) {
         int $idServicio,
         int $idProceso,
         string $segmento = 'GENERAL',
-        float $porcentajeMinimoAprobacion = 80.0
+        float $porcentajeMinimoAprobacion = 80.0,
+        ?int $idProcesoHabilitacion = null
     ): array {
         $cargo = obtenerCargoTrabajador($pdo, $rut);
 
@@ -486,8 +662,8 @@ if (!function_exists('recalcularResultadoServicio')) {
         $exigePruebaAprobada  = strtoupper(trim((string)($regla['exige_prueba_aprobada'] ?? 'S'))) === 'S';
         $exigeTerrenoAprobado = strtoupper(trim((string)($regla['exige_terreno_aprobado'] ?? 'S'))) === 'S';
 
-        $teorica = obtenerUltimaNotaTeorica($pdo, $rut, $idServicio, $idProceso);
-        $terreno = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso);
+        $teorica = obtenerUltimaNotaTeorica($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
+        $terreno = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
 
         $notaPrueba        = isset($teorica['nota']) ? (float)$teorica['nota'] : null;
         $porcentajePrueba  = isset($teorica['porcentaje']) ? (float)$teorica['porcentaje'] : null;
@@ -498,6 +674,7 @@ if (!function_exists('recalcularResultadoServicio')) {
             'rut'                 => $rut,
             'id_servicio'         => $idServicio,
             'id_proceso'          => $idProceso,
+            'id_proceso_habilitacion' => $idProcesoHabilitacion,
             'cargo'               => $cargo,
             'segmento'            => $segmento,
             'nota_prueba'         => $notaPrueba,
@@ -616,6 +793,7 @@ if (!function_exists('guardarResultadoFinalServicio')) {
                 rut,
                 id_servicio,
                 id_proceso,
+                id_proceso_habilitacion,
                 cargo,
                 segmento,
                 nota_prueba,
@@ -634,6 +812,7 @@ if (!function_exists('guardarResultadoFinalServicio')) {
                 :rut,
                 :id_servicio,
                 :id_proceso,
+                :id_proceso_habilitacion,
                 :cargo,
                 :segmento,
                 :nota_prueba,
@@ -648,6 +827,7 @@ if (!function_exists('guardarResultadoFinalServicio')) {
                 NOW()
             )
             ON DUPLICATE KEY UPDATE
+                id_proceso_habilitacion = VALUES(id_proceso_habilitacion),
                 cargo = VALUES(cargo),
                 nota_prueba = VALUES(nota_prueba),
                 nota_terreno = VALUES(nota_terreno),
@@ -666,6 +846,7 @@ if (!function_exists('guardarResultadoFinalServicio')) {
             ':rut'                 => $resultado['rut'],
             ':id_servicio'         => $resultado['id_servicio'],
             ':id_proceso'          => $resultado['id_proceso'],
+            ':id_proceso_habilitacion' => $resultado['id_proceso_habilitacion'] ?? null,
             ':cargo'               => $resultado['cargo'],
             ':segmento'            => $resultado['segmento'],
             ':nota_prueba'         => $resultado['nota_prueba'],
@@ -678,5 +859,9 @@ if (!function_exists('guardarResultadoFinalServicio')) {
             ':resultado_final'     => $resultado['resultado_final'],
             ':observacion'         => $resultado['observacion']
         ]);
+
+        if (($resultado['resultado_final'] ?? '') === 'APROBADO' && !empty($resultado['id_proceso_habilitacion'])) {
+            cerrarProcesoHabilitacion($pdo, (int)$resultado['id_proceso_habilitacion']);
+        }
     }
 }

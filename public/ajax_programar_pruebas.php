@@ -3,6 +3,7 @@ declare(strict_types=1);
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -60,9 +61,9 @@ try {
 
     $stmtIns = $pdo->prepare("
         INSERT INTO ceo_evaluaciones_programadas
-        (rut, id_servicio, tipo, cuadrilla, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
+        (rut, id_servicio, tipo, cuadrilla, id_proceso_habilitacion, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
         VALUES
-        (:rut, :id_servicio, :tipo, :cuadrilla, :fecha_programacion, :usuario, 'PENDIENTE', :intento, 'PENDIENTE', NULL, 0)
+        (:rut, :id_servicio, :tipo, :cuadrilla, :id_proceso_habilitacion, :fecha_programacion, :usuario, 'PENDIENTE', :intento, 'PENDIENTE', NULL, 0)
     ");
 
     $insertados = 0;
@@ -110,11 +111,14 @@ try {
             if ($intento <= 0) $intento = 1;
 
             // 3) insertar
+            $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $rut, $id_servicio);
+
             $stmtIns->execute([
                 ':rut'               => $rut,
                 ':id_servicio'       => $id_servicio,
                 ':tipo'              => $tipo,
                 ':cuadrilla'         => $cuadrilla,
+                ':id_proceso_habilitacion' => (int)$procesoHab['id'],
                 ':fecha_programacion'=> $fecha_programacion,
                 ':usuario'           => $usuario,
                 ':intento'           => $intento

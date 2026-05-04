@@ -5,6 +5,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 require_once '../config/db.php';
+require_once '../config/functions.php';
 
 if (empty($_SESSION['auth'])) {
     http_response_code(401);
@@ -52,6 +53,8 @@ try {
     $registro = $stmtExiste->fetch(PDO::FETCH_ASSOC);
 
     if ($checked) {
+        $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $rut, $servicio);
+        $idProcesoHab = (int)$procesoHab['id'];
 
         // Si ya existe, reactivar en vez de insertar
         if ($registro) {
@@ -62,12 +65,14 @@ try {
                     fecha_resultado = NULL,
                     usuario_programa = :usuario,
                     fecha_programacion = NOW(),
+                    id_proceso_habilitacion = :id_proceso_habilitacion,
                     cobrado = 0
                 WHERE id = :id
                 LIMIT 1
             ");
             $stmtUpd->execute([
                 ':usuario' => ($userId > 0 ? $userId : 1),
+                ':id_proceso_habilitacion' => $idProcesoHab,
                 ':id' => (int)$registro['id']
             ]);
 
@@ -78,15 +83,16 @@ try {
         // Si no existe, insertar nuevo
         $stmtIns = $pdo->prepare("
             INSERT INTO ceo_evaluaciones_programadas
-                (rut, id_servicio, tipo, cuadrilla, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
+                (rut, id_servicio, tipo, cuadrilla, id_proceso_habilitacion, fecha_programacion, usuario_programa, estado, intento, resultado, fecha_resultado, cobrado)
             VALUES
-                (:rut, :servicio, :tipo, :cuadrilla, NOW(), :usuario, 'PENDIENTE', 1, 'PENDIENTE', NULL, 0)
+                (:rut, :servicio, :tipo, :cuadrilla, :id_proceso_habilitacion, NOW(), :usuario, 'PENDIENTE', 1, 'PENDIENTE', NULL, 0)
         ");
         $stmtIns->execute([
             ':rut' => $rut,
             ':servicio' => $servicio,
             ':tipo' => $tipo,
             ':cuadrilla' => $cuadrilla,
+            ':id_proceso_habilitacion' => $idProcesoHab,
             ':usuario' => ($userId > 0 ? $userId : 1)
         ]);
 
