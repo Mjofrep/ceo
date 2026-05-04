@@ -93,7 +93,13 @@ try {
         SELECT COUNT(*) 
         FROM ceo_participantes_solicitud ps 
         WHERE ps.id_solicitud = s.nsolicitud
-      ) AS cantidad_personas
+      ) AS cantidad_personas,
+      (
+        SELECT COUNT(*)
+        FROM ceo_participantes_solicitud ps
+        WHERE ps.id_solicitud = s.nsolicitud
+          AND ps.asistio = 1
+      ) AS cantidad_asistentes
     FROM ceo_solicitudes s
     LEFT JOIN ceo_usuarios u ON s.solicitante = u.id
     LEFT JOIN ceo_patios    p ON s.patio = p.id
@@ -219,6 +225,7 @@ try {
               <th>Habilitación CEO</th>
               <th>Tipo Habilitación</th>
               <th>Cant. Personas</th>
+              <th>Asistieron</th>
             </tr>
           </thead>
           <tbody>
@@ -237,9 +244,10 @@ try {
               <td><?= esc($row['habilitacionceo']) ?></td>
               <td><?= esc($row['tipohabilitacion']) ?></td>
               <td class="text-center"><?= esc($row['cantidad_personas']) ?></td>
+              <td class="text-center"><?= esc($row['cantidad_asistentes']) ?></td>
             </tr>
           <?php endforeach; else: ?>
-            <tr><td colspan="13" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
+            <tr><td colspan="14" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
           <?php endif; ?>
           </tbody>
         </table>
