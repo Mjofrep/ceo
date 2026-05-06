@@ -170,12 +170,11 @@ function validar_rut_backend(string $rut): bool
  *    Si el rut + servicio tiene vigencia activa en ceo_vigencia_detalle
  *    y existe respaldo del mismo proceso en ceo_vigencia_general.
  *
- * 2) EN PROCESO
- *    Si no está habilitado, pero ya existen evaluaciones para ese
- *    rut + servicio y todavía falta aprobar una o más pruebas.
- *
- * 3) LIBRE
+ * 2) LIBRE
  *    Si no cae en ninguna de las anteriores.
+ *
+ * Un proceso ABIERTO no bloquea la agenda: representa una habilitación
+ * en curso y puede recibir nuevas planificaciones hasta aprobar.
  */
 function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServicio): array
 {
@@ -222,43 +221,9 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
     }
 
     // -----------------------------------------------------
-    // 2) VALIDAR SI EXISTE UN PROCESO ABIERTO DEL MISMO SERVICIO
-    //    SOLO bloquea si hay registros pendientes / no cerrados
-    // -----------------------------------------------------
-    $sqlProcesoAbierto = "
-        SELECT
-            id,
-            numero_proceso
-        FROM ceo_proceso_habilitacion
-        WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') = :rut
-          AND id_servicio = :id_servicio
-          AND estado = 'ABIERTO'
-        ORDER BY numero_proceso DESC, id DESC
-        LIMIT 1
-    ";
-
-    $stmt = $pdo->prepare($sqlProcesoAbierto);
-    $stmt->execute([
-        ':rut'         => $rutComp,
-        ':id_servicio' => $idServicio
-    ]);
-
-    $abierto = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($abierto) {
-        $procesoRef = !empty($abierto['numero_proceso']) ? $abierto['numero_proceso'] : 's/i';
-
-        return [
-            'bloquear' => true,
-            'estado'   => 'en_proceso',
-            'mensaje'  => "el RUT {$rut} ya se encuentra en proceso de habilitación para este servicio (proceso {$procesoRef})"
-        ];
-    }
-
-    // -----------------------------------------------------
-    // 3) LIBRE
-    //    Si solo hay históricos REPROBADOS o procesos cerrados,
-    //    se permite generar un nuevo proceso
+    // 2) LIBRE
+    //    Si tiene un proceso abierto, se permite replanificar dentro
+    //    de ese mismo proceso hasta que apruebe el servicio.
     // -----------------------------------------------------
     return [
         'bloquear' => false,

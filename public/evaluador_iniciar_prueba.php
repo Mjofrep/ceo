@@ -10,20 +10,6 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/functions.php';
 require_once __DIR__ . '/../src/Csrf.php';
 
-/* ===========================================================
-   FUNCION DEBUG (si no existe)
-   =========================================================== */
-if (!function_exists('debug')) {
-    function debug($label, $data) {
-        if (!defined('APP_DEBUG') || APP_DEBUG !== true) return;
-        echo "<pre style='background:#111;color:#0f0;padding:8px;border-radius:6px;
-                    margin:10px 0;font-size:14px;'>";
-        echo "<strong>$label</strong>\n";
-        print_r($data);
-        echo "</pre>";
-    }
-}
-
 $pdo = db();
 $err  = '';
 $msg  = '';
@@ -50,13 +36,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data['nsolicitud']    = (int)($_POST['nsolicitud'] ?? 0);
         $data['proceso']       = (int)($_POST['proceso'] ?? 0);
 
-        debug("POST DATA", $data);
-
         $respuestas = $_POST['respuestas'] ?? [];
-        debug("RESPUESTAS RECIBIDAS", $respuestas);
 
         $preguntas = $_POST['preguntas'] ?? [];
-        debug("PREGUNTAS RENDIDAS", $preguntas);
 
         if (!$preguntas) {
             throw new Exception('No se recibieron las preguntas rendidas.');
@@ -96,23 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $idProcesoHab = (int)($procRow['id_proceso_habilitacion'] ?? 0);
 
                 if ($idProcesoHab <= 0) {
-                    $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $data['rut_alumno'], (int)$data['id_servicio']);
-                    $idProcesoHab = (int)$procesoHab['id'];
-
-                    $stmtUpdProcesoHab = $pdo->prepare('
-                        UPDATE ceo_evaluaciones_programadas
-                        SET id_proceso_habilitacion = :id_proceso_habilitacion
-                        WHERE id = :id
-                        LIMIT 1
-                    ');
-                    $stmtUpdProcesoHab->execute([
-                        ':id_proceso_habilitacion' => $idProcesoHab,
-                        ':id' => $data['proceso'],
-                    ]);
+                    throw new Exception('La evaluación no tiene un proceso de habilitación asociado. Genere o seleccione un proceso abierto antes de rendir la prueba.');
                 }
-
-                debug('CUADRILLA RESUELTA', $cuadrilla);
-                debug('PROCESO PROGRAMADO', $procRow);
 
                 // =====================================================
                 // INSERTAR RESPUESTAS TEORICAS
@@ -180,8 +147,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':proceso'        => $cuadrilla,
                         ':intento'        => $intentoActual
                     ];
-
-                    debug('INSERT RESPUESTA + VALIDACION', $paramsInsert);
 
                     $stmtIns->execute($paramsInsert);
                 }
@@ -252,19 +217,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     : 'REPROBADO';
 
                 $notaFinal = calcularNotaFinalDesdePorcentaje($porcentajeObtenido, $porcentajeMinimo);
-
-                debug('RESUMEN RESULTADO PRUEBA', [
-                    'rut'           => $data['rut_alumno'],
-                    'proceso'       => $cuadrilla,
-                    'id_servicio'   => $data['id_servicio'],
-                    'correctas'     => $correctas,
-                    'incorrectas'   => $incorrectas,
-                    'ncontestadas'  => $ncontestadas,
-                    'total'         => $total,
-                    'porcentaje'    => $porcentajeObtenido,
-                    'nota'          => $notaFinal,
-                    'resultado'     => $resultado
-                ]);
 
                 // =====================================================
                 // GUARDAR INTENTO TEORICO
@@ -377,16 +329,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         recalcularVigenciaGeneral($pdo, $data['rut_alumno'], $cuadrilla);
 
-                        debug('VIGENCIA REGISTRADA', [
-                            'rut'      => $data['rut_alumno'],
-                            'servicio' => $data['id_servicio'],
-                            'proceso'  => $cuadrilla,
-                            'tipo'     => $procRow['tipo']
-                        ]);
                     }
 
-                } else {
-                    debug('BLOQUEO', 'Vigencia general activa: no se inserta vigencia_detalle ni se recalcula vigencia_general.');
                 }
 
                 // =====================================================
@@ -405,7 +349,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     guardarResultadoFinalServicio($pdo, $resultadoFinalServicio);
 
-                    debug('RESULTADO FINAL SERVICIO', $resultadoFinalServicio);
                 }
 
                 $pdo->commit();
@@ -427,8 +370,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data['id_agrupacion'] = (int)($_GET['id_agrupacion'] ?? 0);
     $data['nsolicitud']    = (int)($_GET['nsolicitud'] ?? 0);
     $data['proceso']       = (int)($_GET['id_programada'] ?? 0);
-
-    debug("GET DATA", $data);
 
     if ($data['id_servicio'] <= 0) {
         $err = "No se indicó servicio.";
@@ -482,14 +423,9 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
         ];
     }
 
-    debug("SQL AGRUPACION", $sqlAgr);
-    debug("PARAMS AGRUPACION", $paramsAgr);
-
     $stmtAgr = $pdo->prepare($sqlAgr);
     $stmtAgr->execute($paramsAgr);
     $agrupacion = $stmtAgr->fetch(PDO::FETCH_ASSOC);
-
-    debug("RESULT AGRUPACION", $agrupacion);
 
     if (!$agrupacion) {
         $err = "No se encontró agrupación.";
@@ -541,13 +477,8 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             foreach ($preguntas as &$preg) {
                 $paramsAlt = [':id_pregunta' => $preg['id']];
 
-                debug("SQL ALTERNATIVAS", $sqlAlt);
-                debug("PARAMS ALTERNATIVA", $paramsAlt);
-
                 $stmtA->execute($paramsAlt);
                 $preg['alternativas'] = $stmtA->fetchAll(PDO::FETCH_ASSOC);
-
-                debug("RESULT ALTERNATIVAS", $preg['alternativas']);
             }
             unset($preg);
         }

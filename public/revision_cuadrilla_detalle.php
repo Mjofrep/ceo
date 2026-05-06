@@ -8,6 +8,7 @@ session_start();
 require_once '../config/db.php';
 require_once '../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/historico_procesos_habilitacion_lib.php';
 
 if (empty($_SESSION['auth'])) {
     header("Location: /ceo/public/index.php");
@@ -16,8 +17,50 @@ if (empty($_SESSION['auth'])) {
 
 $pdo = db();
 
-$rut = $_GET['rut'] ?? '';
-$prog = $_GET['programa'] ?? '';
+$rut = preg_replace('/\s+/', '', trim((string)($_GET['rut'] ?? '')));
+$prog = (int)($_GET['programa'] ?? 0);
+
+function revFmtNota($value): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    $number = str_replace(',', '.', (string)$value);
+    return is_numeric($number) ? number_format((float)$number, 2, '.', '') : (string)$value;
+}
+
+function revFmtFecha($value): string
+{
+    if ($value instanceof DateTimeImmutable) {
+        return $value->format('d-m-Y');
+    }
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '';
+    }
+    $ts = strtotime($text);
+    return $ts ? date('d-m-Y', $ts) : $text;
+}
+
+function revResolverPesos(?string $cargo): ?array
+{
+    $cargoNorm = strtoupper(trim((string)$cargo));
+    $cargoNorm = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $cargoNorm);
+    $cargoNorm = strtr($cargoNorm, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N']);
+    $cargoNorm = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $cargoNorm) ?: $cargoNorm;
+    $cargoNorm = preg_replace('/[^A-Z0-9]+/u', ' ', $cargoNorm) ?? $cargoNorm;
+    $cargoNorm = preg_replace('/\s+/', ' ', $cargoNorm) ?? $cargoNorm;
+    if ($cargoNorm === '') {
+        return null;
+    }
+    if (str_contains($cargoNorm, 'SUPERVISOR') || str_contains($cargoNorm, 'LIDER') || str_contains($cargoNorm, 'CAPATAZ') || str_contains($cargoNorm, 'MAESTRO')) {
+        return ['teorica' => 0.6, 'terreno' => 0.4];
+    }
+    if (str_contains($cargoNorm, 'OPERADOR') || str_contains($cargoNorm, 'ACOMPAN') || str_contains($cargoNorm, 'AYUDANTE')) {
+        return ['teorica' => 0.4, 'terreno' => 0.6];
+    }
+    return null;
+}
 // ============================================================
 // CONSULTA DATOS DEL TRABAJADOR
 // ============================================================
@@ -25,29 +68,10 @@ $prog = $_GET['programa'] ?? '';
 $trabajador = null;
 $wfRegistros = [];
 $agrupaciones = [];
+$historialConsolidado = [];
 
 if ($rut) {
-/*    $sql = "SELECT 
-            a.id,
-            a.rut,
-            a.nombre,
-            a.apellidos,
-            b.cargo,
-            c.nombre AS empresa,
-            d.desc_uo AS uo,
-            sp.id AS id_servicio,
-            sp.descripcion AS servicio_descripcion
-        FROM ceo_contratistas a
-        INNER JOIN ceo_cargo_contratistas b ON a.id_cargo = b.id
-        INNER JOIN ceo_empresas c ON a.id_empresa = c.id
-        INNER JOIN ceo_uo d ON a.uo = d.id
-LEFT JOIN ceo_resultado_prueba_intento rpi 
-       ON rpi.rut COLLATE utf8mb4_unicode_ci = a.rut COLLATE utf8mb4_unicode_ci
-        LEFT JOIN ceo_servicios_pruebas sp ON sp.id = rpi.id_servicio
-            WHERE a.rut = :rut
-            LIMIT 1"; */
-
-        $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, d.cargo ,e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion,
+        $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, COALESCE(cc.cargo, b.cargo) AS cargo, c.id_cargo, e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion,
         (
             SELECT ph.numero_proceso
             FROM ceo_evaluaciones_programadas ep
@@ -61,12 +85,10 @@ LEFT JOIN ceo_resultado_prueba_intento rpi
         FROM ceo_habilitacion a
         INNER JOIN ceo_habilitacion_participantes b ON a.cuadrilla = b.id_cuadrilla 
         LEFT JOIN ceo_contratistas c ON b.rut COLLATE utf8mb4_unicode_ci = c.rut COLLATE utf8mb4_unicode_ci
-        INNER JOIN ceo_servicios_rut z ON z.rut = b.rut
-        INNER JOIN ceo_cargos_habilitacion d ON z.id_cargo = d.id
-        INNER JOIN ceo_empresas e ON e.id = c.id_empresa
-        INNER JOIN ceo_uo f ON a.uo = f.id
-        INNER JOIN ceo_servicios_pruebas g ON a.id_servicio = g.id
-        INNER JOIN ceo_reportewf h ON h.rut_empleado = b.rut
+        LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
+        LEFT JOIN ceo_empresas e ON e.id = COALESCE(c.id_empresa, a.empresa)
+        LEFT JOIN ceo_uo f ON a.uo = f.id
+        LEFT JOIN ceo_servicios_pruebas g ON a.id_servicio = g.id
         where a.id = :programa
         and b.rut = :rut;";
         $stmt = $pdo->prepare($sql);
@@ -75,6 +97,33 @@ LEFT JOIN ceo_resultado_prueba_intento rpi
             'rut' => $rut
         ]);
         $trabajador = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$trabajador) {
+            $sqlPersona = "
+                SELECT
+                    c.id,
+                    NULL AS cuadrilla,
+                    c.rut,
+                    c.nombre,
+                    c.apellidos,
+                    cc.cargo,
+                    c.id_cargo,
+                    e.nombre AS empresa,
+                    u.desc_uo AS uo,
+                    NULL AS id_servicio,
+                    NULL AS servicio_descripcion,
+                    NULL AS numero_proceso
+                FROM ceo_contratistas c
+                LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
+                LEFT JOIN ceo_empresas e ON e.id = c.id_empresa
+                LEFT JOIN ceo_uo u ON u.id = c.uo
+                WHERE c.rut = :rut
+                LIMIT 1
+            ";
+            $stmtPersona = $pdo->prepare($sqlPersona);
+            $stmtPersona->execute(['rut' => $rut]);
+            $trabajador = $stmtPersona->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
 
         // ============================================================
         // CONSULTA WF DEL TRABAJADOR
@@ -108,6 +157,72 @@ LEFT JOIN ceo_resultado_prueba_intento rpi
             $stmtAgr->execute(['srv' => $trabajador['id_servicio']]);
             $agrupaciones = $stmtAgr->fetchAll(PDO::FETCH_ASSOC);
         }
+
+        $simulado = historicoSimularProcesos($pdo, 0, $rut);
+        foreach ($simulado['rows'] as $evento) {
+            $idServicio = (int)($evento['id_servicio'] ?? 0);
+            $proceso = $evento['proceso_real'] !== null ? (string)$evento['proceso_real'] : 'H-' . (string)$evento['proceso'];
+            $key = $idServicio . '|' . $proceso;
+            if (!isset($historialConsolidado[$key])) {
+                $historialConsolidado[$key] = [
+                    'numero_proceso' => $proceso,
+                    'rut' => (string)($evento['rut'] ?? $rut),
+                    'fecha_terreno' => null,
+                    'cargo' => (string)($evento['cargo_evaluacion'] ?? ''),
+                    'fecha_prueba' => null,
+                    'nota_terreno' => null,
+                    'nota_prueba' => null,
+                    'nota_final' => null,
+                    'estado' => (string)($evento['estado_proceso'] ?? ''),
+                    'fecha_evaluacion' => null,
+                ];
+            }
+
+            $fecha = $evento['fecha_hora'] ?? null;
+            if ($fecha instanceof DateTimeImmutable && (!($historialConsolidado[$key]['fecha_evaluacion'] instanceof DateTimeImmutable) || $fecha > $historialConsolidado[$key]['fecha_evaluacion'])) {
+                $historialConsolidado[$key]['fecha_evaluacion'] = $fecha;
+            }
+            if ($historialConsolidado[$key]['cargo'] === '' && !empty($evento['cargo_evaluacion'])) {
+                $historialConsolidado[$key]['cargo'] = (string)$evento['cargo_evaluacion'];
+            }
+
+            if (($evento['tipo'] ?? '') === 'TEORICA') {
+                if (!($historialConsolidado[$key]['fecha_prueba'] instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $historialConsolidado[$key]['fecha_prueba'])) {
+                    $historialConsolidado[$key]['fecha_prueba'] = $fecha;
+                    $historialConsolidado[$key]['nota_prueba'] = $evento['nota_final'];
+                }
+            } elseif (($evento['tipo'] ?? '') === 'TERRENO') {
+                if (!($historialConsolidado[$key]['fecha_terreno'] instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $historialConsolidado[$key]['fecha_terreno'])) {
+                    $notaTerrenoEvento = $evento['nota_final'];
+                    if (($notaTerrenoEvento === null || $notaTerrenoEvento === '') && is_numeric((string)($evento['puntaje'] ?? ''))) {
+                        $notaTerrenoEvento = calcularNotaFinalDesdePorcentaje((float)$evento['puntaje'], 80.0);
+                    }
+                    $historialConsolidado[$key]['fecha_terreno'] = $fecha;
+                    $historialConsolidado[$key]['nota_terreno'] = $notaTerrenoEvento;
+                }
+            }
+        }
+
+        foreach ($historialConsolidado as &$hc) {
+            $notaPrueba = is_numeric((string)$hc['nota_prueba']) ? (float)$hc['nota_prueba'] : null;
+            $notaTerreno = is_numeric((string)$hc['nota_terreno']) ? (float)$hc['nota_terreno'] : null;
+            $pesos = revResolverPesos((string)$hc['cargo']);
+            if ($notaPrueba !== null && $notaTerreno !== null) {
+                $hc['nota_final'] = $pesos !== null
+                    ? round(($notaPrueba * $pesos['teorica']) + ($notaTerreno * $pesos['terreno']), 2)
+                    : round(($notaPrueba + $notaTerreno) / 2, 2);
+                $hc['estado'] = $hc['nota_final'] >= 4.0 ? 'APROBADO' : 'REPROBADO';
+            } elseif ($notaPrueba !== null || $notaTerreno !== null) {
+                $hc['estado'] = 'PENDIENTE';
+            }
+        }
+        unset($hc);
+
+        usort($historialConsolidado, static function (array $a, array $b): int {
+            $fechaA = $a['fecha_evaluacion'] instanceof DateTimeImmutable ? $a['fecha_evaluacion']->getTimestamp() : 0;
+            $fechaB = $b['fecha_evaluacion'] instanceof DateTimeImmutable ? $b['fecha_evaluacion']->getTimestamp() : 0;
+            return $fechaB <=> $fechaA;
+        });
 }
 
 $intentos = [];
@@ -379,6 +494,11 @@ body {background:#f7f9fc;}
     color:#41464b;
     border:1px solid #d3d6d8;
 }
+
+.excel-like-table th,
+.excel-like-table td {
+    white-space: nowrap;
+}
 </style>
 
 </head>
@@ -413,12 +533,23 @@ body {background:#f7f9fc;}
          CARD PRINCIPAL
     ============================================================ -->
 <div class="card rounded-4 shadow-sm mb-4">
-    <div class="card-body py-3 d-flex justify-content-between align-items-center">
+    <div class="card-body py-3 d-flex justify-content-between align-items-center gap-3 flex-wrap">
 
-        <h4 class="fw-bold text-primary mb-0">
-            <i class="bi bi-person-vcard me-2"></i>
-            Detalle de Evaluaciones
-        </h4>
+        <div>
+            <h4 class="fw-bold text-primary mb-2">
+                <i class="bi bi-person-vcard me-2"></i>
+                Detalle de Evaluaciones
+            </h4>
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-success btn-sm rounded-3 fw-semibold" id="btnGenerarProceso">
+                    <i class="bi bi-plus-circle me-1"></i> Generar Proceso Nuevo
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm rounded-3 fw-semibold" id="btnProcesoAnterior">
+                    <i class="bi bi-clock-history me-1"></i> Proceso Anterior
+                </button>
+            </div>
+            <div id="procesoMsg" class="small mt-2"></div>
+        </div>
 
         <!-- Botón Servicios por Habilitar -->
         <button class="btn btn-outline-primary rounded-3 fw-semibold"
@@ -535,179 +666,70 @@ body {background:#f7f9fc;}
 </div>
 
 
-    <!-- ============================================================
-         EVALUACIÓN DE TERRENO
-    ============================================================ -->
-    <div class="card shadow-sm rounded-4 mb-4">
-        <div class="card-body">
-            <div class="section-title"><i class="bi bi-tools me-2"></i>Evaluación de Terreno</div>
-
-            <div class="scroll-box">
-                <table class="table table-sm table-bordered">
-                    <thead>
-                        <tr class="text-center">
-                            <th>RUT</th>
-                            <th>Cargo</th>
-                            <th>Fecha</th>
-
-                            <th>Nota</th>
-                        </tr>
-                    </thead>
-<tbody>
-<?php if (empty($evaluacionesTerreno)): ?>
-    <tr>
-        <td colspan="<?= count($agrupaciones) + 4 ?>" class="text-center text-muted">
-            Sin evaluaciones de terreno registradas
-        </td>
-    </tr>
-<?php else: ?>
-
-<?php foreach ($evaluacionesTerreno as $et): ?>
-
-<?php
-    // Obtener estado por agrupación
-    $stmtDet = $pdo->prepare("
-        SELECT
-            d.codigo_area,
-            MAX(CASE WHEN d.resultado_item = 'No alcanzó' THEN 1 ELSE 0 END) AS falla
-        FROM ceo_evaluacion_terreno_detalle d
-        WHERE d.id_evaluacion_terreno = :id
-        GROUP BY d.codigo_area
-    ");
-    $stmtDet->execute(['id' => $et['id']]);
-    $estados = $stmtDet->fetchAll(PDO::FETCH_KEY_PAIR);
-?>
-
-<tr class="text-center">
-    <td><?= esc($et['rut']) ?></td>
-    <td><?= esc($et['cargo']) ?></td>
-    <td><?= esc(date('d-m-Y', strtotime($et['fecha_evaluacion']))) ?></td>
-
-
-    <td><?= esc($et['resultado']) ?></td>
-</tr>
-
-<?php endforeach; ?>
-<?php endif; ?>
-</tbody>
-
-                </table>
-            </div>
-
+<!-- ============================================================
+     HISTORIAL CONSOLIDADO
+============================================================ -->
+<div class="card shadow-sm rounded-4 mb-4">
+    <div class="card-body">
+        <div class="section-title">
+            <i class="bi bi-table me-2"></i>Historial Evaluaciones
         </div>
-    </div>
 
-
-
-
-    <!-- ============================================================
-         EVALUACIÓN PRUEBA TEÓRICA
-    ============================================================ -->
-    <div class="card shadow-sm rounded-4 mb-4">
-        <div class="card-body">
-
-            <div class="section-title"><i class="bi bi-journal-check me-2"></i>Evaluación Prueba</div>
-
-            <div class="scroll-box">
-                <table class="table table-sm table-bordered">
-                    <thead>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
+                <thead>
                     <tr class="text-center">
+                        <th>Número Proceso</th>
                         <th>RUT</th>
+                        <th>Fecha terreno</th>
+                        <th>Cargo</th>
                         <th>Fecha Prueba</th>
-
-                    
-                        <th>Nota</th>
+                        <th>Nota Terreno</th>
+                        <th>Nota prueba</th>
+                        <th>Nota Final</th>
+                        <th>Estado</th>
+                        <th>Fecha evaluación</th>
                     </tr>
-                    </thead>
-
-<tbody>
-<?php if (empty($intentos)): ?>
-    <tr>
-        <td colspan="<?= count($agrupaciones) + 3 ?>" class="text-center text-muted">
-            Sin evaluaciones registradas para este servicio
-        </td>
-    </tr>
-<?php else: ?>
-    <?php foreach ($intentos as $int): ?>
-        <tr class="text-center">
-            <td><?= esc($int['rut']) ?></td>
-            <td><?= esc(date('d-m-Y', strtotime($int['fecha_rendicion']))) ?></td>
-
-
-            <td>
-                <?= esc($int['notafinal']) ?>
-
-            </td>
-        </tr>
-    <?php endforeach; ?>
-<?php endif; ?>
-</tbody>
-
-                </table>
-            </div>
-
+                </thead>
+                <tbody>
+                <?php if (empty($historialConsolidado)): ?>
+                    <tr>
+                        <td colspan="10" class="text-center text-muted">
+                            Sin historial de evaluaciones para este RUT
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($historialConsolidado as $rowHist): ?>
+                        <?php
+                            $estadoHist = strtoupper(trim((string)$rowHist['estado']));
+                            if ($estadoHist === '') {
+                                $estadoHist = 'PENDIENTE';
+                            }
+                            $estadoClass = match ($estadoHist) {
+                                'APROBADO', 'CERRADO' => 'success',
+                                'REPROBADO', 'VENCIDO' => 'danger',
+                                default => 'secondary',
+                            };
+                        ?>
+                        <tr>
+                            <td class="text-center"><?= esc((string)$rowHist['numero_proceso']) ?></td>
+                            <td class="text-center"><?= esc((string)$rowHist['rut']) ?></td>
+                            <td class="text-center"><?= esc(revFmtFecha($rowHist['fecha_terreno'])) ?></td>
+                            <td><?= esc((string)$rowHist['cargo']) ?></td>
+                            <td class="text-center"><?= esc(revFmtFecha($rowHist['fecha_prueba'])) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($rowHist['nota_terreno'])) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($rowHist['nota_prueba'])) ?></td>
+                            <td class="text-end fw-semibold"><?= esc(revFmtNota($rowHist['nota_final'])) ?></td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($estadoClass) ?>"><?= esc($estadoHist) ?></span></td>
+                            <td class="text-center"><?= esc(revFmtFecha($rowHist['fecha_evaluacion'])) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
-
-
-
-
-    <!-- ============================================================
-         HISTORIAL DE EVALUACIONES
-    ============================================================ -->
-    <div class="card shadow-sm rounded-4 mb-5">
-        <div class="card-body">
-
-            <div class="section-title"><i class="bi bi-clock-history me-2"></i>Estado Habilitaciones</div>
-
-            <div class="scroll-box">
-                <table class="table table-sm table-bordered">
- <thead>
-  <tr class="text-center">
-      <th>Rut</th>
-      <th>Fecha</th>
-      <th>Cargo</th>
-      <th>Terreno</th>
-      <th>Teórica</th>
-      <th>Resultado</th>
-      <th>Habilitado</th>
-  </tr>
-</thead>
-
-<tbody>
-<?php if (empty($estadoHab)): ?>
-  <tr>
-      <td colspan="6" class="text-center text-muted">
-          Sin información para calcular habilitación
-      </td>
-  </tr>
-<?php else: ?>
-  <?php
-    $hab = strtoupper(trim((string)$estadoHab['habilitado'])) === 'SI';
-  ?>
-  <tr class="text-center">
-      <td><?= esc($estadoHab['rut']) ?></td>
-      <td><?= esc(date('d-m-Y', strtotime($estadoHab['fecha_rendicion']))) ?></td>
-      <td><?= esc($estadoHab['cargo']) ?></td>
-      <td><?= esc($estadoHab['Terreno']) ?></td>
-      <td><?= esc($estadoHab['Teorica']) ?></td>
-      <td><strong><?= esc($estadoHab['resultado']) ?></strong></td>
-      <td>
-        <?php if ($hab): ?>
-          <span class="badge bg-success">SI</span>
-        <?php else: ?>
-          <span class="badge bg-danger">NO</span>
-        <?php endif; ?>
-      </td>
-  </tr>
-<?php endif; ?>
-</tbody>
-
-                </table>
-            </div>
-
-        </div>
-    </div>
+</div>
 
     <!-- ============================================================
          VIGENCIA GENERAL Y DETALLE
@@ -736,7 +758,7 @@ body {background:#f7f9fc;}
 
                 <div class="col-md-3">
                     <div class="box-label">N° Proceso</div>
-                    <div class="data-box"><?= esc($trabajador['numero_proceso'] !== null ? (string)$trabajador['numero_proceso'] : 'Sin proceso') ?></div>
+                    <div class="data-box"><?= esc(($trabajador['numero_proceso'] ?? null) !== null ? (string)$trabajador['numero_proceso'] : 'Sin proceso') ?></div>
                 </div>
 
                 <div class="col-md-3">
@@ -845,6 +867,218 @@ body {background:#f7f9fc;}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<div class="modal fade" id="modalProcesoOpciones" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content rounded-4 shadow">
+      <div class="modal-header bg-success text-white rounded-top-4">
+        <h5 class="modal-title fw-bold"><i class="bi bi-diagram-3 me-2"></i>Generar Proceso</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border">
+          Selecciona la combinación de servicio y cargo asociada al trabajador para generar o reutilizar un proceso abierto.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead class="table-light">
+              <tr class="text-center">
+                <th>Servicio</th>
+                <th>Cargo</th>
+                <th style="width:140px;">Acción</th>
+              </tr>
+            </thead>
+            <tbody id="bodyProcesoOpciones">
+              <tr><td colspan="3" class="text-center text-muted">Sin opciones</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modalProcesosAnteriores" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content rounded-4 shadow">
+      <div class="modal-header bg-secondary text-white rounded-top-4">
+        <h5 class="modal-title fw-bold"><i class="bi bi-clock-history me-2"></i>Procesos Abiertos del Trabajador</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info rounded-3">
+          Solo se muestran procesos <strong>ABIERTO</strong>. Los procesos cerrados no pueden seleccionarse para nuevas planificaciones.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead class="table-light">
+              <tr class="text-center">
+                <th>N° Proceso</th>
+                <th>Servicio</th>
+                <th>Cargo</th>
+                <th>Estado</th>
+                <th>Fecha inicio</th>
+                <th style="width:140px;">Acción</th>
+              </tr>
+            </thead>
+            <tbody id="bodyProcesosAnteriores">
+              <tr><td colspan="6" class="text-center text-muted">Sin procesos abiertos</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const rut = <?= json_encode($rut, JSON_UNESCAPED_UNICODE) ?>;
+  const btnGenerar = document.getElementById('btnGenerarProceso');
+  const btnAnterior = document.getElementById('btnProcesoAnterior');
+  const msg = document.getElementById('procesoMsg');
+  const modalOpcionesEl = document.getElementById('modalProcesoOpciones');
+  const modalAnterioresEl = document.getElementById('modalProcesosAnteriores');
+  const bodyOpciones = document.getElementById('bodyProcesoOpciones');
+  const bodyAnteriores = document.getElementById('bodyProcesosAnteriores');
+  const modalOpciones = modalOpcionesEl ? new bootstrap.Modal(modalOpcionesEl) : null;
+  const modalAnteriores = modalAnterioresEl ? new bootstrap.Modal(modalAnterioresEl) : null;
+
+  function setProcesoMsg(text, kind = 'info') {
+    if (!msg) return;
+    msg.innerHTML = text ? `<span class="text-${kind}">${escapeHtml(text)}</span>` : '';
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
+  }
+
+  function fmtServicio(row) {
+    const desc = String(row.descripcion || '').trim();
+    return desc ? `${row.servicio} - ${desc}` : String(row.servicio || '');
+  }
+
+  function fmtFecha(value) {
+    if (!value) return '';
+    const d = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('es-CL');
+  }
+
+  async function postJson(url, payload) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'No se pudo completar la operación');
+    return json;
+  }
+
+  async function crearProceso(payload = {}) {
+    const json = await postJson('ajax_proceso_habilitacion_crear.php', {rut, ...payload});
+    if (json.requires_selection) {
+      renderOpciones(json.options || []);
+      modalOpciones?.show();
+      return;
+    }
+    const p = json.proceso || {};
+    const accion = json.created ? 'Proceso creado' : 'Proceso abierto existente';
+    setProcesoMsg(`${accion}: N° ${p.numero_proceso} (${fmtServicio(p)} / ${p.cargo || ''})`, 'success');
+    modalOpciones?.hide();
+  }
+
+  function renderOpciones(options) {
+    if (!options.length) {
+      bodyOpciones.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Sin servicios/cargos asociados</td></tr>';
+      return;
+    }
+    bodyOpciones.innerHTML = options.map((row) => `
+      <tr>
+        <td>${escapeHtml(fmtServicio(row))}</td>
+        <td>${escapeHtml(row.cargo || '')}</td>
+        <td class="text-center">
+          <button type="button" class="btn btn-success btn-sm btn-crear-opcion" data-servicio="${Number(row.id_servicio)}" data-cargo="${Number(row.id_cargo)}">Generar</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  bodyOpciones?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-crear-opcion');
+    if (!btn) return;
+    try {
+      btn.disabled = true;
+      await crearProceso({id_servicio: Number(btn.dataset.servicio), id_cargo: Number(btn.dataset.cargo)});
+    } catch (err) {
+      setProcesoMsg(err.message || 'Error al generar proceso', 'danger');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  btnGenerar?.addEventListener('click', async () => {
+    try {
+      btnGenerar.disabled = true;
+      setProcesoMsg('Procesando...', 'secondary');
+      await crearProceso();
+    } catch (err) {
+      setProcesoMsg(err.message || 'Error al generar proceso', 'danger');
+    } finally {
+      btnGenerar.disabled = false;
+    }
+  });
+
+  btnAnterior?.addEventListener('click', async () => {
+    try {
+      btnAnterior.disabled = true;
+      const json = await postJson('ajax_procesos_habilitacion_rut.php', {rut});
+      renderProcesos(json.data || []);
+      modalAnteriores?.show();
+    } catch (err) {
+      setProcesoMsg(err.message || 'Error al cargar procesos abiertos', 'danger');
+    } finally {
+      btnAnterior.disabled = false;
+    }
+  });
+
+  function renderProcesos(rows) {
+    if (!rows.length) {
+      bodyAnteriores.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No hay procesos abiertos para este RUT</td></tr>';
+      return;
+    }
+    bodyAnteriores.innerHTML = rows.map((row) => `
+      <tr>
+        <td class="text-center">${escapeHtml(row.numero_proceso || '')}</td>
+        <td>${escapeHtml(fmtServicio(row))}</td>
+        <td>${escapeHtml(row.cargo || '')}</td>
+        <td class="text-center"><span class="badge text-bg-success">${escapeHtml(row.estado || '')}</span></td>
+        <td class="text-center">${escapeHtml(fmtFecha(row.fecha_inicio || ''))}</td>
+        <td class="text-center"><button type="button" class="btn btn-outline-primary btn-sm btn-usar-proceso" data-id="${Number(row.id)}" data-numero="${escapeHtml(row.numero_proceso || '')}" data-servicio="${escapeHtml(fmtServicio(row))}" data-cargo="${escapeHtml(row.cargo || '')}">Usar</button></td>
+      </tr>
+    `).join('');
+  }
+
+  bodyAnteriores?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-usar-proceso');
+    if (!btn) return;
+    try {
+      btn.disabled = true;
+      await postJson('ajax_proceso_habilitacion_seleccionar.php', {rut, id: Number(btn.dataset.id)});
+      setProcesoMsg(`Proceso seleccionado para planificación: N° ${btn.dataset.numero} (${btn.dataset.servicio} / ${btn.dataset.cargo})`, 'success');
+      modalAnteriores?.hide();
+    } catch (err) {
+      setProcesoMsg(err.message || 'Error al seleccionar proceso', 'danger');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
 
 <!-- =========================================
      INICIO MODAL SERVICIOS POR HABILITAR

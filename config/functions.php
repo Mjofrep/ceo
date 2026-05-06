@@ -137,23 +137,32 @@ if (!function_exists('calcularNotaFinalDesdePorcentaje')) {
    PROCESO DE HABILITACION
    =========================================================== */
 if (!function_exists('obtenerProcesoHabilitacionAbierto')) {
-    function obtenerProcesoHabilitacionAbierto(\PDO $pdo, string $rut, int $idServicio): ?array
+    function obtenerProcesoHabilitacionAbierto(\PDO $pdo, string $rut, int $idServicio, ?int $idCargo = null): ?array
     {
+        $whereCargo = '';
+        $params = [
+            ':rut' => $rut,
+            ':id_servicio' => $idServicio,
+        ];
+
+        if ($idCargo !== null && $idCargo > 0) {
+            $whereCargo = ' AND id_cargo = :id_cargo';
+            $params[':id_cargo'] = $idCargo;
+        }
+
         $sql = "
-            SELECT id, rut, id_servicio, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
+            SELECT id, rut, id_servicio, id_cargo, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
             FROM ceo_proceso_habilitacion
             WHERE rut = :rut
               AND id_servicio = :id_servicio
+              {$whereCargo}
               AND estado = 'ABIERTO'
             ORDER BY numero_proceso DESC, id DESC
             LIMIT 1
         ";
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            ':rut' => $rut,
-            ':id_servicio' => $idServicio,
-        ]);
+        $stmt->execute($params);
 
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ?: null;
@@ -168,7 +177,7 @@ if (!function_exists('obtenerProcesoHabilitacionPorId')) {
         }
 
         $stmt = $pdo->prepare('
-            SELECT id, rut, id_servicio, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
+            SELECT id, rut, id_servicio, id_cargo, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
             FROM ceo_proceso_habilitacion
             WHERE id = :id
             LIMIT 1
@@ -181,9 +190,9 @@ if (!function_exists('obtenerProcesoHabilitacionPorId')) {
 }
 
 if (!function_exists('obtenerOCrearProcesoHabilitacion')) {
-    function obtenerOCrearProcesoHabilitacion(\PDO $pdo, string $rut, int $idServicio, string $origen = 'CEONEXT'): array
+    function obtenerOCrearProcesoHabilitacion(\PDO $pdo, string $rut, int $idServicio, string $origen = 'CEONEXT', ?int $idCargo = null): array
     {
-        $abierto = obtenerProcesoHabilitacionAbierto($pdo, $rut, $idServicio);
+        $abierto = obtenerProcesoHabilitacionAbierto($pdo, $rut, $idServicio, $idCargo);
         if ($abierto !== null) {
             return $abierto;
         }
@@ -200,13 +209,14 @@ if (!function_exists('obtenerOCrearProcesoHabilitacion')) {
 
         $stmtIns = $pdo->prepare("
             INSERT INTO ceo_proceso_habilitacion
-                (rut, id_servicio, numero_proceso, estado, origen, fecha_inicio)
+                (rut, id_servicio, id_cargo, numero_proceso, estado, origen, fecha_inicio)
             VALUES
-                (:rut, :id_servicio, :numero_proceso, 'ABIERTO', :origen, NOW())
+                (:rut, :id_servicio, :id_cargo, :numero_proceso, 'ABIERTO', :origen, NOW())
         ");
         $stmtIns->execute([
             ':rut' => $rut,
             ':id_servicio' => $idServicio,
+            ':id_cargo' => ($idCargo !== null && $idCargo > 0) ? $idCargo : null,
             ':numero_proceso' => $numeroProceso,
             ':origen' => $origen,
         ]);
@@ -217,6 +227,38 @@ if (!function_exists('obtenerOCrearProcesoHabilitacion')) {
         }
 
         return $nuevo;
+    }
+}
+
+if (!function_exists('resolverProcesoHabilitacionParaProgramacion')) {
+    function resolverProcesoHabilitacionParaProgramacion(\PDO $pdo, string $rut, int $idServicio, int $idCargo): ?array
+    {
+        $seleccionado = (int)($_SESSION['proceso_habilitacion_seleccionado'][$rut][$idServicio][$idCargo] ?? 0);
+        if ($seleccionado > 0) {
+            $stmt = $pdo->prepare('
+                SELECT id, rut, id_servicio, id_cargo, numero_proceso, estado, origen, fecha_inicio, fecha_cierre
+                FROM ceo_proceso_habilitacion
+                WHERE id = :id
+                  AND rut = :rut
+                  AND id_servicio = :id_servicio
+                  AND id_cargo = :id_cargo
+                  AND estado = "ABIERTO"
+                LIMIT 1
+            ');
+            $stmt->execute([
+                ':id' => $seleccionado,
+                ':rut' => $rut,
+                ':id_servicio' => $idServicio,
+                ':id_cargo' => $idCargo,
+            ]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if ($row) {
+                return $row;
+            }
+            unset($_SESSION['proceso_habilitacion_seleccionado'][$rut][$idServicio][$idCargo]);
+        }
+
+        return obtenerProcesoHabilitacionAbierto($pdo, $rut, $idServicio, $idCargo);
     }
 }
 
@@ -416,21 +458,177 @@ if (!function_exists('recalcularVigenciaGeneral')) {
    OBTENER CARGO DEL TRABAJADOR
    =========================================================== */
 if (!function_exists('obtenerCargoTrabajador')) {
-    function obtenerCargoTrabajador(\PDO $pdo, string $rut): ?int
+    function obtenerCargoTrabajador(\PDO $pdo, string $rut, ?int $idServicio = null, ?int $idProceso = null): ?int
     {
-        $sql = "
-            SELECT id_cargo
-            FROM ceo_servicios_rut
-            WHERE rut = :rut
-            LIMIT 1
-        ";
+        $rutKey = strtoupper(str_replace(['.', '-', ' '], '', $rut));
 
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([':rut' => $rut]);
+        if ($idServicio !== null && $idServicio > 0 && $idProceso !== null && $idProceso > 0) {
+            $stmtPlanificacion = $pdo->prepare("
+                SELECT hp.cargo
+                FROM ceo_habilitacion_participantes hp
+                INNER JOIN ceo_habilitacion h ON h.cuadrilla = hp.id_cuadrilla
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(hp.rut), '.', ''), '-', ''), ' ', '') = :rut
+                  AND h.id_servicio = :id_servicio
+                  AND h.cuadrilla = :id_proceso
+                ORDER BY hp.id DESC
+                LIMIT 1
+            ");
+            $stmtPlanificacion->execute([
+                ':rut' => $rutKey,
+                ':id_servicio' => $idServicio,
+                ':id_proceso' => $idProceso,
+            ]);
+            $cargoPlanificacion = trim((string)($stmtPlanificacion->fetchColumn() ?: ''));
 
-        $cargo = $stmt->fetchColumn();
+            if ($cargoPlanificacion !== '') {
+                $cargoNorm = normalizarTextoCargoPonderacion($cargoPlanificacion);
+                $queriesCargoTexto = [
+                    "
+                        SELECT id
+                        FROM ceo_cargo_contratistas
+                        WHERE TRIM(UPPER(cargo)) = :cargo
+                        LIMIT 1
+                    ",
+                    "
+                        SELECT id
+                        FROM ceo_cargos_habilitacion
+                        WHERE TRIM(UPPER(cargo)) = :cargo
+                        LIMIT 1
+                    ",
+                ];
 
-        return ($cargo !== false) ? (int)$cargo : null;
+                foreach ($queriesCargoTexto as $sqlCargoTexto) {
+                    $stmtCargoTexto = $pdo->prepare($sqlCargoTexto);
+                    $stmtCargoTexto->execute([':cargo' => $cargoNorm]);
+                    $idCargoPlanificacion = $stmtCargoTexto->fetchColumn();
+
+                    if ($idCargoPlanificacion !== false && (int)$idCargoPlanificacion > 0) {
+                        return (int)$idCargoPlanificacion;
+                    }
+                }
+
+                $categoriaPlanificacion = resolverCategoriaCargoPonderacion($cargoPlanificacion);
+                if ($categoriaPlanificacion === 'SUPERVISOR') {
+                    return 294;
+                }
+                if ($categoriaPlanificacion === 'OPERADOR') {
+                    return 266;
+                }
+            }
+        }
+
+        $queries = [
+            "
+                SELECT id_cargo
+                FROM ceo_servicios_rut
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') = :rut
+                LIMIT 1
+            ",
+            "
+                SELECT id_cargo
+                FROM ceo_contratistas
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') = :rut
+                  AND id_cargo IS NOT NULL
+                  AND id_cargo > 0
+                LIMIT 1
+            ",
+            "
+                SELECT ps.id_cargo
+                FROM ceo_participantes_solicitud ps
+                INNER JOIN ceo_solicitudes s ON s.nsolicitud = ps.id_solicitud
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(ps.rut), '.', ''), '-', ''), ' ', '') = :rut
+                  AND ps.id_cargo IS NOT NULL
+                  AND ps.id_cargo > 0
+                ORDER BY s.fecha DESC, s.nsolicitud DESC
+                LIMIT 1
+            ",
+        ];
+
+        foreach ($queries as $sql) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':rut' => $rutKey]);
+            $cargo = $stmt->fetchColumn();
+
+            if ($cargo !== false && (int)$cargo > 0) {
+                return (int)$cargo;
+            }
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('normalizarTextoCargoPonderacion')) {
+    function normalizarTextoCargoPonderacion(string $cargo): string
+    {
+        $cargoNorm = strtoupper(trim($cargo));
+        $cargoNorm = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $cargoNorm);
+        $cargoNorm = strtr($cargoNorm, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N']);
+        $cargoNorm = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $cargoNorm) ?: $cargoNorm;
+        $cargoNorm = preg_replace('/[^A-Z0-9]+/u', ' ', $cargoNorm) ?? $cargoNorm;
+        return preg_replace('/\s+/', ' ', $cargoNorm) ?? $cargoNorm;
+    }
+}
+
+if (!function_exists('resolverCategoriaCargoPonderacion')) {
+    function resolverCategoriaCargoPonderacion(?string $cargo, ?int $idCargo = null): ?string
+    {
+        $operadorIds = [266, 268, 287];
+        $supervisorIds = [294];
+
+        if ($idCargo !== null) {
+            if (in_array($idCargo, $supervisorIds, true)) {
+                return 'SUPERVISOR';
+            }
+            if (in_array($idCargo, $operadorIds, true)) {
+                return 'OPERADOR';
+            }
+        }
+
+        $cargoNorm = normalizarTextoCargoPonderacion((string)$cargo);
+        if ($cargoNorm === '') {
+            return null;
+        }
+
+        if (
+            str_contains($cargoNorm, 'SUPERVISOR') ||
+            str_contains($cargoNorm, 'LIDER') ||
+            str_contains($cargoNorm, 'CAPATAZ') ||
+            str_contains($cargoNorm, 'MAESTRO')
+        ) {
+            return 'SUPERVISOR';
+        }
+
+        if (
+            str_contains($cargoNorm, 'OPERADOR') ||
+            str_contains($cargoNorm, 'ACOMPAN') ||
+            str_contains($cargoNorm, 'AYUDANTE')
+        ) {
+            return 'OPERADOR';
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('obtenerNombreCargoPonderacion')) {
+    function obtenerNombreCargoPonderacion(\PDO $pdo, int $idCargo): ?string
+    {
+        $queries = [
+            'SELECT cargo FROM ceo_cargo_contratistas WHERE id = :id LIMIT 1',
+            'SELECT cargo FROM ceo_cargos_habilitacion WHERE id = :id LIMIT 1',
+        ];
+
+        foreach ($queries as $sql) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':id' => $idCargo]);
+            $cargo = $stmt->fetchColumn();
+            if ($cargo !== false && trim((string)$cargo) !== '') {
+                return (string)$cargo;
+            }
+        }
+
+        return null;
     }
 }
 
@@ -474,8 +672,50 @@ if (!function_exists('obtenerReglaPonderacion')) {
         ]);
 
         $regla = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($regla) {
+            return $regla;
+        }
 
-        return $regla ?: null;
+        $categoria = resolverCategoriaCargoPonderacion(obtenerNombreCargoPonderacion($pdo, $cargo), $cargo);
+        if ($categoria === null) {
+            return null;
+        }
+
+        $sqlFallback = "
+            SELECT
+                id,
+                id_servicio,
+                cargo,
+                segmento,
+                ponderacion_prueba,
+                ponderacion_terreno,
+                exige_prueba_aprobada,
+                exige_terreno_aprobado,
+                observacion
+            FROM ceo_reglas_ponderacion
+            WHERE id_servicio = :id_servicio
+              AND segmento = :segmento
+              AND activo = 'S'
+              AND fecha_desde <= CURDATE()
+              AND (fecha_hasta IS NULL OR fecha_hasta >= CURDATE())
+            ORDER BY fecha_desde DESC, id DESC
+        ";
+
+        $stmtFallback = $pdo->prepare($sqlFallback);
+        $stmtFallback->execute([
+            ':id_servicio' => $idServicio,
+            ':segmento'    => $segmento,
+        ]);
+
+        foreach ($stmtFallback->fetchAll(\PDO::FETCH_ASSOC) as $reglaFallback) {
+            $idCargoRegla = (int)($reglaFallback['cargo'] ?? 0);
+            $categoriaRegla = resolverCategoriaCargoPonderacion(obtenerNombreCargoPonderacion($pdo, $idCargoRegla), $idCargoRegla);
+            if ($categoriaRegla === $categoria) {
+                return $reglaFallback;
+            }
+        }
+
+        return null;
     }
 }
 
@@ -642,7 +882,7 @@ if (!function_exists('recalcularResultadoServicio')) {
         float $porcentajeMinimoAprobacion = 80.0,
         ?int $idProcesoHabilitacion = null
     ): array {
-        $cargo = obtenerCargoTrabajador($pdo, $rut);
+        $cargo = obtenerCargoTrabajador($pdo, $rut, $idServicio, $idProceso);
 
         if ($cargo === null) {
             throw new RuntimeException("No se encontró cargo para el rut {$rut}");

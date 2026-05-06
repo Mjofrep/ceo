@@ -53,7 +53,15 @@ try {
     $registro = $stmtExiste->fetch(PDO::FETCH_ASSOC);
 
     if ($checked) {
-        $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $rut, $servicio);
+        $idCargo = obtenerCargoTrabajador($pdo, $rut, $servicio, $cuadrilla);
+        if ($idCargo === null) {
+            throw new Exception('No se pudo determinar el cargo del trabajador para este servicio.');
+        }
+
+        $procesoHab = resolverProcesoHabilitacionParaProgramacion($pdo, $rut, $servicio, $idCargo);
+        if ($procesoHab === null) {
+            throw new Exception('Debe generar o seleccionar un proceso abierto desde el detalle del trabajador antes de programar la evaluación.');
+        }
         $idProcesoHab = (int)$procesoHab['id'];
 
         // Si ya existe, reactivar en vez de insertar

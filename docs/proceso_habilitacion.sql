@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS ceo_proceso_habilitacion (
   id INT NOT NULL AUTO_INCREMENT,
   rut VARCHAR(20) NOT NULL,
   id_servicio INT NOT NULL,
+  id_cargo INT NULL,
   numero_proceso INT NOT NULL,
   estado ENUM('ABIERTO','CERRADO','ANULADO') NOT NULL DEFAULT 'ABIERTO',
   origen VARCHAR(30) NOT NULL DEFAULT 'CEONEXT',
@@ -11,7 +12,7 @@ CREATE TABLE IF NOT EXISTS ceo_proceso_habilitacion (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_proceso_habilitacion_numero (numero_proceso),
-  KEY idx_proceso_habilitacion_abierto (rut, id_servicio, estado),
+  KEY idx_proceso_habilitacion_abierto (rut, id_servicio, id_cargo, estado),
   KEY idx_proceso_habilitacion_servicio (id_servicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

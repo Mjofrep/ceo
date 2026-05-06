@@ -119,6 +119,22 @@ $parts = $pdo->prepare("
 $parts->execute([':nsol' => $sol['nsolicitud']]);
 $participantes = $parts->fetchAll(PDO::FETCH_ASSOC);
 
+function solicitudFetchPairs(PDO $pdo, string $sql, string $key = 'id', string $label = 'nombre'): array
+{
+  $rows = [];
+  foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $rows[(int)$row[$key]] = (string)$row[$label];
+  }
+  return $rows;
+}
+
+$catProcesos = $isAdmin ? solicitudFetchPairs($pdo, 'SELECT id, desc_proceso AS nombre FROM ceo_procesos ORDER BY desc_proceso') : [];
+$catPatios = $isAdmin ? solicitudFetchPairs($pdo, 'SELECT id, desc_patios AS nombre FROM ceo_patios ORDER BY desc_patios') : [];
+$catUo = $isAdmin ? solicitudFetchPairs($pdo, 'SELECT id, desc_uo AS nombre FROM ceo_uo ORDER BY desc_uo') : [];
+$catHabCeo = $isAdmin ? solicitudFetchPairs($pdo, 'SELECT id, desc_tipo AS nombre FROM ceo_habilitaciontipo ORDER BY desc_tipo') : [];
+$catServicios = $isAdmin ? $pdo->query('SELECT id, uo, servicio FROM ceo_servicios ORDER BY servicio')->fetchAll(PDO::FETCH_ASSOC) : [];
+$tiposHabilitacion = ['Seguridad', 'Técnica', 'Ambos'];
+
 ?>
 <!doctype html>
 <html lang="es">
@@ -200,6 +216,14 @@ h4, h5, h6 {font-weight:500;}
   <div class="text-end mb-3">
     <button onclick="window.print();" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-printer me-2"></i> Imprimir
+    </button>
+  </div>
+<?php endif; ?>
+
+<?php if ($isAdmin): ?>
+  <div class="text-end mb-3">
+    <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditarSolicitud">
+      <i class="bi bi-pencil-square me-2"></i>Editar datos solicitud
     </button>
   </div>
 <?php endif; ?>
@@ -682,6 +706,164 @@ document.getElementById('btnAutorizar')?.addEventListener('click', function () {
             }, 50);
 });
 </script>
+<?php if ($isAdmin): ?>
+<div class="modal fade" id="modalEditarSolicitud" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content rounded-4">
+      <div class="modal-header bg-primary text-white rounded-top-4">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Editar datos solicitud</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit_nsolicitud" value="<?= (int)$sol['nsolicitud'] ?>">
+        <div class="alert alert-light border small">
+          Solo se actualizarán Proceso, Patio, Unidad Operativa, Servicio, Habilitación CEO y Tipo Habilitación.
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Proceso</label>
+            <select id="edit_proceso" class="form-select form-select-sm" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($catProcesos as $idCat => $nombreCat): ?>
+                <option value="<?= (int)$idCat ?>" <?= (int)$sol['proceso'] === (int)$idCat ? 'selected' : '' ?>><?= esc($nombreCat) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Patio</label>
+            <select id="edit_patio" class="form-select form-select-sm" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($catPatios as $idCat => $nombreCat): ?>
+                <option value="<?= (int)$idCat ?>" <?= (int)$sol['patio'] === (int)$idCat ? 'selected' : '' ?>><?= esc($nombreCat) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Unidad Operativa</label>
+            <select id="edit_uo" class="form-select form-select-sm" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($catUo as $idCat => $nombreCat): ?>
+                <option value="<?= (int)$idCat ?>" <?= (int)$sol['uo'] === (int)$idCat ? 'selected' : '' ?>><?= esc($nombreCat) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Servicio</label>
+            <select id="edit_servicio" class="form-select form-select-sm" data-current="<?= (int)$sol['servicio'] ?>" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($catServicios as $srv): ?>
+                <option value="<?= (int)$srv['id'] ?>" data-uo="<?= (int)$srv['uo'] ?>" <?= (int)$sol['servicio'] === (int)$srv['id'] ? 'selected' : '' ?>><?= esc($srv['servicio']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Habilitación CEO</label>
+            <select id="edit_habilitacionceo" class="form-select form-select-sm" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($catHabCeo as $idCat => $nombreCat): ?>
+                <option value="<?= (int)$idCat ?>" <?= (int)$sol['habilitacionceo'] === (int)$idCat ? 'selected' : '' ?>><?= esc($nombreCat) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Tipo Habilitación</label>
+            <select id="edit_tipohabilitacion" class="form-select form-select-sm" required>
+              <option value="">-- Seleccionar --</option>
+              <?php foreach ($tiposHabilitacion as $tipoHab): ?>
+                <option value="<?= esc($tipoHab) ?>" <?= (string)$sol['tipohabilitacion'] === $tipoHab ? 'selected' : '' ?>><?= esc($tipoHab) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </div>
+        <div id="editSolicitudMsg" class="mt-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btnGuardarDatosSolicitud">
+          <i class="bi bi-save me-1"></i>Guardar cambios
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const selUo = document.getElementById('edit_uo');
+  const selServicio = document.getElementById('edit_servicio');
+  const btnGuardar = document.getElementById('btnGuardarDatosSolicitud');
+  const msg = document.getElementById('editSolicitudMsg');
+
+  function setMsg(text, kind = 'info') {
+    if (!msg) return;
+    msg.innerHTML = text ? `<div class="alert alert-${kind} py-2 mb-0">${escapeHtml(text)}</div>` : '';
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
+  }
+
+  function filtrarServiciosPorUo() {
+    if (!selUo || !selServicio) return;
+    const uo = selUo.value;
+    let selectedVisible = false;
+    Array.from(selServicio.options).forEach((opt) => {
+      if (!opt.value) {
+        opt.hidden = false;
+        return;
+      }
+      const visible = opt.dataset.uo === uo;
+      opt.hidden = !visible;
+      if (visible && opt.selected) selectedVisible = true;
+    });
+    if (!selectedVisible) selServicio.value = '';
+  }
+
+  selUo?.addEventListener('change', filtrarServiciosPorUo);
+  document.getElementById('modalEditarSolicitud')?.addEventListener('shown.bs.modal', filtrarServiciosPorUo);
+  filtrarServiciosPorUo();
+
+  btnGuardar?.addEventListener('click', async () => {
+    const payload = {
+      nsolicitud: document.getElementById('edit_nsolicitud')?.value || '',
+      proceso: document.getElementById('edit_proceso')?.value || '',
+      patio: document.getElementById('edit_patio')?.value || '',
+      uo: document.getElementById('edit_uo')?.value || '',
+      servicio: document.getElementById('edit_servicio')?.value || '',
+      habilitacionceo: document.getElementById('edit_habilitacionceo')?.value || '',
+      tipohabilitacion: document.getElementById('edit_tipohabilitacion')?.value || ''
+    };
+
+    if (Object.values(payload).some((value) => String(value).trim() === '')) {
+      setMsg('Debe completar todos los campos.', 'warning');
+      return;
+    }
+
+    btnGuardar.disabled = true;
+    setMsg('Guardando cambios...', 'info');
+
+    try {
+      const res = await fetch('ajax_solicitud_mantenedor_update.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'No se pudo actualizar la solicitud.');
+      setMsg('Solicitud actualizada correctamente.', 'success');
+      setTimeout(() => location.reload(), 700);
+    } catch (err) {
+      setMsg(err.message || 'Error al guardar cambios.', 'danger');
+    } finally {
+      btnGuardar.disabled = false;
+    }
+  });
+})();
+</script>
+<?php endif; ?>
 <div class="modal fade" id="modalHistorial" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content rounded-4">

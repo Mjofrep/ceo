@@ -146,19 +146,7 @@ try {
         $idProcesoHab = (int)($ev['id_proceso_habilitacion'] ?? 0);
 
         if ($idProcesoHab <= 0) {
-            $procesoHab = obtenerOCrearProcesoHabilitacion($db, $rutSel, (int)$ev['id_servicio']);
-            $idProcesoHab = (int)$procesoHab['id'];
-
-            $stmtUpdProcesoHab = $db->prepare('
-                UPDATE ceo_evaluaciones_programadas
-                SET id_proceso_habilitacion = :id_proceso_habilitacion
-                WHERE id = :id
-                LIMIT 1
-            ');
-            $stmtUpdProcesoHab->execute([
-                ':id_proceso_habilitacion' => $idProcesoHab,
-                ':id' => $idEval,
-            ]);
+            throw new Exception("La evaluación de terreno del RUT $rutSel no tiene un proceso de habilitación asociado.");
         }
 
         if (isset($mapRutCuadrilla[$rutSel])) {
@@ -308,17 +296,38 @@ try {
         LIMIT 1
     ");
 
-    // Obtener datos del evaluado
+    // Obtener datos del evaluado desde la planificación; contratistas queda como respaldo.
     $stmtDatosEvaluado = $db->prepare("
-        SELECT
-            A.nombre,
-            A.apellidos,
-            B.cargo,
-            C.nombre AS empresa
-        FROM ceo_contratistas A
-        INNER JOIN ceo_cargo_contratistas B ON A.id_cargo = B.id
-        INNER JOIN ceo_empresas C ON A.id_empresa = C.id
-        WHERE A.rut = ?
+        SELECT nombre, apellidos, cargo, empresa
+        FROM (
+            SELECT
+                hp.nombre,
+                hp.apellidos,
+                hp.cargo,
+                COALESCE(emp.nombre, '') AS empresa,
+                1 AS prioridad
+            FROM ceo_habilitacion_participantes hp
+            INNER JOIN ceo_habilitacion h ON h.cuadrilla = hp.id_cuadrilla
+            LEFT JOIN ceo_empresas emp ON emp.id = h.empresa
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(hp.rut), '.', ''), '-', ''), ' ', '') = :rut_planificacion
+              AND hp.id_cuadrilla = :cuadrilla
+              AND h.id_servicio = :id_servicio
+
+            UNION ALL
+
+            SELECT
+                c.nombre,
+                c.apellidos,
+                COALESCE(cc.cargo, '') AS cargo,
+                COALESCE(emp2.nombre, '') AS empresa,
+                2 AS prioridad
+            FROM ceo_contratistas c
+            LEFT JOIN ceo_cargo_contratistas cc ON c.id_cargo = cc.id
+            LEFT JOIN ceo_empresas emp2 ON c.id_empresa = emp2.id
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(c.rut), '.', ''), '-', ''), ' ', '') = :rut_contratista
+        ) datos
+        ORDER BY prioridad ASC
+        LIMIT 1
     ");
 
     // 6.1 Insertar detalle por rut
@@ -416,7 +425,13 @@ try {
             : 'REPROBADO';
 
         // Obtener datos del evaluado
-        $stmtDatosEvaluado->execute([$rut]);
+        $rutKey = strtoupper(str_replace(['.', '-', ' '], '', $rut));
+        $stmtDatosEvaluado->execute([
+            ':rut_planificacion' => $rutKey,
+            ':rut_contratista' => $rutKey,
+            ':cuadrilla' => $cuadrillaRut,
+            ':id_servicio' => $id_servicio,
+        ]);
         $dat = $stmtDatosEvaluado->fetch(PDO::FETCH_ASSOC);
 
         if (!$dat) {

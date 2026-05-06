@@ -110,8 +110,16 @@ try {
             $intento = (int)$stmtNextIntento->fetchColumn();
             if ($intento <= 0) $intento = 1;
 
-            // 3) insertar
-            $procesoHab = obtenerOCrearProcesoHabilitacion($pdo, $rut, $id_servicio);
+            // 3) asociar a un proceso abierto ya generado desde el detalle del trabajador
+            $idCargo = obtenerCargoTrabajador($pdo, $rut, $id_servicio, $cuadrilla);
+            if ($idCargo === null) {
+                throw new Exception('No se pudo determinar el cargo del trabajador para el servicio seleccionado.');
+            }
+
+            $procesoHab = resolverProcesoHabilitacionParaProgramacion($pdo, $rut, $id_servicio, $idCargo);
+            if ($procesoHab === null) {
+                throw new Exception('Debe generar o seleccionar un proceso abierto desde el detalle del trabajador antes de programar la evaluación.');
+            }
 
             $stmtIns->execute([
                 ':rut'               => $rut,
