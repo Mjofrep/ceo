@@ -30,6 +30,83 @@ $sql = "
 ";
 
 $cuadrillas = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+$sqlResumen = "
+    SELECT
+        SUM(CASE WHEN UPPER(TRIM(COALESCE(ep.estado, ''))) = 'ANULADA' THEN 1 ELSE 0 END) AS anulados,
+        SUM(CASE WHEN UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                  AND UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'APROBADO' THEN 1 ELSE 0 END) AS aprobados,
+        SUM(CASE WHEN UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                  AND UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'REPROBADO' THEN 1 ELSE 0 END) AS reprobados,
+        SUM(CASE WHEN ep.id IS NULL
+                  OR (
+                      UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                      AND UPPER(TRIM(COALESCE(ep.resultado, 'PENDIENTE'))) NOT IN ('APROBADO', 'REPROBADO')
+                  ) THEN 1 ELSE 0 END) AS pendientes,
+        COUNT(*) AS total
+    FROM ceo_formacion_participantes p
+    INNER JOIN ceo_formacion f ON f.cuadrilla = p.id_cuadrilla
+    LEFT JOIN (
+        SELECT ep1.*
+        FROM ceo_formacion_programadas ep1
+        INNER JOIN (
+            SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+            FROM ceo_formacion_programadas
+            GROUP BY rut, id_servicio, cuadrilla
+        ) ep2 ON ep1.id = ep2.max_id
+    ) ep ON ep.rut = p.rut AND ep.id_servicio = f.id_servicio AND ep.cuadrilla = p.id_cuadrilla
+";
+
+$resumenGlobal = $pdo->query($sqlResumen)->fetch(PDO::FETCH_ASSOC) ?: [
+    'aprobados' => 0,
+    'reprobados' => 0,
+    'anulados' => 0,
+    'pendientes' => 0,
+    'total' => 0,
+];
+
+$sqlResumenCuadrillas = "
+    SELECT
+        f.id,
+        f.cuadrilla,
+        f.fecha,
+        s.servicio,
+        e.nombre AS empresa,
+        SUM(CASE WHEN p.rut IS NOT NULL
+                  AND UPPER(TRIM(COALESCE(ep.estado, ''))) = 'ANULADA' THEN 1 ELSE 0 END) AS anulados,
+        SUM(CASE WHEN p.rut IS NOT NULL
+                  AND UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                  AND UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'APROBADO' THEN 1 ELSE 0 END) AS aprobados,
+        SUM(CASE WHEN p.rut IS NOT NULL
+                  AND UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                  AND UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'REPROBADO' THEN 1 ELSE 0 END) AS reprobados,
+        SUM(CASE WHEN p.rut IS NOT NULL
+                  AND (
+                      ep.id IS NULL
+                      OR (
+                          UPPER(TRIM(COALESCE(ep.estado, ''))) <> 'ANULADA'
+                          AND UPPER(TRIM(COALESCE(ep.resultado, 'PENDIENTE'))) NOT IN ('APROBADO', 'REPROBADO')
+                      )
+                  ) THEN 1 ELSE 0 END) AS pendientes,
+        COUNT(p.rut) AS total
+    FROM ceo_formacion f
+    LEFT JOIN ceo_formacion_servicios s ON s.id = f.id_servicio
+    LEFT JOIN ceo_empresas e ON e.id = f.empresa
+    LEFT JOIN ceo_formacion_participantes p ON p.id_cuadrilla = f.cuadrilla
+    LEFT JOIN (
+        SELECT ep1.*
+        FROM ceo_formacion_programadas ep1
+        INNER JOIN (
+            SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+            FROM ceo_formacion_programadas
+            GROUP BY rut, id_servicio, cuadrilla
+        ) ep2 ON ep1.id = ep2.max_id
+    ) ep ON ep.rut = p.rut AND ep.id_servicio = f.id_servicio AND ep.cuadrilla = p.id_cuadrilla
+    GROUP BY f.id, f.cuadrilla, f.fecha, s.servicio, e.nombre
+    ORDER BY f.fecha DESC, f.id DESC
+";
+
+$resumenCuadrillas = $pdo->query($sqlResumenCuadrillas)->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!doctype html>
 <html lang="es">
@@ -99,6 +176,72 @@ body {background:#f7f9fc;}
         <?php endif; ?>
       </tbody>
     </table>
+  </div>
+
+  <div class="mt-4">
+    <h6 class="text-primary mb-2"><i class="bi bi-bar-chart-line me-2"></i>Resumen Global</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle bg-white">
+        <thead>
+          <tr>
+            <th>Aprobados</th>
+            <th>Reprobados</th>
+            <th>Anulados</th>
+            <th>Pendientes</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-success fw-semibold"><?= (int)$resumenGlobal['aprobados'] ?></td>
+            <td class="text-danger fw-semibold"><?= (int)$resumenGlobal['reprobados'] ?></td>
+            <td class="text-secondary fw-semibold"><?= (int)$resumenGlobal['anulados'] ?></td>
+            <td class="text-warning fw-semibold"><?= (int)$resumenGlobal['pendientes'] ?></td>
+            <td class="fw-semibold"><?= (int)$resumenGlobal['total'] ?></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <h6 class="text-primary mb-2"><i class="bi bi-grid-3x3-gap me-2"></i>Analisis por Cuadrilla</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered table-hover align-middle bg-white">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cuadrilla</th>
+            <th>Servicio</th>
+            <th>Empresa</th>
+            <th>Aprobados</th>
+            <th>Reprobados</th>
+            <th>Anulados</th>
+            <th>Pendientes</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (empty($resumenCuadrillas)): ?>
+            <tr><td colspan="9" class="text-center text-muted">Sin registros</td></tr>
+          <?php else: ?>
+            <?php foreach ($resumenCuadrillas as $r): ?>
+              <tr class="fila-cuadrilla" data-id="<?= (int)$r['id'] ?>" data-cuadrilla="<?= (int)$r['cuadrilla'] ?>">
+                <td><?= esc((string)$r['fecha']) ?></td>
+                <td><?= (int)$r['cuadrilla'] ?></td>
+                <td><?= esc((string)$r['servicio']) ?></td>
+                <td><?= esc((string)$r['empresa']) ?></td>
+                <td class="text-success fw-semibold"><?= (int)$r['aprobados'] ?></td>
+                <td class="text-danger fw-semibold"><?= (int)$r['reprobados'] ?></td>
+                <td class="text-secondary fw-semibold"><?= (int)$r['anulados'] ?></td>
+                <td class="text-warning fw-semibold"><?= (int)$r['pendientes'] ?></td>
+                <td class="fw-semibold"><?= (int)$r['total'] ?></td>
+              </tr>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
