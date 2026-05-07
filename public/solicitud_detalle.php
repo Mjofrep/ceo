@@ -44,9 +44,10 @@ $stmt = $pdo->prepare("
          p.desc_proceso AS proceso_nombre,
          pa.desc_patios AS patio_nombre,
          u.desc_uo AS uo_nombre,
-         sv.servicio AS servicio_nombre,
-         r.responsable AS resp_uo_nombre,
-         h.desc_tipo AS habceo_nombre,
+          sv.servicio AS servicio_nombre,
+          r.responsable AS resp_uo_nombre,
+          TRIM(CONCAT(COALESCE(ev.nombre, ''), ' ', COALESCE(ev.apellidop, ''), ' ', COALESCE(ev.apellidom, ''))) AS resp_linea_nombre,
+          h.desc_tipo AS habceo_nombre,
          ch.desc_charlas AS charla_nombre,
          s.estado
     FROM ceo_solicitudes s
@@ -56,6 +57,7 @@ $stmt = $pdo->prepare("
     LEFT JOIN ceo_uo u ON u.id = s.uo
     LEFT JOIN ceo_servicios sv ON sv.id = s.servicio
     LEFT JOIN ceo_responsables r ON r.id = s.responsable
+    LEFT JOIN ceo_evaluador ev ON ev.id = s.resplinea
     LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
     LEFT JOIN ceo_charlas ch ON ch.id = s.charla
    WHERE s.nsolicitud = :nsol
@@ -310,6 +312,11 @@ h4, h5, h6 {font-weight:500;}
         <div class="col-md-4">
           <label class="form-label">Responsable UO</label>
           <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['resp_uo_nombre']) ?>" readonly>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Responsable Línea</label>
+          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['resp_linea_nombre']) ?>" readonly>
         </div>
 
         <div class="col-md-4">

@@ -88,6 +88,7 @@ try {
       ce.nombre AS contratista,
       cp.desc_proceso AS proceso,
       ch.desc_tipo AS habilitacionceo,
+      TRIM(CONCAT(COALESCE(ev.nombre, ''), ' ', COALESCE(ev.apellidop, ''), ' ', COALESCE(ev.apellidom, ''))) AS responsable_linea,
       s.tipohabilitacion,
       (
         SELECT COUNT(*) 
@@ -106,6 +107,7 @@ try {
     LEFT JOIN ceo_empresas  ce ON s.contratista = ce.id
     LEFT JOIN ceo_procesos  cp ON s.proceso = cp.id
     LEFT JOIN ceo_habilitaciontipo ch ON s.habilitacionceo = ch.id
+    LEFT JOIN ceo_evaluador ev ON ev.id = s.resplinea
     WHERE $where
     ORDER BY s.nsolicitud DESC LIMIT 2000
   ";
@@ -223,6 +225,7 @@ try {
               <th>Contratista</th>
               <th>Proceso</th>
               <th>Habilitación CEO</th>
+              <th>Responsable Línea</th>
               <th>Tipo Habilitación</th>
               <th>Cant. Personas</th>
               <th>Asistieron</th>
@@ -242,12 +245,13 @@ try {
               <td><?= esc($row['contratista']) ?></td>
               <td><?= esc($row['proceso']) ?></td>
               <td><?= esc($row['habilitacionceo']) ?></td>
+              <td><?= esc($row['responsable_linea']) ?></td>
               <td><?= esc($row['tipohabilitacion']) ?></td>
               <td class="text-center"><?= esc($row['cantidad_personas']) ?></td>
               <td class="text-center"><?= esc($row['cantidad_asistentes']) ?></td>
             </tr>
           <?php endforeach; else: ?>
-            <tr><td colspan="14" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
+            <tr><td colspan="15" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
           <?php endif; ?>
           </tbody>
         </table>
