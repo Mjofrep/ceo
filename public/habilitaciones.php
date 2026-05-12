@@ -26,6 +26,23 @@ $empresas = $pdo->query("
     ORDER BY nombre
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+$empresasEvaluadoras = $pdo->query("
+    SELECT id, nombre, rut, correo
+    FROM ceo_empresa_evaluadora
+    ORDER BY nombre
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$correosAdministradores = $pdo->query("
+    SELECT correo
+    FROM ceo_usuarios
+    WHERE id_rol = 1
+      AND correo IS NOT NULL
+      AND correo <> ''
+    ORDER BY correo
+")->fetchAll(PDO::FETCH_COLUMN);
+
+$ccAdministradores = implode(', ', array_filter(array_map('trim', $correosAdministradores)));
+
 /* =========================================================
    HABILITACIONES (GRILLA)
 ========================================================= */
@@ -205,16 +222,16 @@ body { background:#f7f9fc; }
 
             <div class="col-md-6">
               <label class="form-label fw-semibold text-dark d-block">
-                Para <span class="text-muted">(Destinatario principal)</span>
+                Para <span class="text-muted">(Empresa evaluadora)</span>
               </label>
-              <input type="email" name="para" class="form-control" value="marcelo.jofre.external@enel.com" required>
+              <input type="email" name="para" id="correoEmpresaEvaluadora" class="form-control" readonly>
             </div>
 
             <div class="col-md-6">
               <label class="form-label fw-semibold text-dark d-block">
                 CC <span class="text-muted">(Copia)</span>
               </label>
-              <input type="text" name="cc" class="form-control">
+              <input type="text" name="cc" class="form-control" value="<?= esc($ccAdministradores) ?>">
             </div>
 
             <div class="col-12">
@@ -224,12 +241,23 @@ body { background:#f7f9fc; }
             </div>
 
             <div class="col-md-6">
+              <label class="form-label">RUT Empresa Evaluadora</label>
+              <input type="text" name="rut_empresa_evaluadora" id="rutEmpresaEvaluadora" class="form-control" readonly>
+            </div>
+
+            <div class="col-md-6">
               <label class="form-label">Empresa Evaluadora</label>
-              <select name="empresa_orden" class="form-select">
-                <?php foreach ($empresas as $e): ?>
-                  <option value="<?= (int)$e['id'] ?>"><?= esc($e['nombre']) ?></option>
+              <select name="empresa_orden" id="empresaEvaluadoraSelect" class="form-select" required>
+                <option value="">Seleccione empresa evaluadora...</option>
+                <?php foreach ($empresasEvaluadoras as $e): ?>
+                  <option
+                    value="<?= (int)$e['id'] ?>"
+                    data-rut="<?= esc($e['rut'] ?? '') ?>"
+                    data-correo="<?= esc($e['correo'] ?? '') ?>"
+                  ><?= esc($e['nombre']) ?></option>
                 <?php endforeach; ?>
               </select>
+              <div class="form-text">El correo se enviará al correo configurado para esta empresa.</div>
             </div>
 
             <div class="col-12">
@@ -278,6 +306,24 @@ Saludos cordiales.</textarea>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+
+  const empresaEvaluadoraSelect = document.getElementById('empresaEvaluadoraSelect');
+  const correoEmpresaEvaluadora = document.getElementById('correoEmpresaEvaluadora');
+  const rutEmpresaEvaluadora = document.getElementById('rutEmpresaEvaluadora');
+
+  function actualizarDatosEmpresaEvaluadora() {
+    const selected = empresaEvaluadoraSelect?.selectedOptions?.[0];
+    if (!selected || !selected.value) {
+      if (correoEmpresaEvaluadora) correoEmpresaEvaluadora.value = '';
+      if (rutEmpresaEvaluadora) rutEmpresaEvaluadora.value = '';
+      return;
+    }
+
+    if (correoEmpresaEvaluadora) correoEmpresaEvaluadora.value = selected.dataset.correo || '';
+    if (rutEmpresaEvaluadora) rutEmpresaEvaluadora.value = selected.dataset.rut || '';
+  }
+
+  empresaEvaluadoraSelect?.addEventListener('change', actualizarDatosEmpresaEvaluadora);
 
   // CHECK ALL
   document.getElementById('chkAll').addEventListener('change', function () {

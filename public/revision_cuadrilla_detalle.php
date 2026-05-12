@@ -42,6 +42,19 @@ function revFmtFecha($value): string
     return $ts ? date('d-m-Y', $ts) : $text;
 }
 
+function revFmtFechaHora($value): string
+{
+    if ($value instanceof DateTimeImmutable) {
+        return $value->format('d-m-Y H:i');
+    }
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '';
+    }
+    $ts = strtotime($text);
+    return $ts ? date('d-m-Y H:i', $ts) : $text;
+}
+
 function revResolverPesos(?string $cargo): ?array
 {
     $cargoNorm = strtoupper(trim((string)$cargo));
@@ -68,6 +81,7 @@ function revResolverPesos(?string $cargo): ?array
 $trabajador = null;
 $wfRegistros = [];
 $agrupaciones = [];
+$detalleHistorialEvaluaciones = [];
 $historialConsolidado = [];
 
 if ($rut) {
@@ -163,6 +177,27 @@ if ($rut) {
             $idServicio = (int)($evento['id_servicio'] ?? 0);
             $proceso = $evento['proceso_real'] !== null ? (string)$evento['proceso_real'] : 'H-' . (string)$evento['proceso'];
             $key = $idServicio . '|' . $proceso;
+            $fecha = $evento['fecha_hora'] ?? null;
+            $notaDetalle = $evento['nota_final'];
+            if (($evento['tipo'] ?? '') === 'TERRENO' && ($notaDetalle === null || $notaDetalle === '') && is_numeric((string)($evento['puntaje'] ?? ''))) {
+                $notaDetalle = calcularNotaFinalDesdePorcentaje((float)$evento['puntaje'], 80.0);
+            }
+
+            if ($fecha instanceof DateTimeImmutable) {
+                $detalleHistorialEvaluaciones[] = [
+                    'fecha_hora' => $fecha,
+                    'fecha_grupo' => $fecha->format('Y-m-d'),
+                    'tipo' => (string)($evento['tipo'] ?? ''),
+                    'servicio' => (string)($evento['servicio'] ?? ''),
+                    'numero_proceso' => $proceso,
+                    'cargo' => (string)($evento['cargo_evaluacion'] ?? ''),
+                    'puntaje' => $evento['puntaje'] ?? null,
+                    'nota_final' => $notaDetalle,
+                    'resultado' => (string)($evento['resultado'] ?? ''),
+                    'origen' => (string)($evento['origen'] ?? ''),
+                ];
+            }
+
             if (!isset($historialConsolidado[$key])) {
                 $historialConsolidado[$key] = [
                     'numero_proceso' => $proceso,
@@ -178,7 +213,6 @@ if ($rut) {
                 ];
             }
 
-            $fecha = $evento['fecha_hora'] ?? null;
             if ($fecha instanceof DateTimeImmutable && (!($historialConsolidado[$key]['fecha_evaluacion'] instanceof DateTimeImmutable) || $fecha > $historialConsolidado[$key]['fecha_evaluacion'])) {
                 $historialConsolidado[$key]['fecha_evaluacion'] = $fecha;
             }
@@ -222,6 +256,15 @@ if ($rut) {
             $fechaA = $a['fecha_evaluacion'] instanceof DateTimeImmutable ? $a['fecha_evaluacion']->getTimestamp() : 0;
             $fechaB = $b['fecha_evaluacion'] instanceof DateTimeImmutable ? $b['fecha_evaluacion']->getTimestamp() : 0;
             return $fechaB <=> $fechaA;
+        });
+
+        usort($detalleHistorialEvaluaciones, static function (array $a, array $b): int {
+            $fechaA = $a['fecha_hora'] instanceof DateTimeImmutable ? $a['fecha_hora']->getTimestamp() : 0;
+            $fechaB = $b['fecha_hora'] instanceof DateTimeImmutable ? $b['fecha_hora']->getTimestamp() : 0;
+            if ($fechaA !== $fechaB) {
+                return $fechaB <=> $fechaA;
+            }
+            return strcmp((string)$a['tipo'], (string)$b['tipo']);
         });
 }
 
@@ -662,6 +705,83 @@ body {background:#f7f9fc;}
             </table>
         </div>
 
+    </div>
+</div>
+
+
+<!-- ============================================================
+     DETALLE HISTORIAL DE EVALUACIONES
+============================================================ -->
+<div class="card shadow-sm rounded-4 mb-4">
+    <div class="card-body">
+        <div class="section-title">
+            <i class="bi bi-list-check me-2"></i>Detalle Historial de Evaluaciones
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
+                <thead>
+                    <tr class="text-center">
+                        <th>Fecha / Hora</th>
+                        <th>Tipo</th>
+                        <th>Servicio</th>
+                        <th>Número Proceso</th>
+                        <th>Cargo</th>
+                        <th>Puntaje</th>
+                        <th>Nota</th>
+                        <th>Resultado</th>
+                        <th>Origen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php if (empty($detalleHistorialEvaluaciones)): ?>
+                    <tr>
+                        <td colspan="9" class="text-center text-muted">
+                            Sin detalle histórico de evaluaciones para este RUT
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php $fechaGrupoAnterior = ''; ?>
+                    <?php foreach ($detalleHistorialEvaluaciones as $detalleHist): ?>
+                        <?php
+                            $fechaGrupo = (string)($detalleHist['fecha_grupo'] ?? '');
+                            if ($fechaGrupo !== $fechaGrupoAnterior):
+                                $fechaGrupoAnterior = $fechaGrupo;
+                        ?>
+                            <tr class="table-primary">
+                                <td colspan="9" class="fw-semibold">
+                                    <?= esc(revFmtFecha($fechaGrupo)) ?>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+
+                        <?php
+                            $tipoDetalle = strtoupper(trim((string)$detalleHist['tipo']));
+                            $tipoTexto = $tipoDetalle === 'TEORICA' ? 'Teórica' : ($tipoDetalle === 'TERRENO' ? 'Terreno' : $tipoDetalle);
+                            $tipoClass = $tipoDetalle === 'TEORICA' ? 'info' : 'warning';
+                            $resultadoDetalle = strtoupper(trim((string)$detalleHist['resultado']));
+                            $resultadoClass = match ($resultadoDetalle) {
+                                'APROBADO' => 'success',
+                                'REPROBADO' => 'danger',
+                                default => 'secondary',
+                            };
+                        ?>
+                        <tr>
+                            <td class="text-center"><?= esc(revFmtFechaHora($detalleHist['fecha_hora'])) ?></td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($tipoClass) ?>"><?= esc($tipoTexto) ?></span></td>
+                            <td><?= esc((string)$detalleHist['servicio']) ?></td>
+                            <td class="text-center"><?= esc((string)$detalleHist['numero_proceso']) ?></td>
+                            <td><?= esc((string)$detalleHist['cargo']) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($detalleHist['puntaje'])) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($detalleHist['nota_final'])) ?></td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($resultadoClass) ?>"><?= esc($resultadoDetalle ?: '-') ?></span></td>
+                            <td><?= esc((string)$detalleHist['origen']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 

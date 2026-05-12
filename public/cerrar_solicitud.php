@@ -10,7 +10,7 @@ if ($nsol <= 0) exit('Solicitud inválida');
 
 $pdo = db();
 
-$stmt = $pdo->prepare("UPDATE ceo_solicitudes SET estado = 'F' WHERE nsolicitud = ?");
+$stmt = $pdo->prepare("UPDATE ceo_solicitudes SET estado = 'F', fechafinaliza = CURDATE() WHERE nsolicitud = ?");
 $stmt->execute([$nsol]);
 
 echo "OK";

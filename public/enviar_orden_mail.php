@@ -24,23 +24,25 @@ if (empty($_SESSION['auth'])) {
 // ------------------------
 // RECIBIR POST
 // ------------------------
-$para       = trim((string)($_POST['para'] ?? ''));
+$paraVisual = trim((string)($_POST['para'] ?? ''));
 $cc         = trim((string)($_POST['cc'] ?? ''));
 $asunto     = trim((string)($_POST['asunto'] ?? ''));
 $cuerpo     = (string)($_POST['cuerpo'] ?? '');
 $htmlExtra  = (string)($_POST['html_participantes'] ?? '');
 $cuadrillas = trim((string)($_POST['cuadrillas'] ?? ''));
+$empresaOrdenId = (int)($_POST['empresa_orden'] ?? 0);
 
-debug_log("POST para={$para}");
+debug_log("POST para_visual={$paraVisual}");
 debug_log("POST cc={$cc}");
 debug_log("POST asunto={$asunto}");
 debug_log("POST cuadrillas={$cuadrillas}");
+debug_log("POST empresa_orden={$empresaOrdenId}");
 debug_log("LEN cuerpo=" . strlen($cuerpo));
 debug_log("LEN html_participantes=" . strlen($htmlExtra));
 
-if ($para === '' || $asunto === '') {
-    debug_log("FALTAN DATOS (para/asunto)");
-    echo json_encode(['ok' => false, 'msg' => 'Debe indicar destinatario y asunto']);
+if ($empresaOrdenId <= 0 || $asunto === '') {
+    debug_log("FALTAN DATOS (empresa_orden/asunto)");
+    echo json_encode(['ok' => false, 'msg' => 'Debe seleccionar empresa evaluadora e indicar asunto']);
     exit;
 }
 
@@ -81,6 +83,24 @@ $bodyHtml = "
 debug_log("LEN bodyHtml=" . strlen($bodyHtml));
 debug_log("BODY PREVIEW (first 300): " . substr(preg_replace('/\s+/', ' ', $bodyHtml), 0, 300));
 
+$pdo = db();
+$stmtEval = $pdo->prepare("
+    SELECT id, nombre, rut, correo
+    FROM ceo_empresa_evaluadora
+    WHERE id = :id
+    LIMIT 1
+");
+$stmtEval->execute([':id' => $empresaOrdenId]);
+$empresaEvaluadora = $stmtEval->fetch(PDO::FETCH_ASSOC);
+
+if (!$empresaEvaluadora || trim((string)($empresaEvaluadora['correo'] ?? '')) === '') {
+    debug_log("Empresa evaluadora sin correo id={$empresaOrdenId}");
+    echo json_encode(['ok' => false, 'msg' => 'La empresa evaluadora seleccionada no tiene correo configurado']);
+    exit;
+}
+
+debug_log("Empresa evaluadora=" . (string)$empresaEvaluadora['nombre'] . " rut=" . (string)($empresaEvaluadora['rut'] ?? '') . " correo=" . (string)$empresaEvaluadora['correo']);
+
 // ------------------------
 // ENVIAR CORREO
 // ------------------------
@@ -99,10 +119,27 @@ try {
     $mail->isHTML(true);
 
     $mail->setFrom('ceo@noetica.cl', 'Sistema CEO');
-    $mail->addAddress($para);
+
+    $destinatariosAgregados = 0;
+    foreach (preg_split('/[;,]/', (string)$empresaEvaluadora['correo']) as $email) {
+        $email = trim($email);
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $mail->addAddress($email, (string)$empresaEvaluadora['nombre']);
+            $destinatariosAgregados++;
+            debug_log("Destinatario empresa evaluadora={$email}");
+        } elseif ($email !== '') {
+            debug_log("Correo empresa evaluadora inválido={$email}");
+        }
+    }
+
+    if ($destinatariosAgregados === 0) {
+        debug_log("Sin destinatarios válidos para empresa evaluadora id={$empresaOrdenId}");
+        echo json_encode(['ok' => false, 'msg' => 'La empresa evaluadora no tiene correos válidos']);
+        exit;
+    }
 
     if ($cc !== '') {
-        foreach (explode(',', $cc) as $c) {
+        foreach (preg_split('/[;,]/', $cc) as $c) {
             $c = trim($c);
             if ($c !== '') $mail->addCC($c);
         }
@@ -111,7 +148,6 @@ try {
 // ------------------------
 // ADJUNTAR PERMISOS AUTOMÁTICOS (PDF)
 // ------------------------
-$pdo = db();
 
 // Obtener permisos vigentes por cuadrilla
 $in = implode(',', array_fill(0, count($ids), '?'));

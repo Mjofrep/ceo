@@ -81,6 +81,7 @@ try {
       s.nsolicitud,
       CONCAT(u.nombres, ' ', u.apellidos) AS solicitante,
       p.desc_patios AS patio,
+      s.fechacreacion,
       s.fecha,
       s.horainicio,
       s.horatermino,
@@ -193,6 +194,7 @@ try {
             <option value="nsolicitud">N° Solicitud</option>
             <option value="solicitante">Solicitante</option>
             <option value="patio">Patio</option>
+            <option value="fecha">Fecha</option>
             <option value="estado">Estado</option>
             <option value="contratista">Contratista</option>
             <option value="proceso">Proceso</option>
@@ -218,6 +220,7 @@ try {
               <th>N° Solicitud</th>
               <th>Solicitante</th>
               <th>Patio</th>
+              <th>Fecha Creación</th>
               <th>Fecha</th>
               <th>Hora Inicio</th>
               <th>Hora Término</th>
@@ -238,6 +241,7 @@ try {
               <td><?= esc($row['nsolicitud']) ?></td>
               <td><?= esc($row['solicitante']) ?></td>
               <td><?= esc($row['patio']) ?></td>
+              <td><?= (!empty($row['fechacreacion']) && $row['fechacreacion'] !== '0000-00-00') ? esc($row['fechacreacion']) : '' ?></td>
               <td><?= esc($row['fecha']) ?></td>
               <td><?= esc($row['horainicio']) ?></td>
               <td><?= esc($row['horatermino']) ?></td>
@@ -251,7 +255,7 @@ try {
               <td class="text-center"><?= esc($row['cantidad_asistentes']) ?></td>
             </tr>
           <?php endforeach; else: ?>
-            <tr><td colspan="15" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
+            <tr><td colspan="16" class="text-center text-muted">No hay solicitudes registradas.</td></tr>
           <?php endif; ?>
           </tbody>
         </table>
@@ -298,6 +302,7 @@ try {
       nsolicitud: 'Buscar por N° Solicitud...',
       solicitante: 'Buscar por solicitante...',
       patio: 'Buscar por patio...',
+      fecha: 'Buscar por fecha...',
       estado: 'Buscar por estado...',
       contratista: 'Buscar por contratista...',
       proceso: 'Buscar por proceso...'
@@ -310,10 +315,11 @@ try {
       nsolicitud: [1],
       solicitante: [2],
       patio: [3],
+      fecha: [4],
       estado: [7],
       contratista: [8],
       proceso: [9],
-      general: [1, 2, 3, 7, 8, 9]
+      general: [1, 2, 3, 4, 7, 8, 9]
     };
     const indices = mapa[filtro] || mapa.general;
     return indices.map(idx => cells[idx]?.textContent || '').join(' ').toLowerCase();

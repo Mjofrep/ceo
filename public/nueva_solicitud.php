@@ -57,11 +57,11 @@ if ($next === 5030) {
     INSERT INTO ceo_solicitudes
     (nsolicitud, fecha, horainicio, horatermino, contratista, proceso, habilitacionceo,
      tipohabilitacion, patio, resphse, resplinea, uo, servicio, responsable,
-     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, estado)
+     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, fechacreacion, estado)
       VALUES
     (:nsolicitud,:fecha,:hini,:hfin,:empresa,:proceso,:habceo,:tipohab,:patio,
      :rhse,:rlinea,:uo,:servicio,:ruo,:obs,:charla,:motivoreinduccion,
-     :numerohallazgo,:solicitante,'I')
+     :numerohallazgo,:solicitante,CURDATE(),'I')
     ");
     $stmt->execute([
       ':nsolicitud' => $next,
@@ -132,6 +132,23 @@ if ($next === 5030) {
             throw new RuntimeException('La solicitud debe tener al menos un participante válido.');
         }
 
+        $rutsSinCargo = [];
+        foreach ($rows as $r) {
+            $rut = trim((string)($r['rut'] ?? ''));
+            if ($rut === '') {
+                continue;
+            }
+
+            $cargo = trim((string)($r['cargo'] ?? ''));
+            if ($cargo === '') {
+                $rutsSinCargo[] = $rut;
+            }
+        }
+
+        if (!empty($rutsSinCargo)) {
+            throw new RuntimeException('No se puede registrar la solicitud. Participantes sin cargo: ' . implode(', ', $rutsSinCargo));
+        }
+
 if (!empty($rows)) {
 
   // Buscar cargo
@@ -181,7 +198,7 @@ if (!empty($rows)) {
     $cargoNombre = trim($r['cargo'] ?? '');
 
     if ($cargoNombre === '') {
-      $cargoNombre = 'SIN CARGO';
+      throw new RuntimeException('Participante sin cargo: ' . $rut);
     }
 
     $cargoSel->execute([':cargo' => $cargoNombre]);
@@ -1087,13 +1104,6 @@ document.getElementById('btnGuardar').onclick = async () => {
     return;
   }
 
-  // === DESDE AQUÍ SÍ MOSTRAMOS "TRABAJANDO" ===
-  btn.disabled = true;
-  Working.show('Guardando solicitud…');
-
-  const fd = new FormData(form);
-  fd.append('action', 'guardar_solicitud');
-
   const clean = _rows.filter(r =>
     Array.isArray(r) && r.some(c => String(c || '').trim() !== '')
   );
@@ -1109,6 +1119,30 @@ document.getElementById('btnGuardar').onclick = async () => {
     cargo: hdr.findIndex(h => h.includes('CARGO'))
   };
 
+  if (idx.cargo < 0) {
+    alert('El archivo no contiene columna CARGO. Corrige la planilla antes de guardar.');
+    return;
+  }
+
+  const rutsSinCargo = [];
+  for (let i = start; i < clean.length; i++) {
+    const r = clean[i] || [];
+    const rut = String(r[idx.rut] || '').trim();
+    const cargo = String(r[idx.cargo] || '').trim();
+
+    if (rut !== '' && cargo === '') {
+      rutsSinCargo.push(rut);
+    }
+  }
+
+  if (rutsSinCargo.length > 0) {
+    alert(
+      'No se puede registrar la solicitud. Hay participantes sin cargo.\n\n' +
+      'RUT con cargo vacío: ' + rutsSinCargo.join(', ')
+    );
+    return;
+  }
+
   const participantes = [];
   for (let i = start; i < clean.length; i++) {
     const r = clean[i] || [];
@@ -1121,6 +1155,12 @@ document.getElementById('btnGuardar').onclick = async () => {
     });
   }
 
+  // === DESDE AQUÍ SÍ MOSTRAMOS "TRABAJANDO" ===
+  btn.disabled = true;
+  Working.show('Guardando solicitud…');
+
+  const fd = new FormData(form);
+  fd.append('action', 'guardar_solicitud');
   fd.append('participantes', JSON.stringify(participantes));
 
   try {

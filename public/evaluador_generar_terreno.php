@@ -84,8 +84,8 @@ $stmt = $db->prepare("
     SELECT DISTINCT
         c.rut,
         c.nombre,
-        ' ' AS apellidop,
-        ' ' AS apellidom,
+        c.apellidos AS apellidop,
+        '' AS apellidom,
         c.cargo,
         ep.cuadrilla
     FROM ceo_evaluaciones_programadas ep

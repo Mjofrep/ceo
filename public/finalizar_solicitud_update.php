@@ -11,12 +11,12 @@ header('Content-Type: application/json; charset=utf-8');
 $idSol = (int)($_POST['id_solicitud'] ?? 0);
 
 if ($idSol <= 0) {
-  echo json_encode(['ok'=>false,'error'=>'ID de solicitud inválido']);
+  echo json_encode(['ok'=>false,'error'=>'ID de solicitud invï¿½lido']);
   exit;
 }
 
 try {
-  $st = $pdo->prepare("UPDATE ceo_solicitudes SET estado = 'F' WHERE nsolicitud = :id");
+  $st = $pdo->prepare("UPDATE ceo_solicitudes SET estado = 'F', fechafinaliza = CURDATE() WHERE nsolicitud = :id");
   $st->execute([':id'=>$idSol]);
   echo json_encode(['ok'=>true]);
 } catch (Throwable $e) {
