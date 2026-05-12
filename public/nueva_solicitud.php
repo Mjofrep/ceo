@@ -584,7 +584,20 @@ body{background:#f7f9fc}
         <div class="card-body">
             
 <h6 class="fw-bold mb-3 text-primary d-flex justify-content-between align-items-center">
-  Participantes desde Excel
+  Participantes
+  <div class="d-flex gap-2">
+    <button id="btnModoExcel" type="button" class="btn btn-primary btn-sm">
+      Desde Excel
+    </button>
+    <button id="btnModoManual" type="button" class="btn btn-outline-primary btn-sm">
+      Ingreso Manual
+    </button>
+  </div>
+</h6>
+
+<div id="bloqueExcel">
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <div class="fw-semibold text-secondary">Carga desde Excel</div>
   <div class="d-flex gap-2">
     <button id="btnTablaCompleta" type="button" class="btn btn-outline-secondary btn-sm">
       Vista Completa
@@ -596,7 +609,7 @@ body{background:#f7f9fc}
       <i class="bi bi-trash3 me-1"></i>Limpiar carga
     </button>
   </div>
-</h6>
+</div>
  <!-- Overlay lectura Excel -->
 <div id="excelLoading" class="excel-loading d-none">
   <div class="excel-loading-content">
@@ -619,6 +632,46 @@ body{background:#f7f9fc}
 
 <!--  🔥 INPUT MOVIDO FUERA DEL DIV QUE SE BORRA 🔥 -->
 <input type="file" id="inputExcel" accept=".xlsx,.xls,.csv" style="display:none;">
+</div>
+
+<div id="bloqueManual" class="d-none">
+  <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <div>
+      <div class="fw-semibold text-secondary">Ingreso manual de participantes</div>
+      <small class="text-muted">Todos los campos son obligatorios. El temporal vive solo en esta sesión del navegador.</small>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button id="btnAgregarManual" type="button" class="btn btn-outline-success btn-sm">
+        <i class="bi bi-plus-circle me-1"></i>Agregar fila
+      </button>
+      <button id="btnGuardarManualTmp" type="button" class="btn btn-outline-primary btn-sm">
+        Guardar temporal
+      </button>
+      <button id="btnRecuperarManualTmp" type="button" class="btn btn-outline-secondary btn-sm">
+        Recuperar temporal
+      </button>
+      <button id="btnCancelarManual" type="button" class="btn btn-outline-danger btn-sm">
+        Cancelar ingreso manual
+      </button>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr class="text-center">
+          <th style="min-width:130px;">RUT</th>
+          <th style="min-width:140px;">Nombre</th>
+          <th style="min-width:140px;">Apellido Paterno</th>
+          <th style="min-width:140px;">Apellido Materno</th>
+          <th style="min-width:160px;">Cargo</th>
+          <th style="width:70px;">Acción</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyManualParticipantes"></tbody>
+    </table>
+  </div>
+</div>
 
           
         </div>
@@ -887,8 +940,173 @@ const inputExcel = document.getElementById('inputExcel');
 const tabla      = document.getElementById('tablaParticipantes');
 const btnLimpiarExcel = document.getElementById('btnLimpiarExcel');
 let _rows = [], _rutError = false;
+const bloqueExcel = document.getElementById('bloqueExcel');
+const bloqueManual = document.getElementById('bloqueManual');
+const btnModoExcel = document.getElementById('btnModoExcel');
+const btnModoManual = document.getElementById('btnModoManual');
+const tbodyManualParticipantes = document.getElementById('tbodyManualParticipantes');
+const manualStorageKey = 'ceonext_nueva_solicitud_participantes_manual';
+let modoParticipantes = 'excel';
+let participantesManual = [];
 // === Overlay carga Excel ===
 const excelLoading = document.getElementById('excelLoading');
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function setModoParticipantes(modo) {
+  modoParticipantes = modo;
+  bloqueExcel.classList.toggle('d-none', modo !== 'excel');
+  bloqueManual.classList.toggle('d-none', modo !== 'manual');
+  btnModoExcel.classList.toggle('btn-primary', modo === 'excel');
+  btnModoExcel.classList.toggle('btn-outline-primary', modo !== 'excel');
+  btnModoManual.classList.toggle('btn-primary', modo === 'manual');
+  btnModoManual.classList.toggle('btn-outline-primary', modo !== 'manual');
+
+  if (modo === 'manual' && participantesManual.length === 0) {
+    agregarFilaManual(false);
+  }
+}
+
+function renderTablaManual() {
+  if (!tbodyManualParticipantes) return;
+
+  if (participantesManual.length === 0) {
+    tbodyManualParticipantes.innerHTML = `
+      <tr>
+        <td colspan="6" class="text-center text-muted py-3">
+          Sin participantes manuales. Usa "Agregar fila" para comenzar.
+        </td>
+      </tr>`;
+    return;
+  }
+
+  tbodyManualParticipantes.innerHTML = participantesManual.map((p, i) => `
+    <tr data-index="${i}">
+      <td><input type="text" class="form-control form-control-sm manual-rut" value="${escapeHtml(p.rut)}" placeholder="12345678-9"></td>
+      <td><input type="text" class="form-control form-control-sm manual-nombre" value="${escapeHtml(p.nombre)}"></td>
+      <td><input type="text" class="form-control form-control-sm manual-apellidop" value="${escapeHtml(p.apellidop)}"></td>
+      <td><input type="text" class="form-control form-control-sm manual-apellidom" value="${escapeHtml(p.apellidom)}"></td>
+      <td><input type="text" class="form-control form-control-sm manual-cargo" value="${escapeHtml(p.cargo)}"></td>
+      <td class="text-center">
+        <button type="button" class="btn btn-outline-danger btn-sm btnEliminarManual" title="Eliminar fila">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function leerTablaManual() {
+  participantesManual = [...tbodyManualParticipantes.querySelectorAll('tr[data-index]')].map(tr => ({
+    rut: tr.querySelector('.manual-rut')?.value.trim() || '',
+    nombre: tr.querySelector('.manual-nombre')?.value.trim() || '',
+    apellidop: tr.querySelector('.manual-apellidop')?.value.trim() || '',
+    apellidom: tr.querySelector('.manual-apellidom')?.value.trim() || '',
+    cargo: tr.querySelector('.manual-cargo')?.value.trim() || '',
+  }));
+}
+
+function agregarFilaManual(render = true) {
+  participantesManual.push({ rut: '', nombre: '', apellidop: '', apellidom: '', cargo: '' });
+  if (render) renderTablaManual();
+}
+
+function guardarTemporalManual(mostrarAviso = true) {
+  leerTablaManual();
+  sessionStorage.setItem(manualStorageKey, JSON.stringify(participantesManual));
+  if (mostrarAviso) alert('Participantes manuales guardados temporalmente en esta sesión.');
+}
+
+function recuperarTemporalManual(mostrarAviso = true) {
+  const raw = sessionStorage.getItem(manualStorageKey);
+  if (!raw) {
+    if (mostrarAviso) alert('No hay participantes manuales temporales para recuperar.');
+    return false;
+  }
+
+  try {
+    const data = JSON.parse(raw);
+    participantesManual = Array.isArray(data) ? data : [];
+    renderTablaManual();
+    if (mostrarAviso) alert('Participantes manuales recuperados.');
+    return true;
+  } catch (e) {
+    sessionStorage.removeItem(manualStorageKey);
+    if (mostrarAviso) alert('No fue posible recuperar el temporal manual.');
+    return false;
+  }
+}
+
+function cancelarIngresoManual() {
+  if (!confirm('¿Deseas cancelar el ingreso manual y eliminar los datos temporales?')) return;
+  participantesManual = [];
+  sessionStorage.removeItem(manualStorageKey);
+  renderTablaManual();
+}
+
+function construirParticipantesManual() {
+  leerTablaManual();
+  const errores = [];
+  const participantes = [];
+
+  participantesManual.forEach((p, index) => {
+    const fila = index + 1;
+    const valores = [p.rut, p.nombre, p.apellidop, p.apellidom, p.cargo].map(v => String(v || '').trim());
+    const filaVacia = valores.every(v => v === '');
+    if (filaVacia) return;
+
+    const [rut, nombre, apellidop, apellidom, cargo] = valores;
+    if (!rut || !nombre || !apellidop || !apellidom || !cargo) {
+      errores.push(`Fila ${fila}: todos los campos son obligatorios${rut ? ' (RUT ' + rut + ')' : ''}.`);
+      return;
+    }
+    if (!validarRut(rut)) {
+      errores.push(`Fila ${fila}: RUT inválido ${rut}.`);
+      return;
+    }
+
+    participantes.push({ rut, nombre, apellidop, apellidom, cargo });
+  });
+
+  if (errores.length > 0) {
+    return { ok: false, error: errores.join('\n') };
+  }
+  if (participantes.length === 0) {
+    return { ok: false, error: 'Debe ingresar al menos un participante manual válido.' };
+  }
+
+  return { ok: true, participantes };
+}
+
+btnModoExcel?.addEventListener('click', () => setModoParticipantes('excel'));
+btnModoManual?.addEventListener('click', () => setModoParticipantes('manual'));
+document.getElementById('btnAgregarManual')?.addEventListener('click', () => {
+  leerTablaManual();
+  agregarFilaManual();
+});
+document.getElementById('btnGuardarManualTmp')?.addEventListener('click', () => guardarTemporalManual());
+document.getElementById('btnRecuperarManualTmp')?.addEventListener('click', () => recuperarTemporalManual());
+document.getElementById('btnCancelarManual')?.addEventListener('click', cancelarIngresoManual);
+tbodyManualParticipantes?.addEventListener('input', leerTablaManual);
+tbodyManualParticipantes?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btnEliminarManual');
+  if (!btn) return;
+  leerTablaManual();
+  const tr = btn.closest('tr[data-index]');
+  const idx = Number(tr?.dataset.index || -1);
+  if (idx >= 0) {
+    participantesManual.splice(idx, 1);
+    renderTablaManual();
+  }
+});
+renderTablaManual();
 
 function mostrarCargaExcel() {
   excelLoading.classList.remove('d-none');
@@ -1095,64 +1313,75 @@ document.getElementById('btnGuardar').onclick = async () => {
     alert('Completa todos los campos obligatorios.');
     return;
   }
-  if (_rutError) {
+  if (modoParticipantes === 'excel' && _rutError) {
     alert('Archivo con RUT inválidos. Corrige antes de guardar.');
     return;
   }
-  if ((_rows || []).length <= 1) {
+  if (modoParticipantes === 'excel' && (_rows || []).length <= 1) {
     alert('No hay participantes válidos.');
     return;
   }
 
-  const clean = _rows.filter(r =>
-    Array.isArray(r) && r.some(c => String(c || '').trim() !== '')
-  );
+  let participantes = [];
 
-  const hdr = (clean[0] || []).map(c => String(c || '').toUpperCase().trim());
-  const start = looksLikeHeader(clean[0]) ? 1 : 0;
-
-  const idx = {
-    rut: hdr.findIndex(h => h.includes('RUT')),
-    nombre: hdr.findIndex(h => h.includes('NOMBRE')),
-    apellidop: hdr.findIndex(h => h.includes('PATERNO')),
-    apellidom: hdr.findIndex(h => h.includes('MATERNO')),
-    cargo: hdr.findIndex(h => h.includes('CARGO'))
-  };
-
-  if (idx.cargo < 0) {
-    alert('El archivo no contiene columna CARGO. Corrige la planilla antes de guardar.');
-    return;
-  }
-
-  const rutsSinCargo = [];
-  for (let i = start; i < clean.length; i++) {
-    const r = clean[i] || [];
-    const rut = String(r[idx.rut] || '').trim();
-    const cargo = String(r[idx.cargo] || '').trim();
-
-    if (rut !== '' && cargo === '') {
-      rutsSinCargo.push(rut);
+  if (modoParticipantes === 'manual') {
+    const manual = construirParticipantesManual();
+    if (!manual.ok) {
+      alert('No se puede registrar la solicitud.\n\n' + manual.error);
+      return;
     }
-  }
-
-  if (rutsSinCargo.length > 0) {
-    alert(
-      'No se puede registrar la solicitud. Hay participantes sin cargo.\n\n' +
-      'RUT con cargo vacío: ' + rutsSinCargo.join(', ')
+    participantes = manual.participantes;
+    guardarTemporalManual(false);
+  } else {
+    const clean = _rows.filter(r =>
+      Array.isArray(r) && r.some(c => String(c || '').trim() !== '')
     );
-    return;
-  }
 
-  const participantes = [];
-  for (let i = start; i < clean.length; i++) {
-    const r = clean[i] || [];
-    participantes.push({
-      rut: r[idx.rut] || '',
-      nombre: r[idx.nombre] || '',
-      apellidop: r[idx.apellidop] || '',
-      apellidom: r[idx.apellidom] || '',
-      cargo: r[idx.cargo] || ''
-    });
+    const hdr = (clean[0] || []).map(c => String(c || '').toUpperCase().trim());
+    const start = looksLikeHeader(clean[0]) ? 1 : 0;
+
+    const idx = {
+      rut: hdr.findIndex(h => h.includes('RUT')),
+      nombre: hdr.findIndex(h => h.includes('NOMBRE')),
+      apellidop: hdr.findIndex(h => h.includes('PATERNO')),
+      apellidom: hdr.findIndex(h => h.includes('MATERNO')),
+      cargo: hdr.findIndex(h => h.includes('CARGO'))
+    };
+
+    if (idx.cargo < 0) {
+      alert('El archivo no contiene columna CARGO. Corrige la planilla antes de guardar.');
+      return;
+    }
+
+    const rutsSinCargo = [];
+    for (let i = start; i < clean.length; i++) {
+      const r = clean[i] || [];
+      const rut = String(r[idx.rut] || '').trim();
+      const cargo = String(r[idx.cargo] || '').trim();
+
+      if (rut !== '' && cargo === '') {
+        rutsSinCargo.push(rut);
+      }
+    }
+
+    if (rutsSinCargo.length > 0) {
+      alert(
+        'No se puede registrar la solicitud. Hay participantes sin cargo.\n\n' +
+        'RUT con cargo vacío: ' + rutsSinCargo.join(', ')
+      );
+      return;
+    }
+
+    for (let i = start; i < clean.length; i++) {
+      const r = clean[i] || [];
+      participantes.push({
+        rut: r[idx.rut] || '',
+        nombre: r[idx.nombre] || '',
+        apellidop: r[idx.apellidop] || '',
+        apellidom: r[idx.apellidom] || '',
+        cargo: r[idx.cargo] || ''
+      });
+    }
   }
 
   // === DESDE AQUÍ SÍ MOSTRAMOS "TRABAJANDO" ===
@@ -1172,6 +1401,10 @@ document.getElementById('btnGuardar').onclick = async () => {
     const data = await resp.json();
 
     if (data.ok) {
+      if (modoParticipantes === 'manual') {
+        sessionStorage.removeItem(manualStorageKey);
+        participantesManual = [];
+      }
       alert('✅ Solicitud guardada N° ' + data.nsolicitud);
       window.location.href = 'enviar_correo.php?nsolicitud=' + data.nsolicitud;
       return; // dejamos el overlay, la página cambia
