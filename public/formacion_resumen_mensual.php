@@ -12,6 +12,10 @@ if (empty($_SESSION['auth'])) {
 }
 
 $pdo = db();
+$rolUsuario = (int)($_SESSION['auth']['id_rol'] ?? 0);
+$mostrarEstadoDetalle = ($rolUsuario === 1);
+$mostrarRealizoPruebaDetalle = ($rolUsuario === 5);
+$mostrarColumnaPruebaDetalle = ($mostrarEstadoDetalle || $mostrarRealizoPruebaDetalle);
 
 function frmEsc(mixed $value): string
 {
@@ -360,13 +364,14 @@ canvas{max-height:320px;}
       <h5 class="section-title mb-3"><i class="bi bi-person-lines-fill me-2"></i>BD detalle</h5>
       <div class="table-sticky">
         <table class="table table-sm table-hover align-middle mb-0">
-          <thead><tr><th>Fecha reporte</th><th>Estado</th><th>RUT</th><th>Nombre</th><th>Empresa</th><th>Cargo</th><th>Servicio</th><th>Cuadrilla</th><th>Fecha programacion</th><th>Fecha rendicion</th></tr></thead>
+          <thead><tr><th>Fecha reporte</th><?php if ($mostrarEstadoDetalle): ?><th>Estado</th><?php elseif ($mostrarRealizoPruebaDetalle): ?><th>Realizó prueba</th><?php endif; ?><th>RUT</th><th>Nombre</th><th>Empresa</th><th>Cargo</th><th>Servicio</th><th>Cuadrilla</th><th>Fecha programacion</th><th>Fecha rendicion</th></tr></thead>
           <tbody>
-          <?php if (!$rows): ?><tr><td colspan="10" class="text-center text-muted py-4">Sin registros para los filtros seleccionados.</td></tr><?php endif; ?>
+          <?php if (!$rows): ?><tr><td colspan="<?= $mostrarColumnaPruebaDetalle ? 10 : 9 ?>" class="text-center text-muted py-4">Sin registros para los filtros seleccionados.</td></tr><?php endif; ?>
           <?php foreach ($rows as $r): ?>
             <tr>
               <td><?= frmEsc($r['fecha_reporte']) ?></td>
-              <td><span class="badge text-bg-<?= $r['estado_reporte'] === 'APROBADO' ? 'success' : ($r['estado_reporte'] === 'REPROBADO' ? 'danger' : ($r['estado_reporte'] === 'ANULADA' ? 'secondary' : 'warning')) ?>"><?= frmEsc($r['estado_reporte']) ?></span></td>
+              <?php if ($mostrarEstadoDetalle): ?><td><span class="badge text-bg-<?= $r['estado_reporte'] === 'APROBADO' ? 'success' : ($r['estado_reporte'] === 'REPROBADO' ? 'danger' : ($r['estado_reporte'] === 'ANULADA' ? 'secondary' : 'warning')) ?>"><?= frmEsc($r['estado_reporte']) ?></span></td><?php endif; ?>
+              <?php if ($mostrarRealizoPruebaDetalle): ?><td><?= in_array((string)$r['estado_reporte'], ['APROBADO', 'REPROBADO'], true) ? 'Si' : 'No' ?></td><?php endif; ?>
               <td><?= frmEsc($r['rut']) ?></td><td><?= frmEsc(trim((string)$r['nombre'] . ' ' . (string)$r['apellidos'])) ?></td><td><?= frmEsc($r['empresa']) ?></td><td><?= frmEsc($r['cargo']) ?></td><td><?= frmEsc($r['servicio']) ?></td><td><?= frmEsc($r['cuadrilla']) ?></td><td><?= frmEsc($r['fecha_programacion']) ?></td><td><?= frmEsc($r['fecha_resultado']) ?></td>
             </tr>
           <?php endforeach; ?>

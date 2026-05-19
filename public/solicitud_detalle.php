@@ -17,6 +17,11 @@ if (empty($_SESSION['auth'])) {
   exit;
 }
 
+if ((int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  echo "<div class='alert alert-danger m-5'>No autorizado para consultar solicitudes.</div>";
+  exit;
+}
+
 $pdo = db();
 $id = (int)($_GET['id'] ?? 0);
 if ($id <= 0) {
@@ -95,6 +100,7 @@ $solAutorizada = ($sol['estado'] === 'A');
 // ===============================================================
 $puedeImprimir = ($isAdmin || $isregasist) && $solAutorizada;
 $idRol = (int)($_SESSION['auth']['id_rol'] ?? 0);
+$puedeAgregarParticipante = ($isAdmin || $idRol === 5) && !$solCerrada;
 
 $esContratista = ($idRol === 3);
 
@@ -337,9 +343,16 @@ h4, h5, h6 {font-weight:500;}
   <div class="card rounded-4">
     <div class="card-body">
 
-      <h6 class="text-primary mb-3">
-        <i class="bi bi-people me-2"></i>Lista de Participantes
-      </h6>
+      <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
+        <h6 class="text-primary mb-0">
+          <i class="bi bi-people me-2"></i>Lista de Participantes
+        </h6>
+        <?php if ($puedeAgregarParticipante): ?>
+          <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAgregarParticipante">
+            <i class="bi bi-person-plus me-1"></i>Agregar participante
+          </button>
+        <?php endif; ?>
+      </div>
 
       <!-- Botón cerrar -->
 <?php if ($puedeCerrar && !$bloquearCerrar): ?>
@@ -712,7 +725,107 @@ document.getElementById('btnAutorizar')?.addEventListener('click', function () {
                 'solicitud_autoriza_envio.php?id=<?= (int)$sol['nsolicitud'] ?>';
             }, 50);
 });
+
+// ===========================================================
+// AGREGAR / ACTUALIZAR PARTICIPANTE
+// ===========================================================
+document.addEventListener('DOMContentLoaded', () => {
+document.getElementById('btnGuardarParticipanteNuevo')?.addEventListener('click', async function () {
+    const btn = this;
+    const msg = document.getElementById('agregarParticipanteMsg');
+    const payload = {
+        nsolicitud: <?= (int)$sol['nsolicitud'] ?>,
+        rut: document.getElementById('add_rut')?.value.trim() || '',
+        nombre: document.getElementById('add_nombre')?.value.trim() || '',
+        apellidop: document.getElementById('add_apellidop')?.value.trim() || '',
+        apellidom: document.getElementById('add_apellidom')?.value.trim() || '',
+        cargo: document.getElementById('add_cargo')?.value.trim() || ''
+    };
+
+    function setMsg(text, kind = 'info') {
+        if (!msg) return;
+        msg.innerHTML = text ? `<div class="alert alert-${kind} py-2 mb-0">${escapeHtml(text)}</div>` : '';
+    }
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value ?? '';
+        return div.innerHTML;
+    }
+
+    if (Object.values(payload).some(value => String(value).trim() === '')) {
+        setMsg('Todos los campos son obligatorios.', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    setMsg('Grabando participante...', 'info');
+
+    try {
+        const resp = await fetch('ajax_solicitud_participante_guardar.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'No se pudo guardar el participante.');
+        setMsg(data.accion === 'actualizado' ? 'Participante actualizado correctamente.' : 'Participante agregado correctamente.', 'success');
+        setTimeout(() => location.reload(), 700);
+    } catch (err) {
+        setMsg(err.message || 'Error al guardar participante.', 'danger');
+    } finally {
+        btn.disabled = false;
+    }
+});
+});
 </script>
+<?php if ($puedeAgregarParticipante): ?>
+<div class="modal fade" id="modalAgregarParticipante" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content rounded-4">
+      <div class="modal-header bg-primary text-white rounded-top-4">
+        <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Agregar participante a solicitud</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border small">
+          Si el RUT ya existe en esta solicitud, se actualizarán solo sus datos personales y cargo. No se modifican autorización, asistencia, aprobación ni observaciones existentes.
+        </div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">RUT</label>
+            <input type="text" class="form-control form-control-sm" id="add_rut" placeholder="12345678-9" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Nombre</label>
+            <input type="text" class="form-control form-control-sm" id="add_nombre" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Apellido Paterno</label>
+            <input type="text" class="form-control form-control-sm" id="add_apellidop" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Apellido Materno</label>
+            <input type="text" class="form-control form-control-sm" id="add_apellidom" required>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">Cargo</label>
+            <input type="text" class="form-control form-control-sm" id="add_cargo" required>
+          </div>
+        </div>
+        <div id="agregarParticipanteMsg" class="mt-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btnGuardarParticipanteNuevo">
+          <i class="bi bi-save me-1"></i>Grabar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 <?php if ($isAdmin): ?>
 <div class="modal fade" id="modalEditarSolicitud" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">

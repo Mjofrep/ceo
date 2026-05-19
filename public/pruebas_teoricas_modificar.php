@@ -20,12 +20,50 @@ if (empty($_SESSION['auth'])) {
 $pdo = db();
 $msg = "";
 
+function buildRedirectUrl(int $idAgrupacion, int $idPregunta = 0, string $msg = '', string $type = 'success'): string
+{
+  $params = ['id_agrupacion' => $idAgrupacion];
+  if ($idPregunta > 0) {
+    $params['id_pregunta'] = $idPregunta;
+  }
+  if ($msg !== '') {
+    $params['msg'] = $msg;
+    $params['type'] = $type;
+  }
+  return 'pruebas_teoricas_modificar.php?' . http_build_query($params);
+}
+
+function redirectBack(int $idAgrupacion, int $idPregunta = 0, string $msg = '', string $type = 'success'): void
+{
+  header('Location: ' . buildRedirectUrl($idAgrupacion, $idPregunta, $msg, $type));
+  exit;
+}
+
+function decodeAlternativas(?string $json): array
+{
+  if (!$json) {
+    return [];
+  }
+  $decoded = json_decode($json, true);
+  return is_array($decoded) ? $decoded : [];
+}
 // ======== CARGAR AGRUPACIONES ========
 $agrupaciones = $pdo->query("SELECT id, titulo FROM ceo_agrupacion ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+if (isset($_GET['msg'])) {
+  $type = (string)($_GET['type'] ?? 'success');
+  $class = match ($type) {
+    'info' => 'alert-info',
+    'danger' => 'alert-danger',
+    default => 'alert-success',
+  };
+  $msg = "<div class='alert {$class} mt-3'>" . htmlspecialchars((string)$_GET['msg']) . "</div>";
+}
 
 // ======== ACCIONES ========
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
+  $idSelPost = (int)($_POST['id_agrupacion'] ?? 0);
   try {
     if ($action === 'update') {
       $idPregunta = (int)$_POST['id_pregunta'];
@@ -123,22 +161,33 @@ if (!empty($_POST['nueva_alt_texto'])) {
   }
 }
 
-
-      $msg = "<div class='alert alert-success mt-3'>✅ Pregunta #{$idPregunta} actualizada correctamente.</div>";
+      redirectBack($idSelPost, $idPregunta, "Pregunta #{$idPregunta} actualizada correctamente.");
     }
 
     // === Eliminar pregunta / alternativa ===
     if ($action === 'delete_pregunta') {
       $id = (int)$_POST['id_pregunta'];
+
+      $stmtNext = $pdo->prepare("SELECT id FROM ceo_preguntas_servicios WHERE id_agrupacion = :id_agrupacion AND id > :id ORDER BY id ASC LIMIT 1");
+      $stmtNext->execute([':id_agrupacion' => $idSelPost, ':id' => $id]);
+      $nextId = (int)($stmtNext->fetchColumn() ?: 0);
+
+      if ($nextId <= 0) {
+        $stmtPrev = $pdo->prepare("SELECT id FROM ceo_preguntas_servicios WHERE id_agrupacion = :id_agrupacion AND id < :id ORDER BY id DESC LIMIT 1");
+        $stmtPrev->execute([':id_agrupacion' => $idSelPost, ':id' => $id]);
+        $nextId = (int)($stmtPrev->fetchColumn() ?: 0);
+      }
+
       $pdo->prepare("DELETE FROM ceo_alternativas_preguntas WHERE id_pregunta=?")->execute([$id]);
       $pdo->prepare("DELETE FROM ceo_preguntas_servicios WHERE id=?")->execute([$id]);
-      $msg = "<div class='alert alert-info mt-3'>🗑️ Pregunta eliminada correctamente.</div>";
+      redirectBack($idSelPost, $nextId, 'Pregunta eliminada correctamente.', 'info');
     }
 
     if ($action === 'delete_alternativa') {
       $id = (int)$_POST['id_alternativa'];
+      $idPregunta = (int)($_POST['id_pregunta'] ?? 0);
       $pdo->prepare("DELETE FROM ceo_alternativas_preguntas WHERE id=?")->execute([$id]);
-      $msg = "<div class='alert alert-info mt-3'>🗑️ Alternativa eliminada correctamente.</div>";
+      redirectBack($idSelPost, $idPregunta, 'Alternativa eliminada correctamente.', 'info');
     }
 
   } catch (Throwable $e) {
@@ -148,9 +197,35 @@ if (!empty($_POST['nueva_alt_texto'])) {
 
 // ======== LISTAR PREGUNTAS ========
 $idSel = (int)($_GET['id_agrupacion'] ?? ($_POST['id_agrupacion'] ?? 0));
-$preguntas = [];
+$idPreguntaSel = (int)($_GET['id_pregunta'] ?? 0);
+$preguntasNav = [];
+$preguntaActiva = null;
+$alternativasActivas = [];
+$indiceActual = 0;
+
 if ($idSel > 0) {
-  $stmt = $pdo->prepare("
+  $stmtNav = $pdo->prepare("SELECT id FROM ceo_preguntas_servicios WHERE id_agrupacion = :id ORDER BY id ASC");
+  $stmtNav->execute([':id' => $idSel]);
+  $preguntasNav = $stmtNav->fetchAll(PDO::FETCH_ASSOC);
+
+  if (!$idPreguntaSel && !empty($preguntasNav)) {
+    $idPreguntaSel = (int)$preguntasNav[0]['id'];
+  }
+
+  foreach ($preguntasNav as $idx => $preguntaNav) {
+    if ((int)$preguntaNav['id'] === $idPreguntaSel) {
+      $indiceActual = $idx + 1;
+      break;
+    }
+  }
+
+  if ($idPreguntaSel > 0 && $indiceActual === 0 && !empty($preguntasNav)) {
+    $idPreguntaSel = (int)$preguntasNav[0]['id'];
+    $indiceActual = 1;
+  }
+
+  if ($idPreguntaSel > 0) {
+    $stmt = $pdo->prepare("
     SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg,
            (SELECT JSON_ARRAYAGG(JSON_OBJECT(
               'id', a.id,
@@ -160,12 +235,26 @@ if ($idSel > 0) {
             )) FROM ceo_alternativas_preguntas a WHERE a.id_pregunta = p.id
            ) AS alternativas
       FROM ceo_preguntas_servicios p
-     WHERE p.id_agrupacion = :id
-     ORDER BY p.id ASC
+     WHERE p.id_agrupacion = :id_agrupacion
+       AND p.id = :id_pregunta
+     LIMIT 1
   ");
-  $stmt->execute([':id' => $idSel]);
-  $preguntas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->execute([
+      ':id_agrupacion' => $idSel,
+      ':id_pregunta' => $idPreguntaSel,
+    ]);
+    $preguntaActiva = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($preguntaActiva) {
+      $alternativasActivas = decodeAlternativas($preguntaActiva['alternativas'] ?? null);
+    }
+  }
 }
+
+$totalPreguntas = count($preguntasNav);
+$indicePrevio = $indiceActual > 1 ? $indiceActual - 1 : 0;
+$indiceSiguiente = ($indiceActual > 0 && $indiceActual < $totalPreguntas) ? $indiceActual + 1 : 0;
+$idPreguntaPrevia = $indicePrevio > 0 ? (int)$preguntasNav[$indicePrevio - 1]['id'] : 0;
+$idPreguntaSiguiente = $indiceSiguiente > 0 ? (int)$preguntasNav[$indiceSiguiente - 1]['id'] : 0;
 ?>
 <!doctype html>
 <html lang="es">
@@ -182,6 +271,8 @@ body{background:#f7f9fc;font-size:0.9rem;}
 .alt-correcta{background:#d1e7dd;}
 .form-label{font-weight:500;font-size:0.85rem;}
 .alt-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;}
+.btn-pregunta-circle{width:38px;height:38px;border-radius:50%;font-size:.9rem;padding:0;display:inline-flex;align-items:center;justify-content:center;border:none;background-color:#adb5bd;color:#fff;text-decoration:none;}
+.btn-pregunta-circle.active{background-color:#0d6efd;}
 </style>
 </head>
 <body>
@@ -221,78 +312,96 @@ body{background:#f7f9fc;font-size:0.9rem;}
     </div>
   </div>
 
-  <?php if ($idSel > 0 && !empty($preguntas)): ?>
-    <?php foreach ($preguntas as $p): 
-        $alts = [];
-        if (!empty($p['alternativas']) && is_string($p['alternativas'])) {
-            $alts = json_decode($p['alternativas'], true);
-            if (!is_array($alts)) {
-                $alts = [];
-            }
-        }
+  <?php if ($idSel > 0 && !empty($preguntasNav)): ?>
+    <div class="card rounded-4 mb-4">
+      <div class="card-body text-center">
+        <div class="d-flex flex-wrap justify-content-center gap-2 mb-3">
+          <?php foreach ($preguntasNav as $idx => $preguntaNav): ?>
+            <?php $num = $idx + 1; ?>
+            <a href="<?= htmlspecialchars(buildRedirectUrl($idSel, (int)$preguntaNav['id'])) ?>"
+               class="btn-pregunta-circle <?= ((int)$preguntaNav['id'] === $idPreguntaSel) ? 'active' : '' ?>"
+               title="Pregunta <?= $num ?>">
+              <?= $num ?>
+            </a>
+          <?php endforeach; ?>
+        </div>
+        <div class="d-flex justify-content-center gap-2">
+          <a href="<?= $idPreguntaPrevia > 0 ? htmlspecialchars(buildRedirectUrl($idSel, $idPreguntaPrevia)) : '#' ?>"
+             class="btn btn-outline-secondary btn-sm <?= $idPreguntaPrevia <= 0 ? 'disabled' : '' ?>">Anterior</a>
+          <a href="<?= $idPreguntaSiguiente > 0 ? htmlspecialchars(buildRedirectUrl($idSel, $idPreguntaSiguiente)) : '#' ?>"
+             class="btn btn-outline-secondary btn-sm <?= $idPreguntaSiguiente <= 0 ? 'disabled' : '' ?>">Siguiente</a>
+        </div>
+        <div class="mt-2 small text-muted">
+          Pregunta <strong><?= (int)$indiceActual ?></strong> de <strong><?= (int)$totalPreguntas ?></strong>
+        </div>
+      </div>
+    </div>
+  <?php endif; ?>
 
-    ?>
+  <?php if ($preguntaActiva): ?>
     <form method="POST" enctype="multipart/form-data" class="card rounded-4 mb-4 p-3">
       <input type="hidden" name="action" value="update">
-      <input type="hidden" name="id_pregunta" value="<?= $p['id'] ?>">
-      <input type="hidden" name="id_agrupacion" value="<?= $idSel ?>">
+      <input type="hidden" name="id_pregunta" value="<?= (int)$preguntaActiva['id'] ?>">
+      <input type="hidden" name="id_agrupacion" value="<?= (int)$idSel ?>">
 
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="text-primary mb-0"><i class="bi bi-question-circle me-2"></i>Pregunta #<?= $p['id'] ?></h6>
-        <button type="button" class="btn btn-outline-danger btn-sm btn-delete-pregunta" data-id="<?= $p['id'] ?>"><i class="bi bi-trash"></i></button>
+        <div>
+          <h6 class="text-primary mb-0"><i class="bi bi-question-circle me-2"></i>Pregunta <?= (int)$indiceActual ?> de <?= (int)$totalPreguntas ?></h6>
+          <small class="text-muted">ID interno: <?= (int)$preguntaActiva['id'] ?></small>
+        </div>
+        <button type="button" class="btn btn-outline-danger btn-sm btn-delete-pregunta" data-id="<?= (int)$preguntaActiva['id'] ?>"><i class="bi bi-trash"></i></button>
       </div>
 
-      <textarea name="pregunta_texto" id="pregunta_<?= $p['id'] ?>"><?= $p['pregunta'] ?></textarea>
+      <textarea name="pregunta_texto" id="pregunta_<?= (int)$preguntaActiva['id'] ?>"><?= $preguntaActiva['pregunta'] ?></textarea>
 
-      <?php if ($p['imagen']): ?>
+      <?php if ($preguntaActiva['imagen']): ?>
         <div class="my-2">
           <label class="form-label">Contenido actual:</label>
-          <?php if (preg_match('/\.(jpg|jpeg|png|gif)$/i', $p['imagen'])): ?>
-            <img src="../<?= htmlspecialchars($p['imagen']) ?>" class="img-fluid rounded shadow-sm" style="max-width:250px;">
+          <?php if (preg_match('/\.(jpg|jpeg|png|gif)$/i', (string)$preguntaActiva['imagen'])): ?>
+            <img src="../<?= htmlspecialchars((string)$preguntaActiva['imagen']) ?>" class="img-fluid rounded shadow-sm" style="max-width:250px;">
           <?php else: ?>
-            <a href="<?= htmlspecialchars($p['imagen']) ?>" target="_blank"><i class="bi bi-play-btn"></i> Ver video</a>
+            <a href="<?= htmlspecialchars((string)$preguntaActiva['imagen']) ?>" target="_blank"><i class="bi bi-play-btn"></i> Ver video</a>
           <?php endif; ?>
         </div>
       <?php endif; ?>
 
-      <input type="hidden" name="pregunta_imagen_actual" value="<?= htmlspecialchars($p['imagen']) ?>">
+      <input type="hidden" name="pregunta_imagen_actual" value="<?= htmlspecialchars((string)($preguntaActiva['imagen'] ?? '')) ?>">
       <label class="form-label">Reemplazar imagen</label>
       <input type="file" name="pregunta_imagen" accept="image/*" class="form-control mb-2">
       <label class="form-label">O URL de video</label>
       <input type="url" name="pregunta_video" class="form-control mb-3" placeholder="https://...">
 
-      <?php if (!empty($alts)): ?>
-        <fieldset class="mb-3">
+      <fieldset class="mb-3">
           <legend>Alternativas</legend>
-          <div id="alt_container_<?= $p['id'] ?>">
-            <?php foreach ($alts as $a): ?>
-              <input type="hidden" name="alt_id_<?= $a['id'] ?>" value="<?= $a['id'] ?>">
-              <div class="border rounded p-2 mb-2 <?= $a['correcta']==='S'?'alt-correcta':'' ?>">
+          <div id="alt_container_<?= (int)$preguntaActiva['id'] ?>">
+            <?php foreach ($alternativasActivas as $a): ?>
+              <input type="hidden" name="alt_id_<?= (int)$a['id'] ?>" value="<?= (int)$a['id'] ?>">
+              <div class="border rounded p-2 mb-2 <?= ($a['correcta'] ?? '') === 'S' ? 'alt-correcta' : '' ?>">
                 <div class="alt-header">
                   <div class="d-flex align-items-center gap-2">
-                    <input type="radio" name="correcta_alt" value="<?= $a['id'] ?>" <?= $a['correcta']==='S'?'checked':'' ?>>
+                    <input type="radio" name="correcta_alt" value="<?= (int)$a['id'] ?>" <?= ($a['correcta'] ?? '') === 'S' ? 'checked' : '' ?>>
                     <small>Correcta</small>
                   </div>
-                  <button type="button" class="btn btn-outline-danger btn-sm btn-del-alt" data-id="<?= $a['id'] ?>" title="Eliminar alternativa"><i class="bi bi-x-circle"></i></button>
+                  <button type="button" class="btn btn-outline-danger btn-sm btn-del-alt" data-id="<?= (int)$a['id'] ?>" title="Eliminar alternativa"><i class="bi bi-x-circle"></i></button>
                 </div>
-                <textarea name="alt_texto_<?= $a['id'] ?>" id="alt_texto_<?= $a['id'] ?>"><?= $a['alternativa'] ?></textarea>
+                <textarea name="alt_texto_<?= (int)$a['id'] ?>" id="alt_texto_<?= (int)$a['id'] ?>"><?= $a['alternativa'] ?></textarea>
                 <?php if (!empty($a['imagen'])): ?>
                     <div class="mt-2">
                         <label class="form-label">Contenido actual:</label>
-                        <?php if (preg_match('/\.(jpg|jpeg|png|gif)$/i', $a['imagen'])): ?>
-                            <img src="../<?= htmlspecialchars($a['imagen']) ?>" 
-                                 class="img-fluid rounded shadow-sm" 
+                        <?php if (preg_match('/\.(jpg|jpeg|png|gif)$/i', (string)$a['imagen'])): ?>
+                            <img src="../<?= htmlspecialchars((string)$a['imagen']) ?>"
+                                 class="img-fluid rounded shadow-sm"
                                  style="max-width:180px;">
                         <?php else: ?>
-                            <a href="<?= htmlspecialchars($a['imagen']) ?>" 
+                            <a href="<?= htmlspecialchars((string)$a['imagen']) ?>"
                                target="_blank">
                                <i class="bi bi-play-btn-fill me-1"></i> Ver video
                             </a>
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
-                <input type="hidden" name="alt_imagen_actual_<?= $a['id'] ?>" value="<?= htmlspecialchars($a['imagen']) ?>">
-                <textarea name="alt_textoextra_<?= $a['id'] ?>"
+                <input type="hidden" name="alt_imagen_actual_<?= (int)$a['id'] ?>" value="<?= htmlspecialchars((string)($a['imagen'] ?? '')) ?>">
+                <textarea name="alt_textoextra_<?= (int)$a['id'] ?>"
           class="form-control form-control-sm mt-2"
           rows="2"
           placeholder="(Opcional) Texto complementario para IMAGEN/VIDEO"></textarea>
@@ -302,47 +411,26 @@ body{background:#f7f9fc;font-size:0.9rem;}
           </div>
           <!-- Botón agregar alternativa -->
           <div class="text-end">
-            <button type="button" class="btn btn-outline-success btn-sm mt-2 btn-add-alt" data-id="<?= $p['id'] ?>">
+            <button type="button" class="btn btn-outline-success btn-sm mt-2 btn-add-alt" data-id="<?= (int)$preguntaActiva['id'] ?>">
               <i class="bi bi-plus-circle me-1"></i>Agregar alternativa
             </button>
           </div>
         </fieldset>
-      <?php endif; ?>
-
       <fieldset class="mb-3">
         <legend>Retroalimentación Correcta</legend>
-        <textarea name="retropos" id="retropos_<?= $p['id'] ?>"><?= $p['retropos'] ?></textarea>
+        <textarea name="retropos" id="retropos_<?= (int)$preguntaActiva['id'] ?>"><?= $preguntaActiva['retropos'] ?></textarea>
       </fieldset>
       <fieldset class="mb-3">
         <legend>Retroalimentación Incorrecta</legend>
-        <textarea name="retroneg" id="retroneg_<?= $p['id'] ?>"><?= $p['retroneg'] ?></textarea>
+        <textarea name="retroneg" id="retroneg_<?= (int)$preguntaActiva['id'] ?>"><?= $preguntaActiva['retroneg'] ?></textarea>
       </fieldset>
 
       <div class="text-end">
         <button type="submit" class="btn btn-success px-4"><i class="bi bi-save me-2"></i>Guardar cambios</button>
       </div>
     </form>
-		<script>
-		// Desactiva advertencias de actualización de CKEditor
-		if (window.CKEDITOR) {
-		  CKEDITOR.disableAutoInline = true;
-		  CKEDITOR.config.versionCheck = false;
-		  if (CKEDITOR.plugins && CKEDITOR.plugins.addExternal) {
-		    console.log("CKEditor loaded with version check disabled.");
-		  }
-		}
-		// Suprime mensajes en consola
-		window.CKEDITOR_VERSION_WARNING = false;
-</script>
-    <script>
-      CKEDITOR.replace('pregunta_<?= $p['id'] ?>',{height:80});
-      CKEDITOR.replace('retropos_<?= $p['id'] ?>',{height:70});
-      CKEDITOR.replace('retroneg_<?= $p['id'] ?>',{height:70});
-      <?php foreach ($alts as $a): ?>
-        CKEDITOR.replace('alt_texto_<?= $a['id'] ?>',{height:60});
-      <?php endforeach; ?>
-    </script>
-    <?php endforeach; ?>
+  <?php elseif ($idSel > 0): ?>
+    <div class="alert alert-warning">La agrupación seleccionada no tiene preguntas configuradas.</div>
   <?php endif; ?>
 </div>
 
@@ -352,6 +440,7 @@ body{background:#f7f9fc;font-size:0.9rem;}
     <div class="modal-content">
       <form method="POST">
         <input type="hidden" name="action" id="action_modal">
+        <input type="hidden" name="id_agrupacion" value="<?= (int)$idSel ?>">
         <input type="hidden" name="id_pregunta" id="id_pregunta_modal">
         <input type="hidden" name="id_alternativa" id="id_alternativa_modal">
         <div class="modal-header bg-danger text-white">
@@ -372,13 +461,21 @@ body{background:#f7f9fc;font-size:0.9rem;}
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+if (window.CKEDITOR) {
+  CKEDITOR.disableAutoInline = true;
+  CKEDITOR.config.versionCheck = false;
+}
+window.CKEDITOR_VERSION_WARNING = false;
+
 const modalConfirm = new bootstrap.Modal(document.getElementById('modalConfirm'));
+const preguntaIdActual = <?= (int)$idPreguntaSel ?>;
 
 // === Confirmaciones de eliminación ===
 document.querySelectorAll('.btn-delete-pregunta').forEach(btn=>{
   btn.addEventListener('click',()=>{
     document.getElementById('action_modal').value='delete_pregunta';
     document.getElementById('id_pregunta_modal').value=btn.dataset.id;
+    document.getElementById('id_alternativa_modal').value='';
     document.getElementById('textoConfirm').innerText='¿Eliminar esta pregunta y todas sus alternativas?';
     modalConfirm.show();
   });
@@ -386,6 +483,7 @@ document.querySelectorAll('.btn-delete-pregunta').forEach(btn=>{
 document.querySelectorAll('.btn-del-alt').forEach(btn=>{
   btn.addEventListener('click',()=>{
     document.getElementById('action_modal').value='delete_alternativa';
+    document.getElementById('id_pregunta_modal').value=preguntaIdActual;
     document.getElementById('id_alternativa_modal').value=btn.dataset.id;
     document.getElementById('textoConfirm').innerText='¿Eliminar esta alternativa?';
     modalConfirm.show();
@@ -430,9 +528,20 @@ block.innerHTML = `
 `;
 
     cont.appendChild(block);
-    CKEDITOR.replace('nueva_alt_texto_'+idx,{height:60});
+    if (window.CKEDITOR) {
+      CKEDITOR.replace('nueva_alt_texto_'+idx,{height:60});
+    }
   });
 });
+
+if (window.CKEDITOR && preguntaIdActual > 0) {
+  CKEDITOR.replace('pregunta_' + preguntaIdActual,{height:80});
+  CKEDITOR.replace('retropos_' + preguntaIdActual,{height:70});
+  CKEDITOR.replace('retroneg_' + preguntaIdActual,{height:70});
+  document.querySelectorAll('textarea[id^="alt_texto_"]').forEach(el => {
+    CKEDITOR.replace(el.id,{height:60});
+  });
+}
 </script>
 </body>
 </html>

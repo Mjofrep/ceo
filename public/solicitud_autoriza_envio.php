@@ -24,6 +24,11 @@ if (empty($_SESSION['auth'])) {
   exit;
 }
 
+if ((int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  echo "<div class='alert alert-danger m-5'>No autorizado para autorizar solicitudes.</div>";
+  exit;
+}
+
 $pdo = db();
 $idSolicitud = (int)($_GET['id'] ?? 0);
 if ($idSolicitud <= 0) {
@@ -104,6 +109,7 @@ SELECT ps.rut, ps.nombre, ps.apellidop, ps.apellidom,
 $stp = $pdo->prepare($sqlPart);
 $stp->execute([':id'=>$idSolicitud]);
 $participantes = $stp->fetchAll(PDO::FETCH_ASSOC);
+$cantidadPersonas = count($participantes);
 
 $stmtSol = $pdo->prepare("
 SELECT u.correo, u.nombres
@@ -174,7 +180,8 @@ body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; font-size: 11px; 
   </tr>
   <tr>
     <td colspan="2"><b>Responsable HSE</b> <span class="box"><?= htmlspecialchars($respHSE) ?></span></td>
-    <td colspan="3"><b>Unidad Operativa</b> <span class="box"><?= htmlspecialchars($uo) ?></span></td>
+    <td colspan="2"><b>Unidad Operativa</b> <span class="box"><?= htmlspecialchars($uo) ?></span></td>
+    <td><b>Cant. Personas</b> <span class="box"><?= (int)$cantidadPersonas ?></span></td>
   </tr>
   <tr>
     <td colspan="2"><b>Responsable Línea</b> <span class="box"><?= htmlspecialchars($respLinea) ?></span></td>

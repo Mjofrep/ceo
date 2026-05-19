@@ -34,9 +34,10 @@ if (!$agrup) {
 
 // =================== ÁREAS DE COMPETENCIA ===================
 $stmtArea = $pdo->prepare("
-    SELECT id, descripcion
-    FROM ceo_areacompetencias
+    SELECT MIN(id) AS id, descripcion
+    FROM ceo_areacompetencia_formacion
     WHERE id_servicio = :id_servicio
+    GROUP BY descripcion
     ORDER BY descripcion
 ");
 $stmtArea->execute([

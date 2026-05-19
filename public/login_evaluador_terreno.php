@@ -17,17 +17,17 @@ function debug_point(string $msg): void {
 $err = '';
 
 /* ============================================================
-   Cargar lista de evaluadores rol=4
+   Cargar lista de evaluadores de terreno
    ============================================================ */
 $listaEvaluadores = [];
 
 try {
     $pdo = db();
 
-    $sql = "SELECT id, CONCAT(nombres,' ',apellidos) AS nombre
-            FROM ceo_usuarios
-            WHERE id_rol in (4,5) AND estado = 'A' and clavepruebas is  not null
-            ORDER BY nombres, apellidos";
+    $sql = "SELECT id, rut, CONCAT(nombre, ' ', paterno, ' ', materno) AS nombre
+            FROM ceo_evaluadores
+            WHERE clave IS NOT NULL AND clave <> ''
+            ORDER BY nombre, paterno, materno";
 
     $stmt = $pdo->query($sql);
     $listaEvaluadores = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -62,26 +62,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo = db();
 
                 /* ============================================================
-                   1) VALIDAR LOGIN CONTRA clavepruebas
+                   1) VALIDAR LOGIN CONTRA ceo_evaluadores
                    ============================================================ */
                 $sql = "
                     SELECT 
-                        u.id,
-                        u.nombres,
-                        u.apellidos,
-                        u.correo,
-                        u.id_rol,
-                        r.rol,
-                        u.id_empresa,
-                        e.nombre AS empresa,
-                        u.clavepruebas
-                    FROM ceo_usuarios u
-                    LEFT JOIN ceo_rol r ON r.id = u.id_rol
-                    LEFT JOIN ceo_empresas e ON e.id = u.id_empresa
-                    WHERE u.id = :id
-                    AND u.clavepruebas = :clave
-                    AND u.id_rol in (4,5)
-                    AND u.estado = 'A'
+                        id,
+                        rut,
+                        nombre,
+                        paterno,
+                        materno,
+                        correo,
+                        clave
+                    FROM ceo_evaluadores
+                    WHERE id = :id
+                    AND clave = :clave
                     LIMIT 1
                 ";
 
@@ -100,20 +94,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 debug_point('Login fallido: usuario no encontrado');
                 $err = "Evaluador o clave incorrecta.";
             } else {
-                debug_point('Login exitoso para usuario ID ' . $usr['id']);
-                         $_SESSION['nombre_referente'] = trim($usr['nombres'] . ' ' . $usr['apellidos']);
+                debug_point('Login exitoso para evaluador ID ' . $usr['id']);
+                    $nombreCompleto = trim(($usr['nombre'] ?? '') . ' ' . ($usr['paterno'] ?? '') . ' ' . ($usr['materno'] ?? ''));
+                    $_SESSION['nombre_referente'] = $nombreCompleto;
                     /* ============================================================
                        LOGIN EXITOSO → Guardar sesión del evaluador
                        ============================================================ */
                     $_SESSION['auth'] = [
                         'id'          => $usr['id'],
-                        'nombre'      => trim(($usr['nombres'] ?? '') . ' ' . ($usr['apellidos'] ?? '')),
+                        'rut'         => $usr['rut'] ?? '',
+                        'nombre'      => $nombreCompleto,
                         'correo'      => $usr['correo'] ?? '',
-                        'rol'         => $usr['rol'] ?? 'Evaluador',
-                        'id_rol'      => (int)($usr['id_rol'] ?? 4),
-                        'id_empresa'  => (int)($usr['id_empresa'] ?? 0),
-                        'empresa'     => $usr['empresa'] ?? '',
-                        'codigo'      => $usr['id'] // antes usaba rutAlumno
+                        'rol'         => 'Evaluador Terreno',
+                        'id_rol'      => 4,
+                        'id_empresa'  => 0,
+                        'empresa'     => '',
+                        'codigo'      => $usr['rut'] ?? ''
                     ];
 
                     // Redirección al HOME DEL EVALUADOR
@@ -214,7 +210,7 @@ body{
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
 
     <!-- ============================================================
-         SELECT DE EVALUADORES (ROL 4)
+         SELECT DE EVALUADORES DE TERRENO
          ============================================================ -->
     <div class="form-floating mb-3">
         <select class="form-select" id="usuario" name="usuario" required>

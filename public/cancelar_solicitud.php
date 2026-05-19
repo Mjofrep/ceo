@@ -12,6 +12,11 @@ if (empty($_SESSION['auth'])) {
   exit;
 }
 
+if ((int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  echo "<div class='alert alert-danger m-5'>No autorizado para cancelar solicitudes.</div>";
+  exit;
+}
+
 $pdo = db();
 $id = (int)($_GET['id'] ?? 0);
 if ($id <= 0) {

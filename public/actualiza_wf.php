@@ -12,6 +12,11 @@ if (empty($_SESSION['auth'])) {
   exit;
 }
 
+if ((int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  echo "<div class='alert alert-danger m-5'>No autorizado para Actualizar Work Follow.</div>";
+  exit;
+}
+
 $pdo = db();
 $registros = [];
 $msg = '';
@@ -179,4 +184,3 @@ document.getElementById('btnUpload').addEventListener('click', async ()=>{
 </script>
 </body>
 </html>
-

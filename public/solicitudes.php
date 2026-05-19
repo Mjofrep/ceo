@@ -30,11 +30,13 @@ $error = '';
 $idRol     = (int)($_SESSION['auth']['id_rol'] ?? 0);
 $idEmpresa = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 $idUsuario = $_SESSION['auth']['id'];
+$rolIngresoEspecial = ($idRol === 6);
 
 /* ============================================================
    Validación permisos Work Follow
    ============================================================ */
 $rolContratista = ($idRol === 3);
+$accionesRestringidas = ($rolContratista || $rolIngresoEspecial);
 
 $where  = '';
 $params = [];
@@ -55,8 +57,8 @@ if (($idRol == 1 || $idRol == 5) && $idEmpresa == $empresaEnel) {
     // Acceso total
     $where = "1=1";
 
-// --- Caso 2: Roles 3 o 4 (solo ver lo que él solicitó) ---
-} elseif ($idRol == 3 || $idRol == 4) {
+// --- Caso 2: Roles 3, 4 o 6 (solo ver lo que él solicitó) ---
+} elseif ($idRol == 3 || $idRol == 4 || $idRol == 6) {
 
     $where = "s.solicitante = :iduser";
     $params[':iduser'] = $idUsuario;
@@ -168,14 +170,14 @@ try {
     <div class="card-body py-3 d-flex justify-content-between align-items-center flex-wrap gap-3">
       <div class="d-flex gap-3 align-items-center flex-wrap icon-btn">
         <i class="bi bi-plus-circle text-primary fs-4" title="Ingresar Solicitud" id="btnNuevaSolicitud"></i>
-        <i class="bi bi-search text-info fs-4" title="Consultar Solicitud" id="btnConsultar"></i>
+        <i class="bi bi-search fs-4 <?= $rolIngresoEspecial ? 'text-secondary' : 'text-info' ?>" title="<?= $rolIngresoEspecial ? 'No autorizado para su rol' : 'Consultar Solicitud' ?>" id="btnConsultar" <?= $rolIngresoEspecial ? 'style="cursor:not-allowed; opacity:0.5;"' : '' ?>></i>
         <i
-          class="bi bi-arrow-repeat fs-4 <?= $rolContratista ? 'text-secondary' : 'text-warning' ?>"
-          title="<?= $rolContratista ? 'No autorizado para su rol' : 'Actualizar Work Follow' ?>"
+          class="bi bi-arrow-repeat fs-4 <?= $accionesRestringidas ? 'text-secondary' : 'text-warning' ?>"
+          title="<?= $accionesRestringidas ? 'No autorizado para su rol' : 'Actualizar Work Follow' ?>"
           id="btnActualizarWF"
-          <?= $rolContratista ? 'style="cursor:not-allowed; opacity:0.5;"' : '' ?>
+          <?= $accionesRestringidas ? 'style="cursor:not-allowed; opacity:0.5;"' : '' ?>
         ></i>
-        <i class="bi bi-x-circle text-danger fs-4" title="Cancelar Solicitud" id="btnCancelar"></i>
+        <i class="bi bi-x-circle fs-4 <?= $rolIngresoEspecial ? 'text-secondary' : 'text-danger' ?>" title="<?= $rolIngresoEspecial ? 'No autorizado para su rol' : 'Cancelar Solicitud' ?>" id="btnCancelar" <?= $rolIngresoEspecial ? 'style="cursor:not-allowed; opacity:0.5;"' : '' ?>></i>
 
         <i class="bi bi-door-closed text-dark fs-4" title="Cerrar" id="btnCerrar"></i>
 
@@ -194,6 +196,7 @@ try {
             <option value="nsolicitud">N° Solicitud</option>
             <option value="solicitante">Solicitante</option>
             <option value="patio">Patio</option>
+            <option value="fechacreacion">Fecha Creación</option>
             <option value="fecha">Fecha</option>
             <option value="estado">Estado</option>
             <option value="contratista">Contratista</option>
@@ -286,6 +289,8 @@ try {
 
   // === Doble clic abre detalle ===
   tbody.addEventListener('dblclick', (e) => {
+    const rolIngresoEspecial = <?= $rolIngresoEspecial ? 'true' : 'false' ?>;
+    if (rolIngresoEspecial) return;
     const tr = e.target.closest('tr[data-id]');
     if (!tr) return;
     if (!tr.classList.contains('selected')) tr.click();
@@ -295,6 +300,7 @@ try {
   // === Buscador ===
   const inputBuscar = document.getElementById('buscar');
   const filtroBuscar = document.getElementById('filtroBuscar');
+  const storageFiltroKey = 'ceonext_solicitudes_filtro';
 
   function actualizarPlaceholder() {
     const placeholders = {
@@ -302,6 +308,7 @@ try {
       nsolicitud: 'Buscar por N° Solicitud...',
       solicitante: 'Buscar por solicitante...',
       patio: 'Buscar por patio...',
+      fechacreacion: 'Buscar por fecha creación...',
       fecha: 'Buscar por fecha...',
       estado: 'Buscar por estado...',
       contratista: 'Buscar por contratista...',
@@ -315,11 +322,12 @@ try {
       nsolicitud: [1],
       solicitante: [2],
       patio: [3],
-      fecha: [4],
-      estado: [7],
-      contratista: [8],
-      proceso: [9],
-      general: [1, 2, 3, 4, 7, 8, 9]
+      fechacreacion: [4],
+      fecha: [5],
+      estado: [8],
+      contratista: [9],
+      proceso: [10],
+      general: [1, 2, 3, 4, 5, 8, 9, 10]
     };
     const indices = mapa[filtro] || mapa.general;
     return indices.map(idx => cells[idx]?.textContent || '').join(' ').toLowerCase();
@@ -335,12 +343,51 @@ try {
     });
   }
 
-  inputBuscar.addEventListener('keyup', aplicarFiltroBusqueda);
-  filtroBuscar.addEventListener('change', () => {
-    actualizarPlaceholder();
+  function guardarFiltroBusqueda() {
+    const payload = {
+      filtro: filtroBuscar.value,
+      texto: inputBuscar.value
+    };
+
+    if (payload.filtro === 'general' && payload.texto.trim() === '') {
+      sessionStorage.removeItem(storageFiltroKey);
+      return;
+    }
+
+    sessionStorage.setItem(storageFiltroKey, JSON.stringify(payload));
+  }
+
+  function restaurarFiltroBusqueda() {
+    try {
+      const raw = sessionStorage.getItem(storageFiltroKey);
+      if (!raw) return;
+
+      const payload = JSON.parse(raw);
+      if (payload && typeof payload === 'object') {
+        if (typeof payload.filtro === 'string' && filtroBuscar.querySelector(`option[value="${CSS.escape(payload.filtro)}"]`)) {
+          filtroBuscar.value = payload.filtro;
+        }
+        if (typeof payload.texto === 'string') {
+          inputBuscar.value = payload.texto;
+        }
+      }
+    } catch (e) {
+      sessionStorage.removeItem(storageFiltroKey);
+    }
+  }
+
+  inputBuscar.addEventListener('keyup', () => {
+    guardarFiltroBusqueda();
     aplicarFiltroBusqueda();
   });
+  filtroBuscar.addEventListener('change', () => {
+    actualizarPlaceholder();
+    guardarFiltroBusqueda();
+    aplicarFiltroBusqueda();
+  });
+  restaurarFiltroBusqueda();
   actualizarPlaceholder();
+  aplicarFiltroBusqueda();
 
   // === Acciones con íconos ===
   document.getElementById('btnNuevaSolicitud').onclick = () => {
@@ -350,14 +397,19 @@ try {
     window.location.href = 'general.php';
   };
   document.getElementById('btnConsultar').onclick = () => {
+    const rolIngresoEspecial = <?= $rolIngresoEspecial ? 'true' : 'false' ?>;
+    if (rolIngresoEspecial) {
+      alert('No tienes permiso para consultar solicitudes.');
+      return;
+    }
     if (!ensureSel()) return;
     abrirDetalle(selectedNsol);
   };
 document.getElementById('btnActualizarWF').onclick = () => {
-  const rolContratista = <?= $rolContratista ? 'true' : 'false' ?>;
+  const accionesRestringidas = <?= $accionesRestringidas ? 'true' : 'false' ?>;
 
-  if (rolContratista) {
-    alert('⛔ No tienes permiso para Actualizar Work Follow.');
+  if (accionesRestringidas) {
+    alert('No tienes permiso para Actualizar Work Follow.');
     return;
   }
 
@@ -368,6 +420,12 @@ document.getElementById('btnCancelar').onclick = () => {
   if (!ensureSel()) return;
 
   const rolContratista = <?= $rolContratista ? 'true' : 'false' ?>;
+  const rolIngresoEspecial = <?= $rolIngresoEspecial ? 'true' : 'false' ?>;
+
+  if (rolIngresoEspecial) {
+    alert('No tienes permiso para cancelar solicitudes.');
+    return;
+  }
 
   // ✅ Regla FINAL:
   // Contratista SOLO puede cancelar si estado === "I"
@@ -378,7 +436,8 @@ document.getElementById('btnCancelar').onclick = () => {
 
   abrirCancelar(selectedNsol);
 };
-  document.getElementById('btnFinalizar').onclick = () => {
+  const btnFinalizar = document.getElementById('btnFinalizar');
+  if (btnFinalizar) btnFinalizar.onclick = () => {
     if (!ensureSel()) return;
         abrirFinaliza(selectedNsol);
   };

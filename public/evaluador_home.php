@@ -25,6 +25,7 @@ if (empty($_SESSION['evaluado'])) {
 }
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/db.php';
 
 /* ============================================================
    VARIABLES DE SESIÓN
@@ -39,6 +40,43 @@ $nombreAlumno = trim($alumno['nombre'] ?? '');
 //$idServicio = isset($alumno['id_servicio']) ? (int)$alumno['id_servicio'] : 0;
 $pruebas = $alumno['pruebas'] ?? [];
 $rutAlumno  = trim($alumno['rut'] ?? '');
+
+if ($rutAlumno !== '') {
+    try {
+        $pdo = db();
+        $stmtPruebas = $pdo->prepare("SELECT ep.*, ph.numero_proceso
+            FROM ceo_evaluaciones_programadas ep
+            LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
+            WHERE ep.rut = :rut
+              AND ep.estado = 'PENDIENTE'
+              AND ep.resultado = 'PENDIENTE'
+              AND ep.tipo = 'PRUEBA'
+            ORDER BY ep.fecha_programacion ASC, ep.id ASC");
+        $stmtPruebas->execute([':rut' => $rutAlumno]);
+        $pendientes = $stmtPruebas->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id LIMIT 1');
+        $pruebas = [];
+        foreach ($pendientes as $p) {
+            $idServicio = (int)($p['id_servicio'] ?? 0);
+            $stmtServicio->execute([':id' => $idServicio]);
+            $pruebas[] = [
+                'id_programada' => (int)$p['id'],
+                'id_servicio' => $idServicio,
+                'servicio' => (string)$stmtServicio->fetchColumn(),
+                'nsolicitud' => $p['nsolicitud'] ?? null,
+                'cuadrilla' => $p['cuadrilla'] ?? null,
+                'numero_proceso' => $p['numero_proceso'] ?? null,
+                'fecha_prog' => $p['fecha_programacion'] ?? null,
+                'intento' => $p['intento'] ?? null,
+            ];
+        }
+        $_SESSION['evaluado']['pruebas'] = $pruebas;
+    } catch (Throwable $e) {
+        $pruebas = [];
+    }
+}
+
 $numerosProcesoAlumno = array_values(array_unique(array_filter(array_map(static fn($p) => (string)($p['numero_proceso'] ?? ''), $pruebas))));
 $cuadrillasAlumno = array_values(array_unique(array_filter(array_map(static fn($p) => (string)($p['cuadrilla'] ?? ''), $pruebas))));
 

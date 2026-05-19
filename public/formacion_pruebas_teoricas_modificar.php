@@ -66,9 +66,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $texto = $_POST['pregunta_texto'] ?? '';
       $retroPos = $_POST['retropos'] ?? '';
       $retroNeg = $_POST['retroneg'] ?? '';
+      $areaComp = (int)($_POST['areacomp'] ?? 0);
       $peso = (int)($_POST['peso_' . $idPregunta] ?? 1);
       if ($peso <= 0) {
         $peso = 1;
+      }
+      if ($areaComp <= 0) {
+        throw new RuntimeException('Debe seleccionar un Área de Competencia válida.');
       }
       $tipoPregunta = (string)($_POST['tipo_pregunta_' . $idPregunta] ?? 'ALT');
       $obligatoria = isset($_POST['obligatoria_' . $idPregunta]) ? 1 : 0;
@@ -96,9 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $retroNeg = html_entity_decode(strip_tags((string)$retroNeg), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
       $pdo->prepare("UPDATE ceo_formacion_preguntas_servicios
-                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, peso=?, tipo_pregunta=?, obligatoria=?
+                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, areacomp=?, peso=?, tipo_pregunta=?, obligatoria=?
                      WHERE id=?")
-          ->execute([$texto, $imagen, $retroPos, $retroNeg, $peso, $tipoPregunta, $obligatoria, $idPregunta]);
+          ->execute([$texto, $imagen, $retroPos, $retroNeg, $areaComp, $peso, $tipoPregunta, $obligatoria, $idPregunta]);
 
       foreach ($_POST as $k => $v) {
         if (preg_match('/^alt_id_(\d+)$/', (string)$k, $m)) {
@@ -196,8 +200,19 @@ $preguntasNav = [];
 $preguntaActiva = null;
 $alternativasActivas = [];
 $indiceActual = 0;
+$areasCompetencia = [];
 
 if ($idSel > 0) {
+  $stmtAgrupSel = $pdo->prepare("SELECT id_servicio FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
+  $stmtAgrupSel->execute([':id' => $idSel]);
+  $idServicioAgrup = (int)($stmtAgrupSel->fetchColumn() ?: 0);
+
+  if ($idServicioAgrup > 0) {
+    $stmtArea = $pdo->prepare("SELECT MIN(id) AS id, descripcion FROM ceo_areacompetencia_formacion WHERE id_servicio = :id_servicio GROUP BY descripcion ORDER BY descripcion ASC");
+    $stmtArea->execute([':id_servicio' => $idServicioAgrup]);
+    $areasCompetencia = $stmtArea->fetchAll(PDO::FETCH_ASSOC);
+  }
+
   $stmtNav = $pdo->prepare("SELECT id FROM ceo_formacion_preguntas_servicios WHERE id_agrupacion = :id ORDER BY id ASC");
   $stmtNav->execute([':id' => $idSel]);
   $preguntasNav = $stmtNav->fetchAll(PDO::FETCH_ASSOC);
@@ -220,7 +235,7 @@ if ($idSel > 0) {
 
   if ($idPreguntaSel > 0) {
     $stmtPregunta = $pdo->prepare("
-      SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg, p.peso, p.tipo_pregunta, p.obligatoria,
+      SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg, p.peso, p.tipo_pregunta, p.obligatoria, p.areacomp,
              (SELECT JSON_ARRAYAGG(JSON_OBJECT(
                'id', a.id,
                'alternativa', a.alternativa,
@@ -362,6 +377,17 @@ body{background:#f7f9fc;font-size:0.9rem;}
             <input class="form-check-input" type="checkbox" name="obligatoria_<?= (int)$preguntaActiva['id'] ?>" id="obligatoria_<?= (int)$preguntaActiva['id'] ?>" value="1" <?= !empty($preguntaActiva['obligatoria']) ? 'checked' : '' ?>>
             <label class="form-check-label" for="obligatoria_<?= (int)$preguntaActiva['id'] ?>">Si</label>
           </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Área de Competencia</label>
+          <select name="areacomp" class="form-select form-select-sm" required>
+            <option value="">-- Seleccione --</option>
+            <?php foreach ($areasCompetencia as $area): ?>
+              <option value="<?= (int)$area['id'] ?>" <?= (int)($preguntaActiva['areacomp'] ?? 0) === (int)$area['id'] ? 'selected' : '' ?>>
+                <?= htmlspecialchars((string)$area['descripcion']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
         </div>
       </div>
 

@@ -9,6 +9,11 @@ $pdo = db();
 
 header('Content-Type: application/json; charset=utf-8');
 
+if (empty($_SESSION['auth']) || (int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  echo json_encode(['ok'=>false,'error'=>'No autorizado']);
+  exit;
+}
+
 $idSol = (int)($_POST['id_solicitud'] ?? 0);
 $rut   = trim((string)($_POST['rut'] ?? ''));
 $asis  = ($_POST['asistio'] ?? '0');

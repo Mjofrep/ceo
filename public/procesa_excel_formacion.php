@@ -181,9 +181,9 @@ function validar_rut_backend(string $rut): bool
  *    Si el rut + servicio tiene vigencia activa en ceo_vigencia_detalle
  *    y existe respaldo del mismo proceso en ceo_vigencia_general.
  *
- * 2) EN PROCESO
- *    Si no está habilitado, pero ya existen evaluaciones para ese
- *    rut + servicio y todavía falta aprobar una o más pruebas.
+ * 2) EN PROCESO / APROBADO
+ *    Si ya tiene una prueba de formación pendiente o aprobada para
+ *    el mismo rut + servicio.
  *
  * 3) LIBRE
  *    Si no cae en ninguna de las anteriores.
@@ -233,22 +233,20 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
     }
 
     // -----------------------------------------------------
-    // 2) VALIDAR SI EXISTE UN PROCESO ABIERTO DEL MISMO SERVICIO
-    //    SOLO bloquea si hay registros pendientes / no cerrados
+    // 2) VALIDAR SI EXISTE UNA PRUEBA DE FORMACION PENDIENTE O APROBADA
+    //    PARA EL MISMO RUT + SERVICIO. Solo REPROBADO permite replanificar.
     // -----------------------------------------------------
     $sqlProcesoAbierto = "
         SELECT
             COUNT(*) AS total_abiertos,
-            COALESCE(MAX(cuadrilla), 0) AS cuadrilla_ref
-        FROM ceo_evaluaciones_programadas
-        WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') = :rut
+            COALESCE(MAX(cuadrilla), 0) AS cuadrilla_ref,
+            MAX(CASE WHEN resultado = 'APROBADO' THEN 1 ELSE 0 END) AS tiene_aprobado
+        FROM ceo_formacion_programadas
+        WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci = :rut
           AND id_servicio = :id_servicio
+          AND tipo = 'PRUEBA'
           AND estado <> 'ANULADA'
-          AND (
-                estado = 'PENDIENTE'
-                OR resultado IS NULL
-                OR resultado = 'PENDIENTE'
-          )
+          AND resultado IN ('PENDIENTE', 'APROBADO')
     ";
 
     $stmt = $pdo->prepare($sqlProcesoAbierto);
@@ -263,11 +261,14 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
 
     if ($totalAbiertos > 0) {
         $cuadrillaRef = !empty($abierto['cuadrilla_ref']) ? $abierto['cuadrilla_ref'] : 's/i';
+        $motivo = ((int)($abierto['tiene_aprobado'] ?? 0) > 0)
+            ? 'ya tiene una prueba aprobada para este servicio'
+            : 'ya tiene una prueba pendiente para este servicio';
 
         return [
             'bloquear' => true,
             'estado'   => 'en_proceso',
-            'mensaje'  => "el RUT {$rut} ya se encuentra en proceso de habilitación para este servicio (cuadrilla/proceso {$cuadrillaRef})"
+            'mensaje'  => "el RUT {$rut} {$motivo} en la cuadrilla {$cuadrillaRef}. Solo se puede volver a planificar si el resultado anterior fue REPROBADO o fue anulado"
         ];
     }
 

@@ -273,7 +273,6 @@ body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; color:#1f2d3d; fo
     <tr><td class="label">Nombre</td><td class="value"><?= certEsc(trim((string)$cert['nombre'] . ' ' . (string)$cert['apellidos'])) ?></td></tr>
     <tr><td class="label">RUT</td><td class="value"><?= certEsc($cert['rut']) ?></td></tr>
     <tr><td class="label">Cargo</td><td class="value"><?= certEsc($cert['cargo']) ?></td></tr>
-    <tr><td class="label">Empresa Contratista</td><td class="value"><?= certEsc($cert['empresa']) ?></td></tr>
     <tr><td class="label">Fecha Evaluación</td><td class="value"><?= certEsc(certFmtFecha($cert['fecha_evaluacion'])) ?></td></tr>
     <tr><td class="label">Fecha Vigencia</td><td class="value"><strong><?= certEsc(certFmtFecha($cert['fechavig_fin'])) ?></strong></td></tr>
     <tr><td class="service-label">Servicio</td><td class="service-value"><?= certEsc($cert['servicio']) ?></td></tr>

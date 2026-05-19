@@ -34,6 +34,49 @@ if (!$fecha || !$jornada || !$servicio || empty($particip)) {
     exit;
 }
 
+$stmtPendiente = $pdo->prepare("
+    SELECT cuadrilla, fecha_programacion, resultado
+    FROM ceo_formacion_programadas
+    WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci = :rut_key
+      AND id_servicio = :id_servicio
+      AND tipo = 'PRUEBA'
+      AND estado <> 'ANULADA'
+      AND resultado IN ('PENDIENTE', 'APROBADO')
+      AND (:cuadrilla_actual_check = 0 OR cuadrilla <> :cuadrilla_actual_where)
+    ORDER BY fecha_programacion DESC, id DESC
+    LIMIT 1
+");
+
+foreach ($particip as $p) {
+    $rutOriginal = trim((string)($p['rut'] ?? ''));
+    $rutKey = rut_key_formacion($rutOriginal);
+    if ($rutKey === '') {
+        echo json_encode(['ok' => false, 'msg' => 'Hay participantes sin RUT.']);
+        exit;
+    }
+
+    $stmtPendiente->execute([
+        ':rut_key' => $rutKey,
+        ':id_servicio' => $servicio,
+        ':cuadrilla_actual_check' => $cuadrillaExistente,
+        ':cuadrilla_actual_where' => $cuadrillaExistente,
+    ]);
+    $pendiente = $stmtPendiente->fetch(PDO::FETCH_ASSOC);
+    if ($pendiente) {
+        $cuadrillaRef = !empty($pendiente['cuadrilla']) ? (string)$pendiente['cuadrilla'] : 's/i';
+        $fechaRef = !empty($pendiente['fecha_programacion']) ? ' desde ' . date('d-m-Y', strtotime((string)$pendiente['fecha_programacion'])) : '';
+        $resultadoRef = strtoupper(trim((string)($pendiente['resultado'] ?? 'PENDIENTE')));
+        $motivo = $resultadoRef === 'APROBADO'
+            ? 'ya tiene una prueba aprobada para este servicio'
+            : 'ya tiene una prueba pendiente para este servicio';
+        echo json_encode([
+            'ok' => false,
+            'msg' => "El RUT {$rutOriginal} {$motivo} en la cuadrilla {$cuadrillaRef}{$fechaRef}. Solo se puede volver a planificar si el resultado anterior fue REPROBADO o fue anulado."
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 try {
     $pdo->beginTransaction();
 
@@ -221,4 +264,8 @@ function normalizar_rut($rut) {
 
     // Insertar guion antes del último carácter
     return substr($rut, 0, -1) . '-' . substr($rut, -1);
+}
+
+function rut_key_formacion(string $rut): string {
+    return strtoupper(str_replace(['.', '-', ' '], '', trim($rut)));
 }

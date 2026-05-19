@@ -212,6 +212,22 @@ body {background:#f7f9fc;}
     padding: 2px 4px;
 }
 
+.servicios-visibles-panel {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.servicios-visibles-list {
+    max-height: 120px;
+    overflow: auto;
+}
+
+.servicios-visibles-list .form-check-label {
+    font-size: 0.82rem;
+}
+
 /* =========================
    Overlay carga Excel Agenda
    ========================= */
@@ -366,6 +382,33 @@ function filtrarParticipantes() {
       ============================================================ -->
       <div class="tab-pane fade" id="plan" role="tabpanel">
 
+        <div class="servicios-visibles-panel mb-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+              <div class="fw-semibold text-primary">Servicios visibles</div>
+              <small class="text-muted">Selecciona qué servicios mostrar como columnas en la planificación.</small>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="badge text-bg-light" id="serviciosVisiblesContador"></span>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="btnServiciosMostrarTodos">Mostrar todos</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="btnServiciosOcultarTodos">Ocultar todos</button>
+            </div>
+          </div>
+
+          <div class="row g-2 servicios-visibles-list" id="serviciosVisiblesList">
+            <?php foreach($servicios as $s): ?>
+              <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2">
+                <div class="form-check">
+                  <input class="form-check-input chk-servicio-plan" type="checkbox" value="<?= (int)$s['id'] ?>" id="chkServicioPlan<?= (int)$s['id'] ?>" checked>
+                  <label class="form-check-label" for="chkServicioPlan<?= (int)$s['id'] ?>">
+                    <?= esc($s['servicio']) ?>
+                  </label>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+
         <div class="scroll-box">
 
  <table class="table table-sm table-bordered align-middle">
@@ -374,7 +417,7 @@ function filtrarParticipantes() {
         <th>Fecha</th>
         <th>Jornada</th>
         <?php foreach($servicios as $s): ?>
-            <th><?= esc($s['servicio']) ?></th>
+            <th data-servicio-col="<?= (int)$s['id'] ?>"><?= esc($s['servicio']) ?></th>
         <?php endforeach; ?>
       </tr>
     </thead>
@@ -403,7 +446,7 @@ function filtrarParticipantes() {
         $arr  = $mapCuadrillas[$key] ?? [];
         $cant = count($arr);
     ?>
-    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>">
+    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>" data-servicio-col="<?= (int)$s['id'] ?>">
         <?php if(!$isBlocked): ?>
             <button 
                 type="button"
@@ -450,7 +493,7 @@ function filtrarParticipantes() {
         $arr  = $mapCuadrillas[$key] ?? [];
         $cant = count($arr);
     ?>
-    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>">
+    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>" data-servicio-col="<?= (int)$s['id'] ?>">
         <?php if(!$isBlocked): ?>
             <button 
                 type="button"
@@ -1170,6 +1213,76 @@ document.addEventListener("DOMContentLoaded", function () {
     tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+});
+
+// Mostrar/ocultar columnas de servicios en planificación, persistiendo preferencia local.
+document.addEventListener("DOMContentLoaded", function () {
+    const storageKey = "ceonext_agenda_formaciones_servicios_visibles";
+    const checks = Array.from(document.querySelectorAll(".chk-servicio-plan"));
+    const contador = document.getElementById("serviciosVisiblesContador");
+    const btnMostrarTodos = document.getElementById("btnServiciosMostrarTodos");
+    const btnOcultarTodos = document.getElementById("btnServiciosOcultarTodos");
+
+    if (checks.length === 0) return;
+
+    function leerPreferencia() {
+        try {
+            const raw = localStorage.getItem(storageKey);
+            const parsed = raw ? JSON.parse(raw) : null;
+            return Array.isArray(parsed) ? parsed.map(String) : null;
+        } catch (e) {
+            localStorage.removeItem(storageKey);
+            return null;
+        }
+    }
+
+    function guardarPreferencia() {
+        const visibles = checks.filter(chk => chk.checked).map(chk => String(chk.value));
+        localStorage.setItem(storageKey, JSON.stringify(visibles));
+    }
+
+    function aplicarVisibilidad(guardar = true) {
+        let visibles = 0;
+
+        checks.forEach(chk => {
+            const servicioId = String(chk.value);
+            const visible = chk.checked;
+            if (visible) visibles++;
+
+            document.querySelectorAll(`[data-servicio-col="${CSS.escape(servicioId)}"]`).forEach(el => {
+                el.style.display = visible ? "" : "none";
+            });
+        });
+
+        if (contador) {
+            contador.textContent = `${visibles} de ${checks.length} servicios visibles`;
+        }
+
+        if (guardar) guardarPreferencia();
+    }
+
+    const preferencia = leerPreferencia();
+    if (preferencia !== null) {
+        checks.forEach(chk => {
+            chk.checked = preferencia.includes(String(chk.value));
+        });
+    }
+
+    checks.forEach(chk => {
+        chk.addEventListener("change", () => aplicarVisibilidad(true));
+    });
+
+    btnMostrarTodos?.addEventListener("click", () => {
+        checks.forEach(chk => { chk.checked = true; });
+        aplicarVisibilidad(true);
+    });
+
+    btnOcultarTodos?.addEventListener("click", () => {
+        checks.forEach(chk => { chk.checked = false; });
+        aplicarVisibilidad(true);
+    });
+
+    aplicarVisibilidad(preferencia !== null);
 });
 
 </script>

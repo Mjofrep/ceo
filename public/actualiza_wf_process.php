@@ -13,6 +13,10 @@ header('Content-Type: application/json; charset=utf-8');
 $pdo = db();
 
 try {
+    if (empty($_SESSION['auth']) || (int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+        throw new Exception('No autorizado');
+    }
+
     if (empty($_FILES['excel']['tmp_name'])) {
         throw new Exception('No se recibió ningún archivo.');
     }

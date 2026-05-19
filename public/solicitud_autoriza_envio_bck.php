@@ -3,6 +3,7 @@
 declare(strict_types=1);
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
+session_start();
 
 require_once '../config/db.php';
 require_once '../config/functions.php';
@@ -11,6 +12,10 @@ require_once __DIR__ . '/../config/app.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
+
+if (empty($_SESSION['auth']) || (int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+  exit('No autorizado');
+}
 
 $id = (int)($_GET['id'] ?? 0);
 if ($id <= 0) exit('Solicitud inválida');

@@ -1278,16 +1278,23 @@ body {background:#f7f9fc;}
                 <th style="width:180px;">Cargo</th>
                 <th class="text-start">Servicio</th>
                 <th class="text-start">Otro</th>
+                <th style="width:90px;">Teórica</th>
+                <th style="width:90px;">Terreno</th>
+                <th style="width:90px;">Nota final</th>
+                <th style="width:130px;">Estado actual</th>
+                <th style="width:110px;">Fecha cálculo</th>
                 <th style="width:150px;">Acciones</th>
               </tr>
             </thead>
             <tbody id="mp_body">
               <tr>
-                <td colspan="4" class="text-center text-muted">Sin líneas agregadas</td>
+                <td colspan="9" class="text-center text-muted">Sin líneas agregadas</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <div id="mp_resumen_estado" class="small text-muted mt-2"></div>
 
         <div id="mp_msg" class="mt-2"></div>
 
@@ -1307,6 +1314,7 @@ body {background:#f7f9fc;}
 (function () {
   const body = document.getElementById('mp_body');
   const msg  = document.getElementById('mp_msg');
+  const resumenEstado = document.getElementById('mp_resumen_estado');
 
   const selCargo    = document.getElementById('mp_cargo');
   const selServicio = document.getElementById('mp_servicio');
@@ -1336,7 +1344,8 @@ body {background:#f7f9fc;}
 
   function render() {
     if (!persisted.length && !lines.length) {
-      body.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Sin líneas agregadas</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="text-center text-muted">Sin líneas agregadas</td></tr>`;
+      renderResumenEstado();
       return;
     }
 
@@ -1351,6 +1360,11 @@ body {background:#f7f9fc;}
             <span class="badge bg-warning text-dark ms-2">Guardado</span>
           </td>
           <td class="text-start">${escapeHtml(p.otro || '')}</td>
+          <td class="text-end">${fmtNota(p.nota_teorica)}</td>
+          <td class="text-end">${fmtNota(p.nota_terreno)}</td>
+          <td class="text-end fw-semibold">${fmtNota(p.nota_final)}</td>
+          <td>${badgeResultado(p.resultado_final)}</td>
+          <td>${escapeHtml(fmtFecha(p.fecha_calculo || ''))}</td>
           <td>
             <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-persisted="${idx}">
               <i class="bi bi-pencil"></i>
@@ -1368,6 +1382,11 @@ body {background:#f7f9fc;}
         <td>${escapeHtml(l.cargo_txt)}</td>
         <td class="text-start">${escapeHtml(l.servicio_txt)}</td>
         <td class="text-start">${escapeHtml(l.otro || '')}</td>
+        <td class="text-end">-</td>
+        <td class="text-end">-</td>
+        <td class="text-end fw-semibold">-</td>
+        <td>${badgeResultado('Sin resultado')}</td>
+        <td>-</td>
         <td>
           <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-new="${idx}">
             <i class="bi bi-pencil"></i>
@@ -1380,6 +1399,53 @@ body {background:#f7f9fc;}
     `).join('');
 
     body.innerHTML = html;
+    renderResumenEstado();
+  }
+
+  function fmtNota(value) {
+    if (value === null || value === undefined || value === '') return '-';
+    const n = Number(String(value).replace(',', '.'));
+    return Number.isFinite(n) ? n.toFixed(2) : escapeHtml(value);
+  }
+
+  function fmtFecha(value) {
+    const text = String(value || '').trim();
+    if (!text || text.startsWith('0000-00-00')) return '-';
+    const parts = text.substring(0, 10).split('-');
+    if (parts.length !== 3) return text;
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+
+  function normalizarResultado(value) {
+    const text = String(value || '').trim().toUpperCase();
+    if (text === 'APROBADO') return 'APROBADO';
+    if (text === 'REPROBADO') return 'REPROBADO';
+    if (text === 'PENDIENTE') return 'PENDIENTE';
+    return 'SIN RESULTADO';
+  }
+
+  function badgeResultado(value) {
+    const resultado = normalizarResultado(value);
+    const cls = resultado === 'APROBADO' ? 'success' : (resultado === 'REPROBADO' ? 'danger' : (resultado === 'PENDIENTE' ? 'warning text-dark' : 'secondary'));
+    const label = resultado === 'SIN RESULTADO' ? 'Sin resultado' : resultado;
+    return `<span class="badge text-bg-${cls}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderResumenEstado() {
+    if (!resumenEstado) return;
+    const registros = [
+      ...persisted.map(p => normalizarResultado(p.resultado_final)),
+      ...lines.map(() => 'SIN RESULTADO')
+    ];
+    if (!registros.length) {
+      resumenEstado.textContent = 'Sin servicios seleccionados para resumir.';
+      return;
+    }
+    const aprobados = registros.filter(x => x === 'APROBADO').length;
+    const reprobados = registros.filter(x => x === 'REPROBADO').length;
+    const pendientes = registros.filter(x => x === 'PENDIENTE').length;
+    const sinResultado = registros.filter(x => x === 'SIN RESULTADO').length;
+    resumenEstado.innerHTML = `Resumen estado actual: <strong>${aprobados}</strong> aprobados · <strong>${reprobados}</strong> reprobados · <strong>${pendientes}</strong> pendientes · <strong>${sinResultado}</strong> sin resultado`;
   }
 
   function escapeHtml(text) {
@@ -1522,21 +1588,9 @@ body {background:#f7f9fc;}
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'No se pudo actualizar');
 
-        const pos = persisted.findIndex(x => Number(x.id) === Number(id));
-        if (pos >= 0) {
-          persisted[pos] = {
-            ...persisted[pos],
-            id_cargo,
-            cargo_txt,
-            id_servicio,
-            servicio_txt,
-            otro
-          };
-        }
-
-        setMsg('✅ Registro actualizado correctamente.', 'success');
         clearForm(true);
-        render();
+        await loadServiciosRut();
+        setMsg('✅ Registro actualizado correctamente.', 'success');
       } catch (err) {
         setMsg('❌ ' + (err.message || 'Error al actualizar'), 'danger');
       }
@@ -1608,7 +1662,12 @@ body {background:#f7f9fc;}
           cargo_txt: r.cargo || '',
           id_servicio: parseInt(r.id_servicio, 10),
           servicio_txt: r.servicio || '',
-          otro: r.otro || ''
+          otro: r.otro || '',
+          nota_teorica: r.nota_teorica,
+          nota_terreno: r.nota_terreno,
+          nota_final: r.nota_final,
+          resultado_final: r.resultado_final || 'Sin resultado',
+          fecha_calculo: r.fecha_calculo || ''
         });
       });
 

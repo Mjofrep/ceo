@@ -11,6 +11,10 @@ try {
         throw new Exception('Sesión no válida');
     }
 
+    if ((int)($_SESSION['auth']['id_rol'] ?? 0) === 6) {
+        throw new Exception('No autorizado para modificar solicitudes.');
+    }
+
     $rol = strtolower((string)($_SESSION['auth']['rol'] ?? ''));
     if ($rol !== 'administrador') {
         throw new Exception('No autorizado para modificar solicitudes.');

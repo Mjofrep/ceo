@@ -27,6 +27,49 @@ $rows = [];
 $persona = null;
 $resumenServicios = [];
 
+function formatearFechaHistorial(mixed $valor, bool $conHora = false): string
+{
+    if ($valor instanceof DateTimeInterface) {
+        return $valor->format($conHora ? 'd-m-Y H:i' : 'd-m-Y');
+    }
+
+    $fecha = trim((string)$valor);
+    if ($fecha === '' || str_starts_with($fecha, '0000-00-00')) {
+        return '';
+    }
+
+    try {
+        return (new DateTimeImmutable($fecha))->format($conHora ? 'd-m-Y H:i' : 'd-m-Y');
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
+function formatearNotaHistorial(mixed $valor): string
+{
+    if (!is_numeric((string)$valor)) {
+        return '';
+    }
+
+    return number_format((float)$valor, 2, '.', '');
+}
+
+function obtenerNotaDetalleHistorial(array $row, array $terrainThresholdsByService): string
+{
+    $nota = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
+    if ($nota === null) {
+        return '';
+    }
+
+    if (strtoupper(trim((string)($row['tipo_evaluacion'] ?? ''))) === 'PRACTICA') {
+        $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
+        $porcentajeMinimo = (float)($terrainThresholdsByService[$serviceId] ?? 80.0);
+        $nota = calcularNotaFinalDesdePorcentaje($nota, $porcentajeMinimo);
+    }
+
+    return formatearNotaHistorial($nota);
+}
+
 function resolverPesosPorCargo(?string $cargo, ?int $idCargo = null): ?array
 {
     $operadorIds = [266, 268, 287];
@@ -422,15 +465,15 @@ body { background:#f7f9fc; }
                 <td><?= esc((string)$resumen['servicio']) ?></td>
                 <td class="text-center"><?= esc($resumen['numero_proceso'] !== null ? (string)$resumen['numero_proceso'] : '') ?></td>
                 <td><?= esc((string)($resumen['cargo'] ?? '')) ?></td>
-                <td><?= esc($resumen['ultima_teorica_nota'] !== null ? number_format((float)$resumen['ultima_teorica_nota'], 2, '.', '') : '') ?></td>
-                <td><?= esc($resumen['ultima_teorica_fecha'] instanceof DateTimeImmutable ? $resumen['ultima_teorica_fecha']->format('Y-m-d H:i:s') : '') ?></td>
+                <td><?= esc(formatearNotaHistorial($resumen['ultima_teorica_nota'] ?? null)) ?></td>
+                <td><?= esc(formatearFechaHistorial($resumen['ultima_teorica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_teorica_resultado'] ?? '')) ?></td>
-                <td><?= esc($resumen['ultima_practica_porcentaje'] !== null ? number_format((float)$resumen['ultima_practica_porcentaje'], 2, '.', '') . '%' : '') ?></td>
-                <td><?= esc($resumen['ultima_practica_fecha'] instanceof DateTimeImmutable ? $resumen['ultima_practica_fecha']->format('Y-m-d H:i:s') : '') ?></td>
+                <td><?= esc(formatearNotaHistorial($resumen['ultima_practica_nota'] ?? null)) ?></td>
+                <td><?= esc(formatearFechaHistorial($resumen['ultima_practica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_practica_resultado'] ?? '')) ?></td>
-                <td><?= esc($resumen['nota_final_ponderada'] !== null ? number_format((float)$resumen['nota_final_ponderada'], 2, '.', '') : '') ?></td>
-                <td><?= esc($resumen['fecha_habilitacion'] instanceof DateTimeImmutable ? $resumen['fecha_habilitacion']->format('Y-m-d') : '') ?></td>
-                <td><?= esc($resumen['vigencia_hasta'] instanceof DateTimeImmutable ? $resumen['vigencia_hasta']->format('Y-m-d') : '') ?></td>
+                <td><?= esc(formatearNotaHistorial($resumen['nota_final_ponderada'] ?? null)) ?></td>
+                <td><?= esc(formatearFechaHistorial($resumen['fecha_habilitacion'] ?? null)) ?></td>
+                <td><?= esc(formatearFechaHistorial($resumen['vigencia_hasta'] ?? null)) ?></td>
                 <td><span class="badge text-bg-<?= esc($estadoBadge) ?>"><?= esc((string)$resumen['estado_inferido']) ?></span></td>
               </tr>
             <?php endforeach; ?>
@@ -463,9 +506,9 @@ body { background:#f7f9fc; }
               <td><?= esc($r['tipo_evaluacion']) ?></td>
               <td><?= esc($r['servicio']) ?></td>
               <td class="text-center"><?= esc($r['numero_proceso'] !== null ? (string)$r['numero_proceso'] : '') ?></td>
-              <td><?= esc($r['fecha_hora']) ?></td>
+              <td><?= esc(formatearFechaHistorial($r['fecha_hora'] ?? null)) ?></td>
               <td><?= esc($r['resultado_mostrado']) ?></td>
-              <td><?= esc($r['nota_mostrada']) ?></td>
+              <td><?= esc(obtenerNotaDetalleHistorial($r, $terrainThresholdsByService ?? [])) ?></td>
               <td><?= esc($r['empresa']) ?></td>
               <td><?= esc($r['cargo']) ?></td>
               <td><?= esc($r['evaluador']) ?></td>
