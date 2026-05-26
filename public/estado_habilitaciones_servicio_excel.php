@@ -46,21 +46,45 @@ $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_servicios_pruebas WHERE 
 $stmtServicio->execute([':id' => $idServicio]);
 $nombreServicio = (string)($stmtServicio->fetchColumn() ?: 'Servicio');
 
-$stmtTeorica = $pdo->prepare('
-    SELECT rut, fecha_rendicion, hora_rendicion, puntaje_total, notafinal
-    FROM ceo_resultado_prueba_intento
-    WHERE id_servicio = :id_servicio
-    ORDER BY rut ASC, fecha_rendicion DESC, hora_rendicion DESC, id DESC
-');
+$stmtTeorica = $pdo->prepare("
+    SELECT rpi.rut, rpi.fecha_rendicion, rpi.hora_rendicion, rpi.puntaje_total, rpi.notafinal,
+           (
+               SELECT emp_h.nombre
+               FROM ceo_evaluaciones_programadas ep_h
+               INNER JOIN ceo_habilitacion h ON h.cuadrilla = ep_h.cuadrilla AND h.id_servicio = ep_h.id_servicio
+               LEFT JOIN ceo_empresas emp_h ON emp_h.id = h.empresa
+               WHERE ep_h.id_proceso_habilitacion = rpi.id_proceso_habilitacion
+                 AND ep_h.id_servicio = rpi.id_servicio
+                 AND ep_h.tipo = 'PRUEBA'
+                 AND REPLACE(REPLACE(REPLACE(UPPER(ep_h.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+               ORDER BY ep_h.id DESC
+               LIMIT 1
+           ) AS empresa_historica
+    FROM ceo_resultado_prueba_intento rpi
+    WHERE rpi.id_servicio = :id_servicio
+    ORDER BY rpi.rut ASC, rpi.fecha_rendicion DESC, rpi.hora_rendicion DESC, rpi.id DESC
+");
 $stmtTeorica->execute([':id_servicio' => $idServicio]);
 $teoricas = $stmtTeorica->fetchAll(PDO::FETCH_ASSOC);
 
-$stmtTerreno = $pdo->prepare('
-    SELECT rut, fecha_evaluacion, resultado
-    FROM ceo_evaluacion_terreno
-    WHERE id_servicio = :id_servicio
-    ORDER BY rut ASC, fecha_evaluacion DESC, id DESC
-');
+$stmtTerreno = $pdo->prepare("
+    SELECT et.rut, et.fecha_evaluacion, et.resultado,
+           (
+               SELECT emp_h.nombre
+               FROM ceo_evaluaciones_programadas ep_h
+               INNER JOIN ceo_habilitacion h ON h.cuadrilla = ep_h.cuadrilla AND h.id_servicio = ep_h.id_servicio
+               LEFT JOIN ceo_empresas emp_h ON emp_h.id = h.empresa
+               WHERE ep_h.id_proceso_habilitacion = et.id_proceso_habilitacion
+                 AND ep_h.id_servicio = et.id_servicio
+                 AND ep_h.tipo = 'TERRENO'
+                 AND REPLACE(REPLACE(REPLACE(UPPER(ep_h.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+               ORDER BY ep_h.id DESC
+               LIMIT 1
+           ) AS empresa_historica
+    FROM ceo_evaluacion_terreno et
+    WHERE et.id_servicio = :id_servicio
+    ORDER BY et.rut ASC, et.fecha_evaluacion DESC, et.id DESC
+");
 $stmtTerreno->execute([':id_servicio' => $idServicio]);
 $terrenos = $stmtTerreno->fetchAll(PDO::FETCH_ASSOC);
 
@@ -81,7 +105,10 @@ foreach ($teoricas as $row) {
             'ultima_fecha' => $fechaHora,
             'ultima_resultado' => $resultado,
             'aprobada_fecha' => null,
+            'empresa_historica' => trim((string)($row['empresa_historica'] ?? '')),
         ];
+    } elseif ($teoricaPorRut[$rut]['empresa_historica'] === '' && trim((string)($row['empresa_historica'] ?? '')) !== '') {
+        $teoricaPorRut[$rut]['empresa_historica'] = trim((string)$row['empresa_historica']);
     }
 
     if ($resultado === 'APROBADO' && $teoricaPorRut[$rut]['aprobada_fecha'] === null) {
@@ -106,7 +133,10 @@ foreach ($terrenos as $row) {
             'ultima_fecha' => $fecha,
             'ultima_resultado' => $resultado,
             'aprobada_fecha' => null,
+            'empresa_historica' => trim((string)($row['empresa_historica'] ?? '')),
         ];
+    } elseif ($terrenoPorRut[$rut]['empresa_historica'] === '' && trim((string)($row['empresa_historica'] ?? '')) !== '') {
+        $terrenoPorRut[$rut]['empresa_historica'] = trim((string)$row['empresa_historica']);
     }
 
     if ($resultado === 'APROBADO' && $terrenoPorRut[$rut]['aprobada_fecha'] === null) {
@@ -177,12 +207,17 @@ foreach ($ruts as $rut) {
         $ultimaEvaluacion = $terr['ultima_fecha'];
     }
 
+    $empresaHistorica = trim((string)($terr['empresa_historica'] ?? ''));
+    if ($empresaHistorica === '') {
+        $empresaHistorica = trim((string)($teo['empresa_historica'] ?? ''));
+    }
+
     $personas[] = [
         'rut' => $rut,
         'nombre' => trim((string)($contratista['nombre'] ?? '')),
         'apellidos' => trim((string)($contratista['apellidos'] ?? '')),
         'cargo' => trim((string)($contratista['cargo'] ?? '')),
-        'empresa' => trim((string)($contratista['empresa'] ?? '')),
+        'empresa' => $empresaHistorica !== '' ? $empresaHistorica : trim((string)($contratista['empresa'] ?? '')),
         'ultima_teorica' => $teo['ultima_fecha'] ?? null,
         'resultado_teorica' => $teo['ultima_resultado'] ?? '',
         'ultima_practica' => $terr['ultima_fecha'] ?? null,

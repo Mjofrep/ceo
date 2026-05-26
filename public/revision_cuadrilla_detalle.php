@@ -100,7 +100,7 @@ if ($rut) {
         INNER JOIN ceo_habilitacion_participantes b ON a.cuadrilla = b.id_cuadrilla 
         LEFT JOIN ceo_contratistas c ON b.rut COLLATE utf8mb4_unicode_ci = c.rut COLLATE utf8mb4_unicode_ci
         LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
-        LEFT JOIN ceo_empresas e ON e.id = COALESCE(c.id_empresa, a.empresa)
+        LEFT JOIN ceo_empresas e ON e.id = COALESCE(a.empresa, c.id_empresa)
         LEFT JOIN ceo_uo f ON a.uo = f.id
         LEFT JOIN ceo_servicios_pruebas g ON a.id_servicio = g.id
         where a.id = :programa

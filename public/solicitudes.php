@@ -273,6 +273,12 @@ try {
   let selectedId = null;
   let selectedNsol = null;
   let selectedEstado = null;
+  const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+  const keepaliveIntervalMs = 5 * 60 * 1000;
+
+  setInterval(() => {
+    fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+  }, keepaliveIntervalMs);
   
   const tbody = document.querySelector('#tablaSolicitudes tbody');
 

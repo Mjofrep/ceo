@@ -76,6 +76,14 @@ $apps = [
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230d6efd'/%3E%3Cstop offset='100%25' stop-color='%2381b1ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Ccircle cx='240' cy='88' r='62' fill='rgba(255,255,255,0.18)'/%3E%3Cpath d='M70 220c26-58 74-92 146-104' stroke='white' stroke-width='18' stroke-linecap='round' fill='none' opacity='.85'/%3E%3Cpath d='M72 226h170' stroke='white' stroke-width='14' stroke-linecap='round' opacity='.7'/%3E%3Crect x='74' y='76' width='90' height='90' rx='22' fill='rgba(255,255,255,0.22)'/%3E%3C/svg%3E",
     ],
     [
+        'title' => 'Gestión de Preguntas',
+        'description' => 'Carga fuentes, genera preguntas con IA, revisa, visa y publica cuestionarios para CEONext.',
+        'url' => 'https://www.noetica.cl/ceo.noetica.cl/public/gp_login.php',
+        'tag' => 'Banco de preguntas',
+        'accent' => '#2563eb',
+        'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%232563eb'/%3E%3Cstop offset='100%25' stop-color='%2395b8ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='62' y='56' width='196' height='208' rx='28' fill='rgba(255,255,255,0.14)'/%3E%3Crect x='92' y='86' width='136' height='26' rx='13' fill='white' opacity='.92'/%3E%3Cpath d='M94 144h132M94 176h132M94 208h88' stroke='white' stroke-width='16' stroke-linecap='round' opacity='.9'/%3E%3Ccircle cx='232' cy='214' r='28' fill='rgba(255,255,255,0.92)'/%3E%3Cpath d='M221 214l8 8 16-20' stroke='%232563eb' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E",
+    ],
+    [
         'title' => 'Salud',
         'description' => 'Seguimiento y acceso a procesos vinculados a salud ocupacional.',
         'url' => 'https://www.noetica.cl/ceo_salud/auth/login.php',

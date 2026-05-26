@@ -1,0 +1,55 @@
+﻿Pendientes;Aprobadas;Reprobadas;;;;;;;
+11;31;9;;;;;;;
+;;;;;;;;;
+;N°;RUT;Nombre;Apellido;Cargo;Prueba C-Integrada;Prueba SE;RDO;Resultado de Habilitación
+GRUPO 1;1;26357986-0;Amarilys;Bracho;BLUE TEAM PESADO;66%;82%;80%;77%
+;2;19032893-7;Andrea;Ramos;ITO MA;79%;87%;89%;85%
+;3;12861959-3;Carolina ;Larrondo;ITO;78%;89%;83%;84%
+;4;18645651-3;Claudia;Orellana;RESPONSABLE BLUE TEAM;91%;84%;91%;88%
+;5;15761247-6;Cristian;Gonzalez;P&M;66%;87%;85%;80%
+;6;15426724-7;Elizabeth;Salinas;ITO;72%;93%;96%;87%
+;7;25494140-9;Francisco;Oñate;ITO;70%;80%;87%;79%
+;8;18908098-0;Hugo;Pastrian;ITO HS;85%;87%;91%;87%
+;9;21105026-8;Ivonne ;Riquelme;ITO;77%;82%;89%;82%
+;10;18936278-1;Javier;Mendez;ITO HS;86%;89%;98%;90%
+;11;19919942-0;Joshua;Perez;P&M;86%;78%;74%;79%
+;12;19289611-8;Lucas;Cáceres;ITO BLUE TEAM;67%;80%;93%;79%
+;13;18613606-3;Luis;Cortes;ITO MA;72%;91%;87%;84%
+;14;19064635-1;Macarena;Adasme;ITO COSTUMER CARE;81%;87%;89%;86%
+;15;12862266-7;Maximiliano;Araneda;ITO HS;70%;;93%;Pendiente
+;16;18849090-5;Mirko;Banda;P&M;82%;87%;93%;87%
+;17;16201989-9;Nery;Retamal;ITO HS;79%;84%;91%;84%
+;18;25555496-4;Yecelys;Salazar;ITO BLUE TEAM;59%;93%;;Pendiente
+GRUPO 2;1;18661503-4;Aníbal;Miranda;ITO;74%;87%;93%;84%
+;2;18273866-2;Catalina;Llul;ITO;75%;87%;87%;83%
+;3;17036745-6;Cristóbal;Monsalve;ITO;88%;84%;93%;87%
+;4;13692075-8;Javier;Insotroza;ITO;62%;73%;79%;71%
+;5;17951472-9;Javiera;Quiroz;ITO;70%;82%;;Pendiente
+;6;16954557-K;Joan;Diez;ITO;79%;89%;86%;85%
+;7;26832932-3;Josmer;Villegas;ITO;82%;82%;;Pendiente
+;8;11296184-4;Juan;Urriola;ITO;76%;96%;87%;88%
+;9;25754920-8;Luis;Dobobuto;ITO;63%;82%;93%;79%
+;10;19078150-K;Nicolás;Patroni;ITO;79%;91%;;Pendiente
+;11;10635000-0;Roberto;Vera;ITO;89%;80%;87%;84%
+;12;8043090-6;Sergio;Mora;ITO;72%;82%;74%;78%
+;13;27131189-3;Wilfer;Sánchez;ITO;86%;82%;87%;84%
+GRUPO 3;1;26583436-1;Daniel;Apolinar;ITO;87%;89%;98%;90%
+;2;10742577-2;Abelardo;Pardo;ITO;80%;76%;63%;74%
+;3;17242514-3;Pablo;Díaz;ITO PODA;69%;82%;85%;79%
+;4;16032513-5;Anaximandro;Bórquez;ITO;82%;91%;87%;88%
+;5;25653678-1;Milbys;Castillo;Especialista technical team;76%;84%;96%;84%
+;6;15438902-4;Marcelo;Díaz;;47%;;;Pendiente
+;7;13896843-K;José Luis;Ortiz;Especialista technical team;88%;80%;93%;85%
+;8;17936445-K;Ibar;Carvajal;ITO;82%;87%;91%;86%
+;9;15468314-3;David;Salas;;14%;;;Pendiente
+;10;17191827-8;Gustavo;Garrido;Inspector hs;81%;91%;78%;86%
+;11;17411012-3;Gustavo;Jiménez;Secretario técnico;82%;84%;85%;84%
+;12;16406300-3;Carolina;Ríos;;38%;;;Pendiente
+;13;24815309-1;Brayan;Parra;ITO;79%;84%;83%;82%
+;14;18221712-3;Javier;Contreras;;46%;;;Pendiente
+;15;17309584-8;Ignacio;Pellizzari;ITO;86%;89%;93%;89%
+GRUPO 4;1;19170767-2;Patricia;Urrutia;ESPECIALISTA EN GESTION DE SEGURIDAD Y M;89%;91%;78%;88%
+;2;7798415-1;José Antonio;Soto;ITO;77%;93%;89%;88%
+;3;19055608-5;Gonzalo;Alvarez;ITO;82%;82%;91%;84%
+;4;17879431-0;Italo;Berríos;Especialista technical team;40%;;80%;Pendiente
+;5;14145717-9;Rodrigo;Parra;Head of Pacifico Dispatching & Services;44%;;91%;Pendiente

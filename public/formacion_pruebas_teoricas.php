@@ -20,6 +20,29 @@ if (empty($_SESSION['auth'])) {
 $pdo = db();
 $msg = "";
 
+function formEnsureAgrupacionOriginTable(PDO $pdo): void {
+  $pdo->exec("CREATE TABLE IF NOT EXISTS ceo_gp_agrupacion_origen (
+    id INT NOT NULL AUTO_INCREMENT,
+    destino ENUM('HABILITACION','FORMACION') NOT NULL,
+    id_agrupacion INT NOT NULL,
+    origen VARCHAR(40) NOT NULL,
+    fecha_creacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_gp_agrupacion_origen (destino, id_agrupacion)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function formSetAgrupacionOrigin(PDO $pdo, int $idAgrupacion, string $origen): void {
+  if ($idAgrupacion <= 0 || trim($origen) === '') {
+    return;
+  }
+  formEnsureAgrupacionOriginTable($pdo);
+  $stmt = $pdo->prepare("INSERT INTO ceo_gp_agrupacion_origen (destino, id_agrupacion, origen) VALUES ('FORMACION', :id_agrupacion, :origen) ON DUPLICATE KEY UPDATE origen = origen");
+  $stmt->execute([':id_agrupacion' => $idAgrupacion, ':origen' => $origen]);
+}
+
+formEnsureAgrupacionOriginTable($pdo);
+
 /* ===============================================================
    ACCIONES CRUD
    =============================================================== */
@@ -63,6 +86,7 @@ try {
           $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio]);
         }
         $idNuevaAgrupacion = (int)$pdo->lastInsertId();
+        formSetAgrupacionOrigin($pdo, $idNuevaAgrupacion, 'FORMACION_PRUEBAS_TEORICAS');
 
         if ($id_agrupacion_base > 0) {
           $stmtPreguntas = $pdo->prepare("
@@ -171,6 +195,13 @@ $agrup = $pdo->query("
   SELECT a.id, a.titulo, a.id_servicio, s.servicio
   FROM ceo_formacion_agrupacion a
   JOIN ceo_formacion_servicios s ON s.id = a.id_servicio
+  LEFT JOIN ceo_gp_agrupacion_origen go ON go.destino = 'FORMACION' AND go.id_agrupacion = a.id
+  LEFT JOIN (
+    SELECT id_agrupacion, COUNT(*) AS total
+    FROM ceo_formacion_preguntas_servicios
+    GROUP BY id_agrupacion
+  ) qp ON qp.id_agrupacion = a.id
+  WHERE COALESCE(qp.total, 0) > 0 OR go.origen = 'FORMACION_PRUEBAS_TEORICAS'
   ORDER BY a.id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 

@@ -250,7 +250,18 @@ if ($rutNormalizado !== '') {
             END AS resultado_mostrado,
             rpi.notafinal AS nota_mostrada,
             ct.id_cargo AS id_cargo,
-            emp.nombre AS empresa,
+            COALESCE((
+                SELECT emp_h.nombre
+                FROM ceo_evaluaciones_programadas ep_h
+                INNER JOIN ceo_habilitacion h ON h.cuadrilla = ep_h.cuadrilla AND h.id_servicio = ep_h.id_servicio
+                LEFT JOIN ceo_empresas emp_h ON emp_h.id = h.empresa
+                WHERE ep_h.id_proceso_habilitacion = rpi.id_proceso_habilitacion
+                  AND ep_h.id_servicio = rpi.id_servicio
+                  AND ep_h.tipo = 'PRUEBA'
+                  AND REPLACE(REPLACE(REPLACE(UPPER(ep_h.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY ep_h.id DESC
+                LIMIT 1
+            ), emp.nombre) AS empresa,
             cargo.cargo AS cargo,
             CASE
                 WHEN rpi.id_evaluador IS NULL THEN 'Carga histórica'
@@ -282,7 +293,18 @@ if ($rutNormalizado !== '') {
             END AS resultado_mostrado,
             CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) AS nota_mostrada,
             ct2.id_cargo AS id_cargo,
-            emp2.nombre AS empresa,
+            COALESCE((
+                SELECT emp_h2.nombre
+                FROM ceo_evaluaciones_programadas ep_h2
+                INNER JOIN ceo_habilitacion h2 ON h2.cuadrilla = ep_h2.cuadrilla AND h2.id_servicio = ep_h2.id_servicio
+                LEFT JOIN ceo_empresas emp_h2 ON emp_h2.id = h2.empresa
+                WHERE ep_h2.id_proceso_habilitacion = et.id_proceso_habilitacion
+                  AND ep_h2.id_servicio = et.id_servicio
+                  AND ep_h2.tipo = 'TERRENO'
+                  AND REPLACE(REPLACE(REPLACE(UPPER(ep_h2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY ep_h2.id DESC
+                LIMIT 1
+            ), emp2.nombre) AS empresa,
             COALESCE(et.cargo, cargo2.cargo) AS cargo,
             COALESCE(et.evaluador, '') AS evaluador,
             uo2.desc_uo AS uo,

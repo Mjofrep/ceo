@@ -271,6 +271,7 @@ canvas{max-height:320px;}
       <div><div class="brand-title h5 mb-0"><?= frmEsc(APP_NAME) ?></div><small class="text-muted"><?= frmEsc(APP_SUBTITLE) ?></small></div>
     </div>
     <div class="d-flex gap-2">
+      <a href="https://www.noetica.cl/ceo.noetica.cl/public/formacion_registro_asistencia.php" class="btn btn-outline-success btn-sm"><i class="bi bi-clipboard-check"></i> Registro asistencia</a>
       <a href="<?= frmEsc($excelUrl) ?>" class="btn btn-success btn-sm"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</a>
       <a href="general.php" class="btn btn-outline-primary btn-sm">&larr; Volver</a>
     </div>
