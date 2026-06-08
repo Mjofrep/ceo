@@ -91,30 +91,41 @@ function gpWorkflowSmtpConfig(): array
 
 function gpFetchOperacionUsers(PDO $pdo, string $destino = '', int $idServicio = 0): array
 {
-    $params = [':rol' => 'OPERACION'];
-    $whereService = '';
-    if ($idServicio > 0 && in_array($destino, ['HABILITACION', 'FORMACION'], true)) {
-        $whereService = " AND EXISTS (
-            SELECT 1
-            FROM ceo_gp_usuario_servicio us
-            WHERE us.id_usuario = u.id
-              AND us.id_servicio = :id_servicio
-              AND us.destino IN (:destino, 'AMBOS')
-        )";
-        $params[':id_servicio'] = $idServicio;
-        $params[':destino'] = $destino;
-    }
-
-    $sql = "SELECT u.id, u.usuario, u.nombres, u.apellidos, u.correo
+    $baseSql = "SELECT u.id, u.usuario, u.nombres, u.apellidos, u.correo
         FROM ceo_gp_usuarios u
         INNER JOIN ceo_gp_roles r ON r.id = u.id_rol
         WHERE u.estado = 'A'
           AND r.estado = 'A'
           AND r.codigo = :rol
-          {$whereService}
         ORDER BY u.nombres ASC, u.apellidos ASC, u.usuario ASC";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+
+    if ($idServicio > 0 && in_array($destino, ['HABILITACION', 'FORMACION'], true)) {
+        $sql = str_replace(
+            'ORDER BY u.nombres ASC, u.apellidos ASC, u.usuario ASC',
+            " AND EXISTS (
+            SELECT 1
+            FROM ceo_gp_usuario_servicio us
+            WHERE us.id_usuario = u.id
+              AND us.id_servicio = :id_servicio
+              AND us.destino IN (:destino, 'AMBOS')
+        )
+        ORDER BY u.nombres ASC, u.apellidos ASC, u.usuario ASC",
+            $baseSql
+        );
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            ':rol' => 'OPERACION',
+            ':id_servicio' => $idServicio,
+            ':destino' => $destino,
+        ]);
+        $filtered = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($filtered) {
+            return $filtered;
+        }
+    }
+
+    $stmt = $pdo->prepare($baseSql);
+    $stmt->execute([':rol' => 'OPERACION']);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
@@ -188,6 +199,8 @@ function gpSendOperacionAssignmentMail(PDO $pdo, array $operator, array $context
                 $mail->addCC($admin);
             }
         }
+        $mail->CharSet = 'UTF-8';
+        $mail->Encoding = 'base64';
         $mail->isHTML(true);
         $mail->Subject = 'Prueba asignada a Operacion - ' . (string)($context['servicio'] ?? '') . ' - ' . (string)($context['agrupacion'] ?? '');
         $mail->Body = '<html><body style="font-family:Arial,sans-serif">'
@@ -313,14 +326,14 @@ function gpFetchWorkflowBuckets(PDO $pdo, array $states, array $filters = []): a
         MAX(COALESCE(asg.nombres, '')) AS asignado_por_nombres,
         MAX(COALESCE(asg.apellidos, '')) AS asignado_por_apellidos,
         MAX(q.fecha_asignacion_operacion) AS fecha_asignacion_operacion,
-        CASE WHEN q.destino = 'FORMACION'
+        MAX(CASE WHEN q.destino = 'FORMACION'
              THEN (SELECT fs.servicio FROM ceo_formacion_servicios fs WHERE fs.id = q.id_servicio LIMIT 1)
              ELSE (SELECT sp.servicio FROM ceo_servicios_pruebas sp WHERE sp.id = q.id_servicio LIMIT 1)
-        END AS servicio,
-        CASE WHEN q.destino = 'FORMACION'
+        END) AS servicio,
+        MAX(CASE WHEN q.destino = 'FORMACION'
              THEN (SELECT fa.titulo FROM ceo_formacion_agrupacion fa WHERE fa.id = q.id_agrupacion LIMIT 1)
              ELSE (SELECT a.titulo FROM ceo_agrupacion a WHERE a.id = q.id_agrupacion LIMIT 1)
-        END AS agrupacion
+        END) AS agrupacion
         FROM ceo_gp_preguntas q
         LEFT JOIN ceo_gp_fuentes f ON f.id = q.id_fuente
         LEFT JOIN ceo_gp_usuarios op ON op.id = q.id_operador_asignado
@@ -355,7 +368,11 @@ function gpFetchWorkflowQuestions(PDO $pdo, array $states, array $filters = []):
         CASE WHEN q.destino = 'FORMACION'
              THEN (SELECT fa.titulo FROM ceo_formacion_agrupacion fa WHERE fa.id = q.id_agrupacion LIMIT 1)
              ELSE (SELECT a.titulo FROM ceo_agrupacion a WHERE a.id = q.id_agrupacion LIMIT 1)
-        END AS agrupacion
+        END AS agrupacion,
+        CASE WHEN q.destino = 'FORMACION'
+             THEN (SELECT acf.descripcion FROM ceo_areacompetencia_formacion acf WHERE acf.id = q.id_area LIMIT 1)
+             ELSE (SELECT ac.descripcion FROM ceo_areacompetencias ac WHERE ac.id = q.id_area LIMIT 1)
+        END AS area_competencia
         FROM ceo_gp_preguntas q
         LEFT JOIN ceo_gp_fuentes f ON f.id = q.id_fuente
         LEFT JOIN ceo_gp_usuarios op ON op.id = q.id_operador_asignado

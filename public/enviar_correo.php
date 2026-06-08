@@ -82,6 +82,7 @@ $stmtAdmins = $pdo->query("
   SELECT correo
   FROM ceo_usuarios
   WHERE id_rol = 1
+    AND estado = 'A'
     AND correo IS NOT NULL
     AND correo <> ''
 ");
@@ -144,6 +145,8 @@ try {
   }
 
   $mail->isHTML(true);
+  $mail->CharSet = 'UTF-8';
+  $mail->Encoding = 'base64';
   $mail->Subject = "Nueva Solicitud N {$idSolicitud} registrada";
   $mail->Body = $mensaje;
 

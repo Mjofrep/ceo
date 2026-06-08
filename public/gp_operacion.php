@@ -15,6 +15,29 @@ if (!gpIsAdmin()) {
     $operationFilters['id_operador_asignado'] = (int)($auth['id'] ?? 0);
 }
 
+function gpOperacionAreaCatalog(PDO $pdo): array
+{
+    $catalog = [];
+
+    $rowsFormacion = $pdo->query('SELECT MIN(id) AS id, id_servicio, descripcion FROM ceo_areacompetencia_formacion GROUP BY id_servicio, descripcion ORDER BY descripcion ASC')->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rowsFormacion as $row) {
+        $catalog['FORMACION'][(int)$row['id_servicio']][] = [
+            'id' => (int)$row['id'],
+            'descripcion' => (string)$row['descripcion'],
+        ];
+    }
+
+    $rowsHabilitacion = $pdo->query('SELECT id, id_servicio, descripcion FROM ceo_areacompetencias ORDER BY descripcion ASC')->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rowsHabilitacion as $row) {
+        $catalog['HABILITACION'][(int)$row['id_servicio']][] = [
+            'id' => (int)$row['id'],
+            'descripcion' => (string)$row['descripcion'],
+        ];
+    }
+
+    return $catalog;
+}
+
 function gpOperacionBuildMessage(string $action, int $moved): string
 {
     if ($action === 'aprobar') {
@@ -35,7 +58,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $comment = trim((string)($_POST['comentario'] ?? ''));
             $questionIds = [];
 
-            if ($action === 'aprobar' || $action === 'observar') {
+            if ($action === 'guardar_cambios') {
+                $id = (int)($_POST['id_pregunta'] ?? 0);
+                $pregunta = trim((string)($_POST['pregunta'] ?? ''));
+                $idArea = (int)($_POST['id_area'] ?? 0);
+                $alts = $_POST['alternativas'] ?? [];
+                $correcta = (int)($_POST['correcta'] ?? 0);
+                if ($id <= 0 || $pregunta === '' || !is_array($alts) || count($alts) < 2) {
+                    throw new RuntimeException('Datos incompletos para guardar la pregunta.');
+                }
+
+                $params = [':id' => $id];
+                $sqlEstado = 'SELECT estado, id_operador_asignado, destino, id_servicio FROM ceo_gp_preguntas WHERE id = :id LIMIT 1';
+                $stmt = $pdo->prepare($sqlEstado);
+                $stmt->execute($params);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $estado = (string)($row['estado'] ?? '');
+                $idOperadorAsignado = (int)($row['id_operador_asignado'] ?? 0);
+                $destinoPregunta = (string)($row['destino'] ?? '');
+                $idServicioPregunta = (int)($row['id_servicio'] ?? 0);
+                if ($estado !== 'OPERACION') {
+                    throw new RuntimeException('Solo se pueden editar preguntas en Operacion.');
+                }
+                if (!gpIsAdmin() && $idOperadorAsignado > 0 && $idOperadorAsignado !== (int)($auth['id'] ?? 0)) {
+                    throw new RuntimeException('No puedes editar una pregunta no asignada a tu usuario.');
+                }
+
+                if ($idArea <= 0) {
+                    throw new RuntimeException('Debes seleccionar un área de competencia.');
+                }
+                $sqlArea = $destinoPregunta === 'FORMACION'
+                    ? 'SELECT 1 FROM ceo_areacompetencia_formacion WHERE id = :id AND id_servicio = :id_servicio LIMIT 1'
+                    : 'SELECT 1 FROM ceo_areacompetencias WHERE id = :id AND id_servicio = :id_servicio LIMIT 1';
+                $stmtArea = $pdo->prepare($sqlArea);
+                $stmtArea->execute([
+                    ':id' => $idArea,
+                    ':id_servicio' => $idServicioPregunta,
+                ]);
+                if (!$stmtArea->fetchColumn()) {
+                    throw new RuntimeException('El área de competencia seleccionada no corresponde al servicio de la pregunta.');
+                }
+
+                $pdo->beginTransaction();
+                $pdo->prepare('UPDATE ceo_gp_preguntas SET pregunta = :pregunta, id_area = :id_area, estado = "OPERACION", actualizado_por = :u, fecha_actualizacion = NOW() WHERE id = :id')->execute([
+                    ':pregunta' => $pregunta,
+                    ':id_area' => $idArea,
+                    ':u' => (int)($auth['id'] ?? 0),
+                    ':id' => $id,
+                ]);
+                foreach ($alts as $idAlt => $texto) {
+                    $idAlt = (int)$idAlt;
+                    $texto = trim((string)$texto);
+                    if ($idAlt <= 0 || $texto === '') {
+                        continue;
+                    }
+                    $pdo->prepare('UPDATE ceo_gp_alternativas SET alternativa = :alt, correcta = :correcta WHERE id = :id AND id_pregunta = :id_pregunta')->execute([
+                        ':alt' => $texto,
+                        ':correcta' => $idAlt === $correcta ? 'S' : 'N',
+                        ':id' => $idAlt,
+                        ':id_pregunta' => $id,
+                    ]);
+                }
+                gpAddRevisionLog($pdo, $id, $estado, 'OPERACION', $comment !== '' ? $comment : 'Correccion aplicada en Operacion', (int)($auth['id'] ?? 0));
+                $pdo->commit();
+                $msg = 'Cambios guardados y pregunta mantenida en OPERACION.';
+            } elseif ($action === 'aprobar' || $action === 'observar') {
                 $questionIds = [(int)($_POST['id_pregunta'] ?? 0)];
             } elseif ($action === 'aprobar_seleccionadas' || $action === 'observar_seleccionadas') {
                 $questionIds = $_POST['ids'] ?? [];
@@ -76,10 +163,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg .= ' Advertencias: ' . implode(' | ', $result['warnings']);
             }
         } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             $error = $e->getMessage();
         }
     }
 }
+
+$areaCatalog = gpOperacionAreaCatalog($pdo);
 
 $buckets = gpFetchWorkflowBuckets($pdo, ['OPERACION'], $operationFilters);
 $agrupaciones = [];
@@ -249,7 +341,7 @@ $csrf = Csrf::token();
   <?php endif; ?>
 
   <?php foreach ($questions as $q): ?>
-    <div class="card p-4 mb-3">
+    <div class="card p-4 mb-3" id="pregunta-<?= (int)$q['id'] ?>">
       <div class="d-flex justify-content-between gap-3 flex-wrap">
         <div>
           <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -257,7 +349,7 @@ $csrf = Csrf::token();
             <span class="badge text-bg-warning">OPERACION</span>
             <span class="badge text-bg-light border"><?= gpEsc($q['destino']) ?></span>
           </div>
-          <div class="small text-muted mt-1"><?= gpEsc($q['servicio']) ?> | <?= gpEsc($q['agrupacion']) ?> | <?= gpEsc($q['fuente']) ?></div>
+          <div class="small text-muted mt-1"><?= gpEsc($q['servicio']) ?> | <?= gpEsc($q['agrupacion']) ?> | <?= gpEsc($q['area_competencia'] ?: 'Sin área de competencia') ?> | <?= gpEsc($q['fuente']) ?></div>
           <?php if ((int)($q['id_operador_asignado'] ?? 0) > 0): ?>
             <div class="mt-2"><span class="assignment-chip">Asignada a: <?= gpEsc(trim((string)(($q['operador_nombres'] ?? '') . ' ' . ($q['operador_apellidos'] ?? '')))) ?></span></div>
           <?php endif; ?>
@@ -265,13 +357,6 @@ $csrf = Csrf::token();
         <div class="small text-muted">#<?= (int)$q['id'] ?></div>
       </div>
       <hr>
-      <p class="fw-semibold"><?= gpEsc($q['pregunta']) ?></p>
-      <?php foreach ($q['alternativas'] as $alt): ?>
-        <div class="border rounded p-2 mb-2 <?= $alt['correcta'] === 'S' ? 'correct' : '' ?>">
-          <span class="badge text-bg-<?= $alt['correcta'] === 'S' ? 'success' : 'light text-dark border' ?> me-2"><?= $alt['correcta'] === 'S' ? 'Correcta' : 'Alt' ?></span>
-          <?= gpEsc($alt['alternativa']) ?>
-        </div>
-      <?php endforeach; ?>
       <?php if ($q['logs']): ?>
         <details class="mt-3">
           <summary class="small text-muted">Comentarios anteriores</summary>
@@ -280,14 +365,31 @@ $csrf = Csrf::token();
           <?php endforeach; ?>
         </details>
       <?php endif; ?>
-      <form method="post" class="mt-3">
+      <form method="post" class="mt-3" action="?id_agrupacion=<?= (int)$selectedAgrupacion ?>&bucket=<?= urlencode((string)$selectedBucket) ?>#pregunta-<?= (int)$q['id'] ?>">
         <input type="hidden" name="csrf" value="<?= gpEsc($csrf) ?>">
         <input type="hidden" name="id_pregunta" value="<?= (int)$q['id'] ?>">
         <input type="hidden" name="id_agrupacion_filtro" value="<?= (int)$selectedAgrupacion ?>">
         <input type="hidden" name="bucket_filtro" value="<?= gpEsc($selectedBucket) ?>">
+        <label class="form-label">Pregunta</label>
+        <textarea name="pregunta" class="form-control mb-3" rows="3" required><?= gpEsc($q['pregunta']) ?></textarea>
+        <?php $areaOptions = $areaCatalog[(string)($q['destino'] ?? '')][(int)($q['id_servicio'] ?? 0)] ?? []; ?>
+        <label class="form-label">Área de competencia</label>
+        <select name="id_area" class="form-select mb-3" required>
+          <option value="">Selecciona un área</option>
+          <?php foreach ($areaOptions as $areaOption): ?>
+            <option value="<?= (int)$areaOption['id'] ?>" <?= (int)($q['id_area'] ?? 0) === (int)$areaOption['id'] ? 'selected' : '' ?>><?= gpEsc((string)$areaOption['descripcion']) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <?php foreach ($q['alternativas'] as $alt): ?>
+          <div class="input-group mb-2 <?= $alt['correcta'] === 'S' ? 'correct rounded' : '' ?>">
+            <div class="input-group-text"><input type="radio" name="correcta" value="<?= (int)$alt['id'] ?>" <?= $alt['correcta'] === 'S' ? 'checked' : '' ?>></div>
+            <input type="text" name="alternativas[<?= (int)$alt['id'] ?>]" class="form-control" value="<?= gpEsc($alt['alternativa']) ?>" required>
+          </div>
+        <?php endforeach; ?>
         <label class="form-label small">Comentario</label>
         <textarea name="comentario" class="form-control mb-2" rows="2"></textarea>
         <div class="text-end d-flex gap-2 justify-content-end flex-wrap">
+          <button class="btn btn-outline-primary btn-sm" name="accion" value="guardar_cambios">Guardar cambios</button>
           <button class="btn btn-outline-danger btn-sm" name="accion" value="observar">Observar</button>
           <button class="btn btn-success btn-sm" name="accion" value="aprobar">Visar</button>
         </div>

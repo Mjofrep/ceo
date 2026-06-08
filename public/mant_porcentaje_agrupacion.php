@@ -29,6 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $fechadesde     = $_POST['fechadesde'] ?? '';
     $activo         = $_POST['activo'] ?? 'S';
 
+    if (($accion === 'crear' || $accion === 'editar') && ($porcentaje <= 0 || $porcentaje > 100)) {
+        $msg = '⚠️ El porcentaje debe ser mayor que 0 y menor o igual que 100.';
+        $accion = '';
+    }
+
     /* ===================== CREAR ===================== */
     if ($accion === 'crear' && $id_agrupacion > 0 && $fechadesde) {
 
@@ -156,7 +161,7 @@ table th, table td { vertical-align:middle; }
 
 <div class="col-md-3">
   <label class="form-label">Porcentaje</label>
-  <input type="number" name="porcentaje" id="porcentaje" class="form-control" min="0" max="100" required>
+  <input type="number" name="porcentaje" id="porcentaje" class="form-control" min="1" max="100" required>
 </div>
 
 <div class="col-md-3">

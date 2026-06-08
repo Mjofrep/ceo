@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 session_start();
 ini_set('memory_limit', '768M');
+ini_set('max_execution_time', '0');
+@set_time_limit(0);
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/functions.php';
@@ -44,11 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($_FILES['csv_trabajadores']['tmp_name'])) {
                 throw new RuntimeException('Debe seleccionar el archivo trabajadores.csv.');
             }
+            if (empty($_FILES['csv_historia']['tmp_name'])) {
+                throw new RuntimeException('Debe seleccionar el archivo historia_evaluaciones.csv.');
+            }
 
             $analisis = analizarHistoricoTerrenoCsv(
                 $pdo,
                 $_FILES['csv_terreno']['tmp_name'],
                 $_FILES['csv_trabajadores']['tmp_name'],
+                $_FILES['csv_historia']['tmp_name'],
                 $servicioSeleccionado
             );
             $_SESSION[TERRENO_SESSION_KEY] = $analisis;
@@ -110,7 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTrabajadores, int $idServicio): array
+function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTrabajadores, string $csvHistoria, int $idServicio): array
 {
     $grupo = obtenerGrupoTerreno($pdo, $idServicio);
     if ($grupo === null) {
@@ -121,8 +127,9 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
     $workers = loadTrabajadoresCsv($csvTrabajadores);
     $instrumento = cargarInstrumentoTerreno($pdo, (int)$grupo['id']);
     $existingEvalKeys = cargarEvaluacionesTerrenoExistentes($pdo, $idServicio);
+    $historyInfo = analizarHistoriaTerrenoCsv($pdo, $csvHistoria, $idServicio);
 
-    $mainInfo = loadTerrenoHistoriCsv($csvTerreno, $idServicio, $workers, $instrumento, $existingEvalKeys);
+    $mainInfo = loadTerrenoHistoriCsv($csvTerreno, $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links']);
     $normalizacion = analizarNormalizacionContratistasTerreno($pdo, $mainInfo['ruts_normalizacion']);
 
     $payloadFile = writeTerrainPayload([
@@ -130,6 +137,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
         'id_grupo' => (int)$grupo['id'],
         'evaluaciones_validas' => $mainInfo['evaluaciones_validas'],
         'normalizacion_detalles' => $normalizacion['detalles'],
+        'process_links' => $mainInfo['process_links'] ?? [],
     ]);
 
     return [
@@ -144,6 +152,58 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
         'mapeo_secciones' => $mainInfo['mapeo_secciones'],
         'mapeo_preguntas' => $mainInfo['mapeo_preguntas'],
         'normalizacion' => $normalizacion,
+        'historia' => $historyInfo['summary'],
+        'payload_file' => $payloadFile,
+    ];
+}
+
+function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServicio): array
+{
+    $grupo = obtenerGrupoTerreno($pdo, $idServicio);
+    if ($grupo === null) {
+        throw new RuntimeException('No existe agrupación de terreno asociada al servicio seleccionado.');
+    }
+
+    $xlsx = openSimpleXlsxContext($excelPath);
+    try {
+        $sheetTrabajadores = simpleWorkbookSheetRowsFromContext($xlsx, 'Trabajadores');
+        $sheetHistoria = simpleWorkbookSheetRowsFromContext($xlsx, 'Historia de Evaluaciones');
+        if ($sheetTrabajadores === null || $sheetHistoria === null) {
+            throw new RuntimeException('El archivo debe contener las hojas Trabajadores e Historia de Evaluaciones.');
+        }
+
+        $threshold = obtenerPorcentajeMinimoTerreno($pdo, (int)$grupo['id']);
+        $workers = loadTrabajadoresSheetRows($sheetTrabajadores);
+        $instrumento = cargarInstrumentoTerreno($pdo, (int)$grupo['id']);
+        $existingEvalKeys = cargarEvaluacionesTerrenoExistentes($pdo, $idServicio);
+        $historyInfo = analizarHistoriaTerrenoRows($pdo, $sheetHistoria, $idServicio);
+        $mainInfo = loadTerrenoHistoriSheetFromContext($xlsx, 'Evaluaciones de Terreno Histori', $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links']);
+        $normalizacion = analizarNormalizacionContratistasTerreno($pdo, $mainInfo['ruts_normalizacion']);
+    } finally {
+        $xlsx['zip']->close();
+    }
+
+    $payloadFile = writeTerrainPayload([
+        'id_servicio' => $idServicio,
+        'id_grupo' => (int)$grupo['id'],
+        'evaluaciones_validas' => $mainInfo['evaluaciones_validas'],
+        'normalizacion_detalles' => $normalizacion['detalles'],
+        'process_links' => $mainInfo['process_links'] ?? [],
+    ]);
+
+    return [
+        'created_at' => date('Y-m-d H:i:s'),
+        'id_servicio' => $idServicio,
+        'servicio' => obtenerNombreServicio($pdo, $idServicio),
+        'id_grupo' => (int)$grupo['id'],
+        'grupo' => (string)$grupo['grupo'],
+        'porcentaje_minimo' => $threshold,
+        'workers' => $workers['summary'],
+        'evaluaciones' => $mainInfo['summary'],
+        'mapeo_secciones' => $mainInfo['mapeo_secciones'],
+        'mapeo_preguntas' => $mainInfo['mapeo_preguntas'],
+        'normalizacion' => $normalizacion,
+        'historia' => $historyInfo['summary'],
         'payload_file' => $payloadFile,
     ];
 }
@@ -199,7 +259,7 @@ function loadTrabajadoresCsv(string $path): array
     }
 }
 
-function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys): array
+function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
 {
     $fh = fopen($path, 'r');
     if ($fh === false) {
@@ -294,7 +354,7 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                     'codigo' => $codigoEvaluacion,
                     'rut' => $rut,
                     'estado' => 'ERROR',
-                    'motivo' => 'Resultado o fecha principal inválida.',
+                    'motivo' => 'Resultado o fecha principal inválida. Resultado raw: ' . trim((string)cellByHeader($row, $resolved, 'RESULTADO')) . ' | Fecha raw: ' . trim((string)cellByHeader($row, $resolved, 'FECHA')),
                 ], TERRENO_PREVIEW_LIMIT);
                 continue;
             }
@@ -334,9 +394,11 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                     'fecha_inicio' => $fechaInicio?->format('Y-m-d H:i:s'),
                     'fecha_fin' => $fechaFin?->format('Y-m-d H:i:s'),
                     'fecha_aprobacion' => $fechaAprob?->format('Y-m-d'),
-                    'comentarios_finales' => $comentariosFinales,
+                    'comentarios_finales' => terrainSafeText($comentariosFinales, 2000),
                     'solicitud' => ctype_digit($solicitud) ? (int)$solicitud : null,
                     'duplicada' => $duplicada,
+                    'id_proceso_habilitacion' => (int)(($processLinks[historicoClaveTerrenoProceso($rut, $fechaEval->format('Y-m-d'))]['id_proceso_habilitacion'] ?? 0)),
+                    'proceso_historico' => (int)(($processLinks[historicoClaveTerrenoProceso($rut, $fechaEval->format('Y-m-d'))]['numero_historico'] ?? 0)),
                     'detalles' => [],
                 ];
             }
@@ -375,8 +437,8 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                 'respuesta' => trim((string)cellByHeader($row, $resolved, 'RESPUESTA')),
                 'peso' => parseNullableFloat(cellByHeader($row, $resolved, 'PESO')),
                 'resultado_item' => $resultado,
-                'comentario_item' => trim((string)cellByHeader($row, $resolved, 'COMENTARIODELITEM')),
-                'plan_accion' => trim((string)cellByHeader($row, $resolved, 'PLANESDEACCION')),
+                'comentario_item' => terrainSafeText(cellByHeader($row, $resolved, 'COMENTARIODELITEM'), 1000),
+                'plan_accion' => terrainSafeText(cellByHeader($row, $resolved, 'PLANESDEACCION'), 1000),
                 'id_seccion' => $sectionMatch['id'],
                 'id_pregunta' => $questionMatch['id'],
                 'practico' => $questionMatch['practico'],
@@ -389,7 +451,11 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                 'codigo' => $codigoEvaluacion,
                 'rut' => $rut,
                 'estado' => $evaluaciones[$key]['duplicada'] ? 'DUPLICADA' : 'IMPORTABLE',
-                'motivo' => $evaluaciones[$key]['duplicada'] ? 'La evaluación ya existe en ceo_evaluacion_terreno.' : 'Evaluación válida para importar.',
+                'motivo' => $evaluaciones[$key]['duplicada']
+                    ? 'La evaluación ya existe en ceo_evaluacion_terreno.'
+                    : (((int)($evaluaciones[$key]['id_proceso_habilitacion'] ?? 0) > 0)
+                        ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($evaluaciones[$key]['proceso_historico'] ?? 0) . '.'
+                        : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
             ], TERRENO_PREVIEW_LIMIT);
         }
 
@@ -413,6 +479,11 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
             'mapeo_preguntas' => array_values($mapeoPreguntas),
             'evaluaciones_validas' => $evaluacionesValidas,
             'ruts_normalizacion' => array_values($rutsNormalizacion),
+            'process_links' => $processLinks,
+            'historia_summary' => [
+                'procesos_detectados' => count($processLinks),
+                'procesos_resueltos' => count(array_filter($evaluacionesValidas, static fn(array $e): bool => (int)($e['id_proceso_habilitacion'] ?? 0) > 0)),
+            ],
         ];
     } finally {
         fclose($fh);
@@ -444,11 +515,11 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
     $stmtExisteContratista = $pdo->prepare('SELECT 1 FROM ceo_contratistas WHERE rut = :rut LIMIT 1');
     $stmtInsertContratista = $pdo->prepare('INSERT INTO ceo_contratistas (rut, nombre, apellidos, correo, telefono, id_cargo, fecha_ingreso, id_empresa, uo) VALUES (:rut, :nombre, :apellidos, NULL, NULL, :id_cargo, CURDATE(), :id_empresa, :uo)');
     $stmtExisteEval = $pdo->prepare('SELECT 1 FROM ceo_evaluacion_terreno WHERE codigo_evaluacion = :codigo AND rut = :rut AND id_servicio = :servicio LIMIT 1');
-    $stmtEval = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno (codigo_evaluacion, rut, nombre, cargo, contratista, evaluador, usuario, resultado, id_servicio, fecha_evaluacion, fecha_inicio, fecha_fin, fecha_aprobacion, comentarios_finales) VALUES (:codigo, :rut, :nombre, :cargo, :contratista, :evaluador, :usuario, :resultado, :servicio, :fecha_eval, :fecha_inicio, :fecha_fin, :fecha_aprobacion, :comentarios_finales)');
+    $stmtEval = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno (codigo_evaluacion, rut, nombre, cargo, contratista, evaluador, usuario, resultado, id_servicio, id_proceso_habilitacion, fecha_evaluacion, fecha_inicio, fecha_fin, fecha_aprobacion, comentarios_finales) VALUES (:codigo, :rut, :nombre, :cargo, :contratista, :evaluador, :usuario, :resultado, :servicio, :id_proceso_habilitacion, :fecha_eval, :fecha_inicio, :fecha_fin, :fecha_aprobacion, :comentarios_finales)');
     $stmtEvalDet = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno_detalle (id_evaluacion_terreno, codigo_area, area, codigo_item, item, respuesta, peso, resultado_item, comentario_item, plan_accion) VALUES (:id_eval, :codigo_area, :area, :codigo_item, :item, :respuesta, :peso, :resultado_item, :comentario_item, :plan_accion)');
     $stmtSecRes = $pdo->prepare('INSERT INTO ceo_seccion_resultado_terreno (id_empresa, fecha_examen, hora_examen, id_servicio, nsolicitud) VALUES (:id_empresa, :fecha_examen, :hora_examen, :id_servicio, :nsolicitud)');
     $stmtResPruebaTerr = $pdo->prepare('INSERT INTO ceo_resultado_prueba_terreno (id_resultado, cumple, no_cumple, no_aplica, observaciones, id_pregunta, id_seccion, rut_contratista, practico, referente, fecha) VALUES (:id_resultado, :cumple, :no_cumple, :no_aplica, :observaciones, :id_pregunta, :id_seccion, :rut_contratista, :practico, :referente, :fecha)');
-    $stmtIntento = $pdo->prepare('INSERT INTO ceo_resultado_terreno_intento (rut, id_servicio, id_evaluador, fecha_rendicion, hora_rendicion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal) VALUES (:rut, :id_servicio, :id_evaluador, :fecha, :hora, :puntaje_total, :correctas, :incorrectas, :ncontestadas, :noaplica, :notafinal)');
+    $stmtIntento = $pdo->prepare('INSERT INTO ceo_resultado_terreno_intento (rut, id_servicio, id_proceso_habilitacion, id_evaluador, fecha_rendicion, hora_rendicion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal) VALUES (:rut, :id_servicio, :id_proceso_habilitacion, :id_evaluador, :fecha, :hora, :puntaje_total, :correctas, :incorrectas, :ncontestadas, :noaplica, :notafinal)');
 
     $threshold = obtenerPorcentajeMinimoTerreno($pdo, $idGrupo);
     $normalizacionMap = [];
@@ -465,16 +536,23 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
     $contratistasIncompletos = 0;
     $detallesMapeados = 0;
     $detalles = [];
+    $currentStep = 'inicio';
+    $currentCodigo = '';
+    $currentRut = '';
 
     $pdo->beginTransaction();
     try {
         foreach ($evaluacionesValidas as $eval) {
             $rut = (string)$eval['rut'];
+            $currentRut = $rut;
+            $currentCodigo = (string)($eval['codigo_evaluacion'] ?? '');
 
+            $currentStep = 'verificar_contratista';
             $stmtExisteContratista->execute([':rut' => $rut]);
             if (!$stmtExisteContratista->fetchColumn()) {
                 $detalleNorm = $normalizacionMap[$rut] ?? null;
                 if (is_array($detalleNorm) && in_array((string)($detalleNorm['estado'] ?? ''), ['SE_CREARA', 'SE_CREARA_TRABAJADORES'], true)) {
+                    $currentStep = 'crear_contratista_completo';
                     $stmtInsertContratista->execute([
                         ':rut' => $rut,
                         ':nombre' => $detalleNorm['nombre'],
@@ -485,6 +563,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                     ]);
                     $contratistasCreados++;
                 } elseif (is_array($detalleNorm) && (string)($detalleNorm['estado'] ?? '') === 'SE_CREARA_INCOMPLETO') {
+                    $currentStep = 'crear_contratista_incompleto';
                     $stmtInsertContratista->execute([
                         ':rut' => $rut,
                         ':nombre' => $detalleNorm['nombre'],
@@ -498,6 +577,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 }
             }
 
+            $currentStep = 'verificar_evaluacion_existente';
             $stmtExisteEval->execute([
                 ':codigo' => $eval['codigo_evaluacion'],
                 ':rut' => $rut,
@@ -514,7 +594,8 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 continue;
             }
 
-            $stmtEval->execute([
+            $currentStep = 'insertar_evaluacion_terreno';
+            executeTerrainStatement($stmtEval, [
                 ':codigo' => $eval['codigo_evaluacion'],
                 ':rut' => $rut,
                 ':nombre' => $eval['nombre'],
@@ -524,12 +605,13 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 ':usuario' => $eval['usuario'],
                 ':resultado' => $eval['resultado'],
                 ':servicio' => $idServicio,
+                ':id_proceso_habilitacion' => (int)($eval['id_proceso_habilitacion'] ?? 0) ?: null,
                 ':fecha_eval' => $eval['fecha_evaluacion'],
                 ':fecha_inicio' => $eval['fecha_inicio'],
                 ':fecha_fin' => $eval['fecha_fin'],
                 ':fecha_aprobacion' => $eval['fecha_aprobacion'],
-                ':comentarios_finales' => $eval['comentarios_finales'],
-            ]);
+                ':comentarios_finales' => terrainSafeText($eval['comentarios_finales'] ?? '', 2000),
+            ], 'INSERT ceo_evaluacion_terreno');
             $idEvaluacion = (int)$pdo->lastInsertId();
 
             $norm = $normalizacionMap[$rut] ?? null;
@@ -538,22 +620,25 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
             if (!empty($eval['fecha_fin'])) {
                 $horaExamen = (new DateTimeImmutable($eval['fecha_fin']))->format('H:i:s');
             }
-            $stmtSecRes->execute([
+            $currentStep = 'insertar_seccion_resultado';
+            executeTerrainStatement($stmtSecRes, [
                 ':id_empresa' => $idEmpresa,
                 ':fecha_examen' => $eval['fecha_evaluacion'],
                 ':hora_examen' => $horaExamen,
                 ':id_servicio' => $idServicio,
                 ':nsolicitud' => $eval['solicitud'],
-            ]);
+            ], 'INSERT ceo_seccion_resultado_terreno');
             $idResultadoSeccion = (int)$pdo->lastInsertId();
 
             $correctas = 0;
             $incorrectas = 0;
             $noaplica = 0;
             $ncontestadas = 0;
+            $detalleResultadoKeys = [];
 
             foreach ($eval['detalles'] as $detalle) {
-                $stmtEvalDet->execute([
+                $currentStep = 'insertar_detalle_evaluacion';
+                executeTerrainStatement($stmtEvalDet, [
                     ':id_eval' => $idEvaluacion,
                     ':codigo_area' => $detalle['codigo_area'],
                     ':area' => $detalle['area'],
@@ -562,9 +647,9 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                     ':respuesta' => $detalle['respuesta'],
                     ':peso' => $detalle['peso'],
                     ':resultado_item' => $detalle['resultado_item'],
-                    ':comentario_item' => $detalle['comentario_item'],
-                    ':plan_accion' => $detalle['plan_accion'],
-                ]);
+                    ':comentario_item' => terrainSafeText($detalle['comentario_item'] ?? '', 1000),
+                    ':plan_accion' => terrainSafeText($detalle['plan_accion'] ?? '', 1000),
+                ], 'INSERT ceo_evaluacion_terreno_detalle');
 
                 [$cumple, $noCumple, $noAplica] = mapTerrenoRespuestaFlags((string)$detalle['respuesta']);
                 if ($cumple) {
@@ -578,7 +663,19 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 }
 
                 if ((int)$detalle['id_seccion'] > 0 && (int)$detalle['id_pregunta'] > 0) {
-                    $stmtResPruebaTerr->execute([
+                    $resultadoKey = implode('|', [
+                        $idResultadoSeccion,
+                        $rut,
+                        (int)$detalle['id_seccion'],
+                        (int)$detalle['id_pregunta'],
+                    ]);
+                    if (isset($detalleResultadoKeys[$resultadoKey])) {
+                        continue;
+                    }
+                    $detalleResultadoKeys[$resultadoKey] = true;
+
+                    $currentStep = 'insertar_resultado_prueba_terreno';
+                    executeTerrainStatement($stmtResPruebaTerr, [
                         ':id_resultado' => $idResultadoSeccion,
                         ':cumple' => $cumple ? '1' : '0',
                         ':no_cumple' => $noCumple ? '1' : '0',
@@ -590,7 +687,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                         ':practico' => (string)$detalle['practico'],
                         ':referente' => (string)$detalle['referente'],
                         ':fecha' => $detalle['fecha_detalle'],
-                    ]);
+                    ], 'INSERT ceo_resultado_prueba_terreno');
                     $detallesMapeados++;
                 }
             }
@@ -602,9 +699,11 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                     : new DateTimeImmutable($eval['fecha_evaluacion'] . ' 00:00:00'));
 
             $notaFinal = calcularNotaFinalDesdePorcentaje((float)$eval['resultado'], $threshold);
-            $stmtIntento->execute([
+            $currentStep = 'insertar_resultado_terreno_intento';
+            executeTerrainStatement($stmtIntento, [
                 ':rut' => $rut,
                 ':id_servicio' => $idServicio,
+                ':id_proceso_habilitacion' => (int)($eval['id_proceso_habilitacion'] ?? 0) ?: null,
                 ':id_evaluador' => resolverIdEvaluadorTerreno($pdo, (string)$eval['usuario'], (string)$eval['evaluador']) ?: ($evaluadorId > 0 ? $evaluadorId : null),
                 ':fecha' => $fechaHoraIntento->format('Y-m-d'),
                 ':hora' => $fechaHoraIntento->format('H:i:s'),
@@ -614,7 +713,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 ':ncontestadas' => $ncontestadas,
                 ':noaplica' => $noaplica,
                 ':notafinal' => $notaFinal,
-            ]);
+            ], 'INSERT ceo_resultado_terreno_intento');
 
             $importadas++;
             $detalles[] = [
@@ -625,10 +724,18 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
             ];
         }
 
+        $currentStep = 'commit';
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();
-        throw $e;
+        throw new RuntimeException(
+            'Fallo en terreno. Paso: ' . $currentStep
+            . '. Código: ' . ($currentCodigo !== '' ? $currentCodigo : '-')
+            . '. RUT: ' . ($currentRut !== '' ? $currentRut : '-')
+            . '. Error: ' . $e->getMessage(),
+            0,
+            $e
+        );
     }
 
     return [
@@ -912,6 +1019,30 @@ function matchTerrenoQuestion(string $item, array $questions): array
     return ['status' => 'NO_ENCONTRADA', 'id' => 0, 'pregunta' => '', 'practico' => '', 'referente' => ''];
 }
 
+function resolveTerrenoSectionMap(array $sections, string $area): array
+{
+    $orderedSections = array_values($sections);
+    $match = matchTerrenoSection($area, $orderedSections);
+    $sectionName = '';
+    foreach ($orderedSections as $section) {
+        if ((int)($section['id'] ?? 0) === (int)($match['id'] ?? 0)) {
+            $sectionName = (string)($section['seccion'] ?? $section['nombre'] ?? '');
+            break;
+        }
+    }
+
+    return [
+        'status' => (string)($match['status'] ?? 'NO_ENCONTRADA'),
+        'id' => (int)($match['id'] ?? 0),
+        'section' => $sectionName,
+    ];
+}
+
+function resolveTerrenoQuestionMap(array $questions, string $item): array
+{
+    return matchTerrenoQuestion($item, $questions);
+}
+
 function splitFullNameWithWorker(string $fullName, ?array $worker): array
 {
     $fullName = trim($fullName);
@@ -1008,6 +1139,24 @@ function appendLimitedAssoc(array &$list, string $key, array $row, int $limit): 
     if (!isset($list[$key]) && count($list) < $limit) {
         $list[$key] = $row;
     }
+}
+
+function executeTerrainStatement(PDOStatement $stmt, array $params, string $label): void
+{
+    try {
+        $stmt->execute($params);
+    } catch (Throwable $e) {
+        throw new RuntimeException($label . ': ' . $e->getMessage(), 0, $e);
+    }
+}
+
+function terrainSafeText($value, int $maxLength = 1000): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '';
+    }
+    return mb_substr($text, 0, $maxLength);
 }
 
 function buildHeaderMap(array $headerRow): array
@@ -1121,6 +1270,10 @@ function parseHistoricalDateTimeByMode($value, string $preferredMode): ?DateTime
     if ($value === null || $value === '') {
         return null;
     }
+    $numericText = str_replace(',', '.', trim((string)$value));
+    if ($numericText !== '' && is_numeric($numericText)) {
+        return parseExcelDateTimeValue($numericText);
+    }
     $text = trim((string)$value);
     $text = preg_replace('/\s+/', ' ', $text) ?? $text;
     $parts = preg_split('/\s+/', $text, 2);
@@ -1149,9 +1302,27 @@ function parseExcelDateTimeValue($value): ?DateTimeImmutable
     if ($value === null || $value === '') {
         return null;
     }
+    $numericText = str_replace(',', '.', trim((string)$value));
+    if ($numericText !== '' && is_numeric($numericText)) {
+        try {
+            $base = new DateTimeImmutable('1899-12-30 00:00:00');
+            $seconds = (int)round(((float)$numericText) * 86400);
+            return $base->modify('+' . $seconds . ' seconds');
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
     $text = trim((string)$value);
     $text = preg_replace('/\s+/', ' ', $text) ?? $text;
-    $formats = ['d/m/Y H:i:s','j/n/Y H:i:s','d/m/Y G:i:s','j/n/Y G:i:s','d/m/y H:i:s','j/n/y H:i:s','d/m/y G:i:s','j/n/y G:i:s','d/m/Y H:i','j/n/Y H:i','d/m/Y G:i','j/n/Y G:i','d/m/y H:i','j/n/y H:i','d/m/y G:i','j/n/y G:i','Y-m-d H:i:s','Y-m-d H:i','d/m/Y','j/n/Y','d/m/y','j/n/y'];
+    $formats = [
+        'd/m/Y H:i:s','j/n/Y H:i:s','d/m/Y G:i:s','j/n/Y G:i:s','d/m/y H:i:s','j/n/y H:i:s','d/m/y G:i:s','j/n/y G:i:s',
+        'd/m/Y H:i','j/n/Y H:i','d/m/Y G:i','j/n/Y G:i','d/m/y H:i','j/n/y H:i','d/m/y G:i','j/n/y G:i',
+        'd-m-Y H:i:s','j-n-Y H:i:s','d-m-Y G:i:s','j-n-Y G:i:s','d-m-y H:i:s','j-n-y H:i:s','d-m-y G:i:s','j-n-y G:i:s',
+        'd-m-Y H:i','j-n-Y H:i','d-m-Y G:i','j-n-Y G:i','d-m-y H:i','j-n-y H:i','d-m-y G:i','j-n-y G:i',
+        'Y-m-d H:i:s','Y-m-d H:i',
+        'd/m/Y','j/n/Y','d/m/y','j/n/y',
+        'd-m-Y','j-n-Y','d-m-y','j-n-y',
+    ];
     foreach ($formats as $format) {
         $dt = DateTimeImmutable::createFromFormat($format, $text);
         if ($dt instanceof DateTimeImmutable) {
@@ -1173,6 +1344,748 @@ function parseNullableFloat($value): ?float
     }
     $text = str_replace(',', '.', $text);
     return is_numeric($text) ? round((float)$text, 2) : null;
+}
+
+function loadSimpleXlsxWorkbook(string $path): array
+{
+    if (!is_file($path)) {
+        throw new RuntimeException('No se encontró el archivo Excel.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        throw new RuntimeException('No fue posible abrir el archivo Excel.');
+    }
+
+    try {
+        $sharedStrings = [];
+        $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sharedXml !== false) {
+            $sharedDoc = new DOMDocument();
+            $sharedDoc->loadXML($sharedXml);
+            foreach ($sharedDoc->getElementsByTagName('si') as $si) {
+                $text = '';
+                foreach ($si->getElementsByTagName('t') as $t) {
+                    $text .= $t->textContent;
+                }
+                $sharedStrings[] = $text;
+            }
+        }
+
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbookXml === false || $relsXml === false) {
+            throw new RuntimeException('El archivo Excel es inválido.');
+        }
+
+        $workbookDoc = new DOMDocument();
+        $workbookDoc->loadXML($workbookXml);
+        $relsDoc = new DOMDocument();
+        $relsDoc->loadXML($relsXml);
+
+        $relMap = [];
+        foreach ($relsDoc->getElementsByTagName('Relationship') as $rel) {
+            $relMap[$rel->getAttribute('Id')] = $rel->getAttribute('Target');
+        }
+
+        $sheets = [];
+        foreach ($workbookDoc->getElementsByTagName('sheet') as $sheet) {
+            $name = $sheet->getAttribute('name');
+            $rid = $sheet->getAttribute('r:id');
+            $target = $relMap[$rid] ?? null;
+            if ($name === '' || $target === null) {
+                continue;
+            }
+            $sheetXml = $zip->getFromName('xl/' . ltrim($target, '/'));
+            if ($sheetXml === false) {
+                continue;
+            }
+            $sheets[$name] = simpleXlsxSheetRows($sheetXml, $sharedStrings);
+        }
+
+        return $sheets;
+    } finally {
+        $zip->close();
+    }
+}
+
+function openSimpleXlsxContext(string $path): array
+{
+    if (!is_file($path)) {
+        throw new RuntimeException('No se encontró el archivo Excel.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        throw new RuntimeException('No fue posible abrir el archivo Excel.');
+    }
+
+    $sharedStrings = [];
+    $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+    if ($sharedXml !== false) {
+        $sharedDoc = new DOMDocument();
+        $sharedDoc->loadXML($sharedXml);
+        foreach ($sharedDoc->getElementsByTagName('si') as $si) {
+            $text = '';
+            foreach ($si->getElementsByTagName('t') as $t) {
+                $text .= $t->textContent;
+            }
+            $sharedStrings[] = $text;
+        }
+    }
+
+    $workbookXml = $zip->getFromName('xl/workbook.xml');
+    $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+    if ($workbookXml === false || $relsXml === false) {
+        $zip->close();
+        throw new RuntimeException('El archivo Excel es inválido.');
+    }
+
+    $workbookDoc = new DOMDocument();
+    $workbookDoc->loadXML($workbookXml);
+    $relsDoc = new DOMDocument();
+    $relsDoc->loadXML($relsXml);
+
+    $relMap = [];
+    foreach ($relsDoc->getElementsByTagName('Relationship') as $rel) {
+        $relMap[$rel->getAttribute('Id')] = $rel->getAttribute('Target');
+    }
+
+    $sheetTargets = [];
+    foreach ($workbookDoc->getElementsByTagName('sheet') as $sheet) {
+        $name = $sheet->getAttribute('name');
+        $rid = $sheet->getAttribute('r:id');
+        $target = $relMap[$rid] ?? null;
+        if ($name !== '' && $target !== null) {
+            $sheetTargets[$name] = 'xl/' . ltrim($target, '/');
+        }
+    }
+
+    return [
+        'zip' => $zip,
+        'shared_strings' => $sharedStrings,
+        'sheet_targets' => $sheetTargets,
+    ];
+}
+
+function simpleWorkbookSheetRowsFromContext(array $context, string $sheetName): ?array
+{
+    foreach (($context['sheet_targets'] ?? []) as $name => $target) {
+        if (normalizeHeaderKey($name) !== normalizeHeaderKey($sheetName)) {
+            continue;
+        }
+        $sheetXml = $context['zip']->getFromName($target);
+        if ($sheetXml === false) {
+            return null;
+        }
+        return simpleXlsxSheetRows($sheetXml, $context['shared_strings'] ?? []);
+    }
+    return null;
+}
+
+function simpleWorkbookSheetXmlFromContext(array $context, string $sheetName): ?string
+{
+    foreach (($context['sheet_targets'] ?? []) as $name => $target) {
+        if (normalizeHeaderKey($name) !== normalizeHeaderKey($sheetName)) {
+            continue;
+        }
+        $sheetXml = $context['zip']->getFromName($target);
+        return $sheetXml === false ? null : $sheetXml;
+    }
+    return null;
+}
+
+function simpleWorkbookSheetRows(array $workbook, string $sheetName): ?array
+{
+    foreach ($workbook as $name => $rows) {
+        if (normalizeHeaderKey($name) === normalizeHeaderKey($sheetName)) {
+            return $rows;
+        }
+    }
+    return null;
+}
+
+function simpleXlsxSheetRows(string $sheetXml, array $sharedStrings): array
+{
+    $doc = new DOMDocument();
+    $doc->loadXML($sheetXml);
+    $rows = [];
+    foreach ($doc->getElementsByTagName('row') as $rowNode) {
+        $row = [];
+        foreach ($rowNode->getElementsByTagName('c') as $cellNode) {
+            $ref = $cellNode->getAttribute('r');
+            $col = simpleXlsxColumnIndex($ref);
+            $type = $cellNode->getAttribute('t');
+            $value = '';
+            if ($type === 'inlineStr') {
+                foreach ($cellNode->getElementsByTagName('t') as $tNode) {
+                    $value .= $tNode->textContent;
+                }
+            } else {
+                $vNode = $cellNode->getElementsByTagName('v')->item(0);
+                if ($vNode) {
+                    $value = $vNode->textContent;
+                    if ($type === 's') {
+                        $value = $sharedStrings[(int)$value] ?? '';
+                    }
+                }
+            }
+            $row[$col] = $value;
+        }
+        if (!empty($row)) {
+            ksort($row);
+            $rows[] = array_values($row);
+        }
+    }
+    return $rows;
+}
+
+function simpleXlsxColumnIndex(string $ref): int
+{
+    $letters = preg_replace('/[^A-Z]/i', '', strtoupper($ref)) ?? '';
+    $index = 0;
+    for ($i = 0; $i < strlen($letters); $i++) {
+        $index = ($index * 26) + (ord($letters[$i]) - 64);
+    }
+    return max(0, $index - 1);
+}
+
+function loadTrabajadoresSheetRows(array $rows): array
+{
+    if (empty($rows)) {
+        throw new RuntimeException('La hoja Trabajadores está vacía.');
+    }
+    $headerMap = buildHeaderMap($rows[0]);
+    $resolved = resolveRequiredHeaders($headerMap, [
+        'RUT' => ['RUT'],
+        'NOMBRE' => ['NOMBRE'],
+        'APELLIDO' => ['APELLIDO', 'APELLIDOS'],
+        'CARGO' => ['CARGO'],
+        'EMPRESA' => ['EMPRESA'],
+        'UO' => ['UO'],
+        'FECHA' => ['FECHA'],
+    ], 'hoja Trabajadores');
+    $workers = [];
+    foreach (array_slice($rows, 1) as $row) {
+        $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
+        if ($rut === '' || !validarRutHistorico($rut)) {
+            continue;
+        }
+        $workers[$rut] = [
+            'rut' => $rut,
+            'nombre' => trim((string)cellByHeader($row, $resolved, 'NOMBRE')),
+            'apellidos' => trim((string)cellByHeader($row, $resolved, 'APELLIDO')),
+            'cargo_txt' => trim((string)cellByHeader($row, $resolved, 'CARGO')),
+            'empresa_txt' => trim((string)cellByHeader($row, $resolved, 'EMPRESA')),
+            'uo_txt' => trim((string)cellByHeader($row, $resolved, 'UO')),
+            'fecha_txt' => trim((string)cellByHeader($row, $resolved, 'FECHA')),
+        ];
+    }
+    return ['data' => $workers, 'summary' => ['total' => count($workers)]];
+}
+
+function analizarHistoriaTerrenoRows(PDO $pdo, array $rows, int $idServicio): array
+{
+    if (empty($rows)) {
+        throw new RuntimeException('La hoja Historia de Evaluaciones está vacía.');
+    }
+    $headerMap = buildHeaderMap($rows[0]);
+    $resolved = resolveRequiredHeaders($headerMap, [
+        'N' => ['N'],
+        'RUT' => ['RUT'],
+        'FECHATERRENO' => ['FECHATERRENO'],
+        'ESTADO' => ['ESTADO'],
+    ], 'hoja Historia de Evaluaciones');
+
+    $processLinks = [];
+    $procesos = [];
+    foreach (array_slice($rows, 1) as $row) {
+        $numeroHistorico = (int)(parseNullableFloat(cellByHeader($row, $resolved, 'N')) ?? 0);
+        $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
+        $fechaTerreno = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHATERRENO'), 'DMY');
+        if ($numeroHistorico <= 0 || $rut === '' || !$fechaTerreno) {
+            continue;
+        }
+        $processKey = $rut . '|' . $numeroHistorico;
+        $estado = strtoupper(trim((string)cellByHeader($row, $resolved, 'ESTADO'))) === 'SI' ? 'CERRADO' : 'ABIERTO';
+        $procesos[$processKey] = [
+            'rut' => $rut,
+            'numero_historico' => $numeroHistorico,
+            'estado' => $estado,
+            'fecha_inicio' => $fechaTerreno->format('Y-m-d') . ' 00:00:00',
+            'fecha_cierre' => $estado === 'CERRADO' ? $fechaTerreno->format('Y-m-d') . ' 00:00:00' : null,
+        ];
+        $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerreno->format('Y-m-d'))] = [
+            'rut' => $rut,
+            'numero_historico' => $numeroHistorico,
+            'fecha_terreno' => $fechaTerreno->format('Y-m-d'),
+        ];
+    }
+
+    $stmt = $pdo->prepare('SELECT id, numero_proceso FROM ceo_proceso_habilitacion WHERE rut = :rut AND id_servicio = :id_servicio AND origen = :origen AND estado = :estado AND fecha_inicio = :fecha_inicio AND ((:fecha_cierre_null IS NULL AND fecha_cierre IS NULL) OR fecha_cierre = :fecha_cierre_value) ORDER BY id ASC LIMIT 1');
+    foreach ($procesos as $proceso) {
+        $stmt->execute([
+            ':rut' => $proceso['rut'],
+            ':id_servicio' => $idServicio,
+            ':origen' => 'HISTORICO_CYR',
+            ':estado' => $proceso['estado'],
+            ':fecha_inicio' => $proceso['fecha_inicio'],
+            ':fecha_cierre_null' => $proceso['fecha_cierre'],
+            ':fecha_cierre_value' => $proceso['fecha_cierre'],
+        ]);
+        $match = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        foreach ($processLinks as $key => $link) {
+            if ($link['rut'] === $proceso['rut'] && (int)$link['numero_historico'] === (int)$proceso['numero_historico']) {
+                $processLinks[$key]['id_proceso_habilitacion'] = (int)($match['id'] ?? 0);
+                $processLinks[$key]['numero_proceso_ceonext'] = (int)($match['numero_proceso'] ?? 0);
+            }
+        }
+    }
+
+    return [
+        'process_links' => $processLinks,
+        'summary' => [
+            'procesos_detectados' => count($procesos),
+            'procesos_resueltos' => count(array_filter($processLinks, static fn(array $row): bool => (int)($row['id_proceso_habilitacion'] ?? 0) > 0)),
+        ],
+    ];
+}
+
+function historicoClaveTerrenoProceso(string $rut, string $fecha): string
+{
+    return strtoupper(str_replace(['.', '-', ' '], '', $rut)) . '|' . $fecha;
+}
+
+function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): array
+{
+    $fh = fopen($path, 'r');
+    if ($fh === false) {
+        throw new RuntimeException('No se pudo abrir historia_evaluaciones.csv.');
+    }
+
+    try {
+        $delimiter = detectCsvDelimiter($path);
+        $header = fgetcsv($fh, 0, $delimiter, '"', '');
+        if (!$header) {
+            throw new RuntimeException('historia_evaluaciones.csv no contiene encabezado.');
+        }
+        $headerMap = buildHeaderMap($header);
+        $resolved = resolveRequiredHeaders($headerMap, [
+            'N' => ['N'],
+            'RUT' => ['RUT'],
+            'FECHATERRENO' => ['FECHATERRENO'],
+            'ESTADO' => ['ESTADO'],
+        ], 'historia_evaluaciones.csv');
+
+        $processLinks = [];
+        $procesos = [];
+        while (($row = fgetcsv($fh, 0, $delimiter, '"', '')) !== false) {
+            $numeroHistorico = (int)(parseNullableFloat(cellByHeader($row, $resolved, 'N')) ?? 0);
+            $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
+            $fechaTerreno = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHATERRENO'), 'DMY');
+            if ($numeroHistorico <= 0 || $rut === '' || !$fechaTerreno) {
+                continue;
+            }
+            $processKey = $rut . '|' . $numeroHistorico;
+            $estado = strtoupper(trim((string)cellByHeader($row, $resolved, 'ESTADO'))) === 'SI' ? 'CERRADO' : 'ABIERTO';
+            $procesos[$processKey] = [
+                'rut' => $rut,
+                'numero_historico' => $numeroHistorico,
+                'estado' => $estado,
+                'fecha_inicio' => $fechaTerreno->format('Y-m-d') . ' 00:00:00',
+                'fecha_cierre' => $estado === 'CERRADO' ? $fechaTerreno->format('Y-m-d') . ' 00:00:00' : null,
+            ];
+            $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerreno->format('Y-m-d'))] = [
+                'rut' => $rut,
+                'numero_historico' => $numeroHistorico,
+                'fecha_terreno' => $fechaTerreno->format('Y-m-d'),
+            ];
+        }
+    } finally {
+        fclose($fh);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, numero_proceso FROM ceo_proceso_habilitacion WHERE rut = :rut AND id_servicio = :id_servicio AND origen = :origen AND estado = :estado AND fecha_inicio = :fecha_inicio AND ((:fecha_cierre_null IS NULL AND fecha_cierre IS NULL) OR fecha_cierre = :fecha_cierre_value) ORDER BY id ASC LIMIT 1');
+    foreach ($procesos as $proceso) {
+        $stmt->execute([
+            ':rut' => $proceso['rut'],
+            ':id_servicio' => $idServicio,
+            ':origen' => 'HISTORICO_CYR',
+            ':estado' => $proceso['estado'],
+            ':fecha_inicio' => $proceso['fecha_inicio'],
+            ':fecha_cierre_null' => $proceso['fecha_cierre'],
+            ':fecha_cierre_value' => $proceso['fecha_cierre'],
+        ]);
+        $match = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        foreach ($processLinks as $key => $link) {
+            if ($link['rut'] === $proceso['rut'] && (int)$link['numero_historico'] === (int)$proceso['numero_historico']) {
+                $processLinks[$key]['id_proceso_habilitacion'] = (int)($match['id'] ?? 0);
+                $processLinks[$key]['numero_proceso_ceonext'] = (int)($match['numero_proceso'] ?? 0);
+            }
+        }
+    }
+
+    return [
+        'process_links' => $processLinks,
+        'summary' => [
+            'procesos_detectados' => count($procesos),
+            'procesos_resueltos' => count(array_filter($processLinks, static fn(array $row): bool => (int)($row['id_proceso_habilitacion'] ?? 0) > 0)),
+        ],
+    ];
+}
+
+function loadTerrenoHistoriSheetFromContext(array $context, string $sheetName, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
+{
+    $sheetXml = simpleWorkbookSheetXmlFromContext($context, $sheetName);
+    if ($sheetXml === null) {
+        throw new RuntimeException('No se encontró la hoja ' . $sheetName . '.');
+    }
+
+    $reader = new XMLReader();
+    $reader->XML($sheetXml, null, LIBXML_NONET | LIBXML_COMPACT);
+
+    $header = null;
+    $resolved = null;
+    $evaluaciones = [];
+    $mapeoSecciones = [];
+    $mapeoPreguntas = [];
+    $detallesFilas = [];
+    $rutsNormalizacion = [];
+    $duplicadas = 0;
+    $errores = 0;
+    $filas = 0;
+    $sharedStrings = $context['shared_strings'] ?? [];
+
+    while ($reader->read()) {
+        if ($reader->nodeType !== XMLReader::ELEMENT || $reader->name !== 'row') {
+            continue;
+        }
+        $row = simpleXlsxReadCurrentRow($reader, $sharedStrings);
+        if ($header === null) {
+            $header = $row;
+            $headerMap = buildHeaderMap($header);
+            $resolved = resolveRequiredHeaders($headerMap, [
+                'CODIGODEEVALUACION' => ['CODIGODEEVALUACION'],
+                'CHECKLIST' => ['CHECKLIST'],
+                'USUARIO' => ['USUARIO'],
+                'CODIGODEAREA' => ['CODIGODEAREA'],
+                'AREA' => ['AREA'],
+                'CODIGODELITEM' => ['CODIGODELITEM'],
+                'ITEM' => ['ITEM'],
+                'RESPUESTA' => ['RESPUESTA'],
+                'PESO' => ['PESO'],
+                'FECHAINICIAL' => ['FECHAINICIAL'],
+                'FECHAFINAL' => ['FECHAFINAL'],
+                'FECHADEAPROBACION' => ['FECHADEAPROBACION'],
+                'RESULTADO' => ['RESULTADO'],
+                'COMENTARIODELITEM' => ['COMENTARIODELITEM'],
+                'COMENTARIOSFINALES' => ['COMENTARIOSFINALES'],
+                'PLANESDEACCION' => ['PLANESDEACCION'],
+                'RUT' => ['RUT'],
+                'NOMBRE' => ['NOMBRE'],
+                'EVALUADOR' => ['EVALUADOR'],
+                'CARGO' => ['CARGO'],
+                'FECHA' => ['FECHA'],
+                'CONTRATISTA' => ['CONTRATISTA'],
+                'SOLICITUD' => ['SOLICITUD'],
+            ], 'hoja ' . $sheetName);
+            continue;
+        }
+        if ($resolved === null) {
+            continue;
+        }
+
+        $filas++;
+        $excelRow = $filas + 1;
+        $codigoEvaluacion = trim((string)cellByHeader($row, $resolved, 'CODIGODEEVALUACION'));
+        $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
+        $area = trim((string)cellByHeader($row, $resolved, 'AREA'));
+        $item = trim((string)cellByHeader($row, $resolved, 'ITEM'));
+        if ($codigoEvaluacion === '' && $rut === '' && $area === '' && $item === '') {
+            continue;
+        }
+        if ($codigoEvaluacion === '' || !validarRutHistorico($rut)) {
+            $errores++;
+            appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Código o RUT inválido.'], TERRENO_PREVIEW_LIMIT);
+            continue;
+        }
+
+        $fechaInicio = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAINICIAL'), 'DMY');
+        $fechaFin = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAFINAL'), 'DMY');
+        $fechaAprob = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHADEAPROBACION'), 'DMY');
+        $fechaEval = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHA'), 'MDY');
+        if ($fechaEval === null) {
+            $errores++;
+            appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Fecha principal inválida.'], TERRENO_PREVIEW_LIMIT);
+            continue;
+        }
+
+        $key = $codigoEvaluacion . '|' . $rut;
+        $duplicada = isset($existingEvalKeys[$key]);
+        if (!isset($evaluaciones[$key])) {
+            $worker = $workers['data'][$rut] ?? null;
+            [$nombre, $apellidos] = splitFullNameWithWorker(trim((string)cellByHeader($row, $resolved, 'NOMBRE')), $worker);
+            $usuario = trim((string)cellByHeader($row, $resolved, 'USUARIO'));
+            $evaluadorTxt = trim((string)cellByHeader($row, $resolved, 'EVALUADOR'));
+            $solicitud = trim((string)cellByHeader($row, $resolved, 'SOLICITUD'));
+            $resultado = parseNullableFloat(cellByHeader($row, $resolved, 'RESULTADO'));
+            $processLink = $processLinks[historicoClaveTerrenoProceso($rut, $fechaEval->format('Y-m-d'))] ?? null;
+            $evaluaciones[$key] = [
+                'codigo_evaluacion' => $codigoEvaluacion,
+                'rut' => $rut,
+                'nombre' => trim($nombre . ' ' . $apellidos),
+                'cargo' => trim((string)cellByHeader($row, $resolved, 'CARGO')),
+                'contratista' => trim((string)cellByHeader($row, $resolved, 'CONTRATISTA')),
+                'evaluador' => $evaluadorTxt !== '' ? $evaluadorTxt : $usuario,
+                'usuario' => $usuario,
+                'resultado' => $resultado ?? 0.0,
+                'fecha_evaluacion' => $fechaEval->format('Y-m-d'),
+                'fecha_inicio' => $fechaInicio?->format('Y-m-d H:i:s'),
+                'fecha_fin' => $fechaFin?->format('Y-m-d H:i:s'),
+                'fecha_aprobacion' => $fechaAprob?->format('Y-m-d'),
+                'comentarios_finales' => terrainSafeText(cellByHeader($row, $resolved, 'COMENTARIOSFINALES'), 2000),
+                'solicitud' => ctype_digit($solicitud) ? (int)$solicitud : null,
+                'detalles' => [],
+                'duplicada' => $duplicada,
+                'id_proceso_habilitacion' => (int)($processLink['id_proceso_habilitacion'] ?? 0),
+                'proceso_historico' => (int)($processLink['numero_historico'] ?? 0),
+            ];
+            $rutsNormalizacion[] = ['rut' => $rut, 'nombre' => $nombre, 'apellidos' => $apellidos];
+        }
+
+        $sectionMap = resolveTerrenoSectionMap($instrumento['secciones'] ?? [], $area);
+        $questionMap = resolveTerrenoQuestionMap($instrumento['preguntas'][$sectionMap['id']] ?? [], $item);
+        $mapeoSecciones[$area] = ['historica' => $area, 'id' => $sectionMap['id'], 'destino' => $sectionMap['section'], 'status' => $sectionMap['status']];
+        $questionPreviewKey = $area . '|' . $item;
+        $mapeoPreguntas[$questionPreviewKey] = ['seccion_historica' => $area, 'item_historico' => $item, 'id' => $questionMap['id'], 'destino' => $questionMap['pregunta'], 'status' => $questionMap['status']];
+        $evaluaciones[$key]['detalles'][] = [
+            'codigo_area' => trim((string)cellByHeader($row, $resolved, 'CODIGODEAREA')),
+            'area' => $area,
+            'codigo_item' => trim((string)cellByHeader($row, $resolved, 'CODIGODELITEM')),
+            'item' => $item,
+            'respuesta' => trim((string)cellByHeader($row, $resolved, 'RESPUESTA')),
+            'peso' => parseNullableFloat(cellByHeader($row, $resolved, 'PESO')) ?? 0.0,
+            'resultado_item' => trim((string)cellByHeader($row, $resolved, 'RESULTADO')),
+            'comentario_item' => terrainSafeText(cellByHeader($row, $resolved, 'COMENTARIODELITEM'), 1000),
+            'plan_accion' => terrainSafeText(cellByHeader($row, $resolved, 'PLANESDEACCION'), 1000),
+            'id_seccion' => $sectionMap['id'],
+            'id_pregunta' => $questionMap['id'],
+            'practico' => $questionMap['practico'],
+            'referente' => $questionMap['referente'],
+            'fecha_detalle' => $fechaEval->format('Y-m-d'),
+        ];
+    }
+    $reader->close();
+
+    $evaluacionesValidas = [];
+    foreach ($evaluaciones as $eval) {
+        if ($eval['duplicada']) {
+            $duplicadas++;
+        } else {
+            $evaluacionesValidas[] = $eval;
+        }
+        appendLimited($detallesFilas, [
+            'fila' => '-',
+            'codigo' => $eval['codigo_evaluacion'],
+            'rut' => $eval['rut'],
+            'estado' => $eval['duplicada'] ? 'DUPLICADA' : 'VALIDA',
+            'motivo' => $eval['duplicada'] ? 'La evaluación ya existe en ceo_evaluacion_terreno.' : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0 ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.' : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
+        ], TERRENO_PREVIEW_LIMIT);
+    }
+
+    return [
+        'evaluaciones_validas' => $evaluacionesValidas,
+        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
+        'mapeo_secciones' => array_values($mapeoSecciones),
+        'mapeo_preguntas' => array_values($mapeoPreguntas),
+        'ruts_normalizacion' => $rutsNormalizacion,
+        'process_links' => $processLinks,
+        'historia_summary' => ['procesos_detectados' => count($processLinks), 'procesos_resueltos' => count(array_filter($evaluacionesValidas, static fn(array $e): bool => (int)($e['id_proceso_habilitacion'] ?? 0) > 0))],
+    ];
+}
+
+function simpleXlsxReadCurrentRow(XMLReader $reader, array $sharedStrings): array
+{
+    $rowXml = $reader->readOuterXML();
+    $rowReader = new XMLReader();
+    $rowReader->XML($rowXml, null, LIBXML_NONET | LIBXML_COMPACT);
+    $row = [];
+    while ($rowReader->read()) {
+        if ($rowReader->nodeType !== XMLReader::ELEMENT || $rowReader->name !== 'c') {
+            continue;
+        }
+        $ref = $rowReader->getAttribute('r') ?: '';
+        $type = $rowReader->getAttribute('t') ?: '';
+        $cellXml = $rowReader->readOuterXML();
+        $cellDoc = new DOMDocument();
+        $cellDoc->loadXML($cellXml);
+        $value = '';
+        if ($type === 'inlineStr') {
+            foreach ($cellDoc->getElementsByTagName('t') as $tNode) {
+                $value .= $tNode->textContent;
+            }
+        } else {
+            $vNode = $cellDoc->getElementsByTagName('v')->item(0);
+            if ($vNode) {
+                $value = $vNode->textContent;
+                if ($type === 's') {
+                    $value = $sharedStrings[(int)$value] ?? '';
+                }
+            }
+        }
+        $row[simpleXlsxColumnIndex($ref)] = $value;
+    }
+    $rowReader->close();
+    if (empty($row)) {
+        return [];
+    }
+    ksort($row);
+    return array_values($row);
+}
+
+function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
+{
+    if (empty($rows)) {
+        throw new RuntimeException('La hoja Evaluaciones de Terreno Histori está vacía.');
+    }
+    $headerMap = buildHeaderMap($rows[0]);
+    $resolved = resolveRequiredHeaders($headerMap, [
+        'CODIGODEEVALUACION' => ['CODIGODEEVALUACION'],
+        'CHECKLIST' => ['CHECKLIST'],
+        'USUARIO' => ['USUARIO'],
+        'CODIGODEAREA' => ['CODIGODEAREA'],
+        'AREA' => ['AREA'],
+        'CODIGODELITEM' => ['CODIGODELITEM'],
+        'ITEM' => ['ITEM'],
+        'RESPUESTA' => ['RESPUESTA'],
+        'PESO' => ['PESO'],
+        'FECHAINICIAL' => ['FECHAINICIAL'],
+        'FECHAFINAL' => ['FECHAFINAL'],
+        'FECHADEAPROBACION' => ['FECHADEAPROBACION'],
+        'RESULTADO' => ['RESULTADO'],
+        'COMENTARIODELITEM' => ['COMENTARIODELITEM'],
+        'COMENTARIOSFINALES' => ['COMENTARIOSFINALES'],
+        'PLANESDEACCION' => ['PLANESDEACCION'],
+        'RUT' => ['RUT'],
+        'NOMBRE' => ['NOMBRE'],
+        'EVALUADOR' => ['EVALUADOR'],
+        'CARGO' => ['CARGO'],
+        'FECHA' => ['FECHA'],
+        'CONTRATISTA' => ['CONTRATISTA'],
+        'SOLICITUD' => ['SOLICITUD'],
+    ], 'hoja Evaluaciones de Terreno Histori');
+
+    $evaluaciones = [];
+    $mapeoSecciones = [];
+    $mapeoPreguntas = [];
+    $detallesFilas = [];
+    $rutsNormalizacion = [];
+    $duplicadas = 0;
+    $errores = 0;
+    $filas = 0;
+
+    foreach (array_slice($rows, 1) as $row) {
+        $filas++;
+        $excelRow = $filas + 1;
+        $codigoEvaluacion = trim((string)cellByHeader($row, $resolved, 'CODIGODEEVALUACION'));
+        $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
+        $area = trim((string)cellByHeader($row, $resolved, 'AREA'));
+        $item = trim((string)cellByHeader($row, $resolved, 'ITEM'));
+        if ($codigoEvaluacion === '' && $rut === '' && $area === '' && $item === '') {
+            continue;
+        }
+        if ($codigoEvaluacion === '' || !validarRutHistorico($rut)) {
+            $errores++;
+            appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Código o RUT inválido.'], TERRENO_PREVIEW_LIMIT);
+            continue;
+        }
+        $fechaInicio = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAINICIAL'), 'DMY');
+        $fechaFin = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAFINAL'), 'DMY');
+        $fechaAprob = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHADEAPROBACION'), 'DMY');
+        $fechaEval = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHA'), 'MDY');
+        if ($fechaEval === null) {
+            $errores++;
+            appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Fecha principal inválida.'], TERRENO_PREVIEW_LIMIT);
+            continue;
+        }
+        $key = $codigoEvaluacion . '|' . $rut;
+        $duplicada = isset($existingEvalKeys[$key]);
+        if (!isset($evaluaciones[$key])) {
+            $worker = $workers['data'][$rut] ?? null;
+            [$nombre, $apellidos] = splitFullNameWithWorker(trim((string)cellByHeader($row, $resolved, 'NOMBRE')), $worker);
+            $usuario = trim((string)cellByHeader($row, $resolved, 'USUARIO'));
+            $evaluadorTxt = trim((string)cellByHeader($row, $resolved, 'EVALUADOR'));
+            $solicitud = trim((string)cellByHeader($row, $resolved, 'SOLICITUD'));
+            $resultado = parseNullableFloat(cellByHeader($row, $resolved, 'RESULTADO'));
+            $processLink = $processLinks[historicoClaveTerrenoProceso($rut, $fechaEval->format('Y-m-d'))] ?? null;
+            $evaluaciones[$key] = [
+                'codigo_evaluacion' => $codigoEvaluacion,
+                'rut' => $rut,
+                'nombre' => trim($nombre . ' ' . $apellidos),
+                'cargo' => trim((string)cellByHeader($row, $resolved, 'CARGO')),
+                'contratista' => trim((string)cellByHeader($row, $resolved, 'CONTRATISTA')),
+                'evaluador' => $evaluadorTxt !== '' ? $evaluadorTxt : $usuario,
+                'usuario' => $usuario,
+                'resultado' => $resultado ?? 0.0,
+                'fecha_evaluacion' => $fechaEval->format('Y-m-d'),
+                'fecha_inicio' => $fechaInicio?->format('Y-m-d H:i:s'),
+                'fecha_fin' => $fechaFin?->format('Y-m-d H:i:s'),
+                'fecha_aprobacion' => $fechaAprob?->format('Y-m-d'),
+                'comentarios_finales' => trim((string)cellByHeader($row, $resolved, 'COMENTARIOSFINALES')),
+                'solicitud' => ctype_digit($solicitud) ? (int)$solicitud : null,
+                'detalles' => [],
+                'duplicada' => $duplicada,
+                'id_proceso_habilitacion' => (int)($processLink['id_proceso_habilitacion'] ?? 0),
+                'proceso_historico' => (int)($processLink['numero_historico'] ?? 0),
+            ];
+            $rutsNormalizacion[] = ['rut' => $rut, 'nombre' => $nombre, 'apellidos' => $apellidos];
+        }
+        $sectionMap = resolveTerrenoSectionMap($instrumento['secciones'] ?? [], trim((string)cellByHeader($row, $resolved, 'AREA')));
+        $questionMap = resolveTerrenoQuestionMap($instrumento['preguntas'][$sectionMap['id']] ?? [], trim((string)cellByHeader($row, $resolved, 'ITEM')));
+        $mapeoSecciones[$area] = ['historica' => $area, 'id' => $sectionMap['id'], 'destino' => $sectionMap['section'], 'status' => $sectionMap['status']];
+        $questionPreviewKey = $area . '|' . $item;
+        $mapeoPreguntas[$questionPreviewKey] = ['seccion_historica' => $area, 'item_historico' => $item, 'id' => $questionMap['id'], 'destino' => $questionMap['pregunta'], 'status' => $questionMap['status']];
+        $evaluaciones[$key]['detalles'][] = [
+            'codigo_area' => trim((string)cellByHeader($row, $resolved, 'CODIGODEAREA')),
+            'area' => $area,
+            'codigo_item' => trim((string)cellByHeader($row, $resolved, 'CODIGODELITEM')),
+            'item' => $item,
+            'respuesta' => trim((string)cellByHeader($row, $resolved, 'RESPUESTA')),
+            'peso' => parseNullableFloat(cellByHeader($row, $resolved, 'PESO')) ?? 0.0,
+            'resultado_item' => trim((string)cellByHeader($row, $resolved, 'RESULTADO')),
+            'comentario_item' => trim((string)cellByHeader($row, $resolved, 'COMENTARIODELITEM')),
+            'plan_accion' => trim((string)cellByHeader($row, $resolved, 'PLANESDEACCION')),
+            'id_seccion' => $sectionMap['id'],
+            'id_pregunta' => $questionMap['id'],
+            'practico' => $questionMap['practico'],
+            'referente' => $questionMap['referente'],
+            'fecha_detalle' => $fechaEval->format('Y-m-d'),
+        ];
+    }
+
+    $evaluacionesValidas = [];
+    foreach ($evaluaciones as $eval) {
+        if ($eval['duplicada']) {
+            $duplicadas++;
+        } else {
+            $evaluacionesValidas[] = $eval;
+        }
+        appendLimited($detallesFilas, [
+            'fila' => '-',
+            'codigo' => $eval['codigo_evaluacion'],
+            'rut' => $eval['rut'],
+            'estado' => $eval['duplicada'] ? 'DUPLICADA' : 'VALIDA',
+            'motivo' => $eval['duplicada'] ? 'La evaluación ya existe en ceo_evaluacion_terreno.' : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0 ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.' : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
+        ], TERRENO_PREVIEW_LIMIT);
+    }
+
+    return [
+        'evaluaciones_validas' => $evaluacionesValidas,
+        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
+        'mapeo_secciones' => array_values($mapeoSecciones),
+        'mapeo_preguntas' => array_values($mapeoPreguntas),
+        'ruts_normalizacion' => $rutsNormalizacion,
+        'process_links' => $processLinks,
+        'historia_summary' => ['procesos_detectados' => count($processLinks), 'procesos_resueltos' => count(array_filter($evaluacionesValidas, static fn(array $e): bool => (int)($e['id_proceso_habilitacion'] ?? 0) > 0))],
+    ];
 }
 
 ?>
@@ -1209,7 +2122,7 @@ function parseNullableFloat($value): ?float
   <div class="card shadow-sm mb-4">
     <div class="card-body">
       <h4 class="text-primary mb-2"><i class="bi bi-clipboard-data me-2"></i>Carga Histórica Terreno</h4>
-      <p class="text-muted mb-0">Importador aislado para historial consultable de evaluaciones de terreno a partir de <strong>2 CSV</strong>: <code>terreno_histori.csv</code> y <code>trabajadores.csv</code>.</p>
+      <p class="text-muted mb-0">Importador aislado para historial consultable de evaluaciones de terreno a partir de <strong>3 CSV</strong>: <code>terreno_histori.csv</code>, <code>trabajadores.csv</code> e <code>historia_evaluaciones.csv</code>.</p>
     </div>
   </div>
 
@@ -1221,13 +2134,17 @@ function parseNullableFloat($value): ?float
     <div class="card-body">
       <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
         <input type="hidden" name="accion" value="analizar">
-        <div class="col-md-4">
+        <div class="col-md-3">
           <label class="form-label fw-semibold">CSV terreno</label>
           <input type="file" name="csv_terreno" class="form-control" accept=".csv" required>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
           <label class="form-label fw-semibold">CSV trabajadores</label>
           <input type="file" name="csv_trabajadores" class="form-control" accept=".csv" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">CSV historia</label>
+          <input type="file" name="csv_historia" class="form-control" accept=".csv" required>
         </div>
         <div class="col-md-2">
           <label class="form-label fw-semibold">Servicio</label>
@@ -1237,7 +2154,7 @@ function parseNullableFloat($value): ?float
             <?php endforeach; ?>
           </select>
         </div>
-        <div class="col-md-2 d-flex gap-2">
+        <div class="col-md-1 d-flex gap-2">
           <button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i>Analizar</button>
         </div>
       </form>
@@ -1269,6 +2186,11 @@ function parseNullableFloat($value): ?float
         <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Evaluaciones únicas</div><div class="fs-4 fw-bold"><?= (int)$analisis['evaluaciones']['evaluaciones_unicas'] ?></div></div></div>
         <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Evaluaciones válidas</div><div class="fs-4 fw-bold text-success"><?= (int)$analisis['evaluaciones']['evaluaciones_validas'] ?></div></div></div>
         <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Duplicadas</div><div class="fs-4 fw-bold text-secondary"><?= (int)$analisis['evaluaciones']['duplicadas'] ?></div></div></div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><div class="border rounded p-3 bg-light"><div class="small text-muted">Procesos históricos detectados</div><div class="fs-4 fw-bold"><?= (int)($analisis['historia']['procesos_detectados'] ?? 0) ?></div></div></div>
+        <div class="col-md-6"><div class="border rounded p-3 bg-light"><div class="small text-muted">Procesos resueltos</div><div class="fs-4 fw-bold text-success"><?= (int)($analisis['historia']['procesos_resueltos'] ?? 0) ?></div></div></div>
       </div>
 
       <div class="row g-3 mb-4">

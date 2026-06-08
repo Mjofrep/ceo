@@ -119,8 +119,17 @@ if (!function_exists('calcularNotaFinalDesdePorcentaje')) {
             $porcentaje = 100;
         }
 
-        if ($porcentajeMinimo <= 0 || $porcentajeMinimo >= 100) {
-            throw new InvalidArgumentException('El porcentaje mínimo debe ser mayor que 0 y menor que 100.');
+        if ($porcentajeMinimo <= 0 || $porcentajeMinimo > 100) {
+            throw new InvalidArgumentException('El porcentaje mínimo debe ser mayor que 0 y menor o igual que 100.');
+        }
+
+        if ($porcentajeMinimo === 100.0) {
+            if ($porcentaje >= 100.0) {
+                return 7.0;
+            }
+
+            $nota = 1 + (($porcentaje / 100) * 3);
+            return round(min($nota, 3.99), 2);
         }
 
         if ($porcentaje <= $porcentajeMinimo) {
@@ -130,6 +139,138 @@ if (!function_exists('calcularNotaFinalDesdePorcentaje')) {
         }
 
         return round($nota, 2);
+    }
+}
+
+if (!function_exists('formacionDistribuirCuotasPorArea')) {
+    function formacionDistribuirCuotasPorArea(
+        int $totalPreguntas,
+        array $configRows,
+        array $availableAdditionalMap,
+        array $mandatoryAreaCounts = []
+    ): array {
+        if ($totalPreguntas <= 0 || empty($configRows)) {
+            return ['targets' => [], 'additional' => []];
+        }
+
+        $configuredAreaIds = [];
+        foreach ($configRows as $cfg) {
+            $areaId = (int)($cfg['id_area'] ?? 0);
+            $pct = (float)($cfg['porcentaje'] ?? 0);
+            if ($areaId > 0 && $pct > 0) {
+                $configuredAreaIds[$areaId] = true;
+            }
+        }
+
+        $mandatoryOutsideConfig = 0;
+        foreach ($mandatoryAreaCounts as $areaId => $count) {
+            if ($count <= 0) {
+                continue;
+            }
+            if (!isset($configuredAreaIds[(int)$areaId])) {
+                $mandatoryOutsideConfig += (int)$count;
+            }
+        }
+
+        $distributableTotal = max(0, $totalPreguntas - $mandatoryOutsideConfig);
+        if ($distributableTotal <= 0) {
+            return ['targets' => [], 'additional' => []];
+        }
+
+        $areas = [];
+        $sumPercent = 0.0;
+        foreach ($configRows as $cfg) {
+            $areaId = (int)($cfg['id_area'] ?? 0);
+            $pct = (float)($cfg['porcentaje'] ?? 0);
+            if ($areaId <= 0 || $pct <= 0) {
+                continue;
+            }
+
+            $mandatory = (int)($mandatoryAreaCounts[$areaId] ?? 0);
+            $availableAdditional = max(0, (int)($availableAdditionalMap[$areaId] ?? 0));
+            $maxTarget = $mandatory + $availableAdditional;
+            if ($maxTarget <= 0) {
+                continue;
+            }
+
+            $areas[] = [
+                'area' => $areaId,
+                'pct' => $pct,
+                'mandatory' => $mandatory,
+                'available_additional' => $availableAdditional,
+                'max_target' => $maxTarget,
+                'target' => 0,
+                'rem' => 0.0,
+            ];
+            $sumPercent += $pct;
+        }
+
+        if ($sumPercent <= 0 || empty($areas)) {
+            return ['targets' => [], 'additional' => []];
+        }
+
+        $assignedTotal = 0;
+        foreach ($areas as $idx => $area) {
+            $exact = ($distributableTotal * $area['pct']) / $sumPercent;
+            $rounded = (int)round($exact, 0, PHP_ROUND_HALF_UP);
+            $target = min($area['max_target'], max($area['mandatory'], $rounded));
+            $areas[$idx]['target'] = $target;
+            $areas[$idx]['exact'] = $exact;
+            $areas[$idx]['delta'] = $exact - $target;
+            $assignedTotal += $target;
+        }
+
+        while ($assignedTotal > $distributableTotal) {
+            $bestIdx = null;
+            $bestOver = -INF;
+            foreach ($areas as $idx => $area) {
+                if ($area['target'] <= $area['mandatory']) {
+                    continue;
+                }
+                $over = $area['target'] - (float)($area['exact'] ?? 0.0);
+                if ($over > $bestOver) {
+                    $bestOver = $over;
+                    $bestIdx = $idx;
+                }
+            }
+            if ($bestIdx === null) {
+                break;
+            }
+            $areas[$bestIdx]['target']--;
+            $areas[$bestIdx]['delta'] = (float)($areas[$bestIdx]['exact'] ?? 0.0) - $areas[$bestIdx]['target'];
+            $assignedTotal--;
+        }
+
+        while ($assignedTotal < $distributableTotal) {
+            $bestIdx = null;
+            $bestUnder = -INF;
+            foreach ($areas as $idx => $area) {
+                if ($area['target'] >= $area['max_target']) {
+                    continue;
+                }
+                $under = (float)($area['exact'] ?? 0.0) - $area['target'];
+                if ($under > $bestUnder) {
+                    $bestUnder = $under;
+                    $bestIdx = $idx;
+                }
+            }
+            if ($bestIdx === null) {
+                break;
+            }
+            $areas[$bestIdx]['target']++;
+            $areas[$bestIdx]['delta'] = (float)($areas[$bestIdx]['exact'] ?? 0.0) - $areas[$bestIdx]['target'];
+            $assignedTotal++;
+        }
+
+        $targets = [];
+        $additional = [];
+        foreach ($areas as $area) {
+            $areaId = (int)$area['area'];
+            $targets[$areaId] = (int)$area['target'];
+            $additional[$areaId] = max(0, (int)$area['target'] - (int)$area['mandatory']);
+        }
+
+        return ['targets' => $targets, 'additional' => $additional];
     }
 }
 
@@ -485,13 +626,13 @@ if (!function_exists('obtenerCargoTrabajador')) {
                 $queriesCargoTexto = [
                     "
                         SELECT id
-                        FROM ceo_cargo_contratistas
+                        FROM ceo_cargos_habilitacion
                         WHERE TRIM(UPPER(cargo)) = :cargo
                         LIMIT 1
                     ",
                     "
                         SELECT id
-                        FROM ceo_cargos_habilitacion
+                        FROM ceo_cargo_contratistas
                         WHERE TRIM(UPPER(cargo)) = :cargo
                         LIMIT 1
                     ",

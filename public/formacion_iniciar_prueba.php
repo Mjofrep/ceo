@@ -517,7 +517,7 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 
         // Preguntas de texto libre obligatorias
         $stmtOb = $pdo->prepare("
-            SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
+            SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria, areacomp
             FROM ceo_formacion_preguntas_servicios
             WHERE id_servicio = :id_servicio
               AND id_agrupacion = :id_agrupacion
@@ -542,6 +542,14 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
             $totalPreguntas = 0;
         } else {
 
+        $mandatoryAreaCounts = [];
+        foreach ($preguntasObligatorias as $preguntaObligatoria) {
+            $areaObligatoria = (int)($preguntaObligatoria['areacomp'] ?? 0);
+            if ($areaObligatoria > 0) {
+                $mandatoryAreaCounts[$areaObligatoria] = (int)($mandatoryAreaCounts[$areaObligatoria] ?? 0) + 1;
+            }
+        }
+
         $stmtAvail = $pdo->prepare("
             SELECT areacomp, COUNT(*) AS total
             FROM ceo_formacion_preguntas_servicios
@@ -559,7 +567,8 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 
         $availableMap = [];
         foreach ($availableRows as $row) {
-            $availableMap[(int)$row['areacomp']] = (int)$row['total'];
+            $areaId = (int)$row['areacomp'];
+            $availableMap[$areaId] = max(0, (int)$row['total'] - (int)($mandatoryAreaCounts[$areaId] ?? 0));
         }
 
         $stmtCfg = $pdo->prepare("
@@ -570,93 +579,37 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
         $stmtCfg->execute([':id_servicio' => $data['id_servicio']]);
         $configRows = $stmtCfg->fetchAll(PDO::FETCH_ASSOC);
 
-        $cantidadRest = $cantidadPreguntas - count($preguntas);
-        if ($cantidadRest < 0) {
-            $cantidadRest = 0;
-        }
-
-        $useConfig = $cantidadRest > 0 && !empty($configRows) && !empty($availableMap);
+        $useConfig = $cantidadPreguntas > 0 && !empty($configRows) && (!empty($availableMap) || !empty($mandatoryAreaCounts));
 
         if ($useConfig) {
-            $areas = [];
-            $sumPercent = 0.0;
-
-            foreach ($configRows as $cfg) {
-                $areaId = (int)$cfg['id_area'];
-                $pct = (float)$cfg['porcentaje'];
-                if ($pct <= 0 || empty($availableMap[$areaId])) {
+            $distribution = formacionDistribuirCuotasPorArea($cantidadPreguntas, $configRows, $availableMap, $mandatoryAreaCounts);
+            foreach (($distribution['additional'] ?? []) as $areaId => $assigned) {
+                if ((int)$assigned <= 0) {
                     continue;
                 }
-                $areas[] = [
-                    'area' => $areaId,
-                    'pct' => $pct,
-                    'available' => $availableMap[$areaId],
-                    'assigned' => 0,
-                    'rem' => 0.0
-                ];
-                $sumPercent += $pct;
-            }
-
-            if ($sumPercent > 0 && !empty($areas)) {
-                $assignedTotal = 0;
-                foreach ($areas as $idx => $area) {
-                    $exact = ($cantidadRest * $area['pct']) / $sumPercent;
-                    $base = (int)floor($exact);
-                    $assign = min($base, $area['available']);
-                    $areas[$idx]['assigned'] = $assign;
-                    $areas[$idx]['rem'] = $exact - $base;
-                    $assignedTotal += $assign;
+                $sqlArea = "
+                    SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
+                    FROM ceo_formacion_preguntas_servicios
+                    WHERE id_servicio = ?
+                      AND id_agrupacion = ?
+                      AND estado = 'S'
+                      AND areacomp = ?
+                ";
+                $excludeIds = array_map(static fn($q) => (int)$q['id'], $preguntas);
+                if (!empty($excludeIds)) {
+                    $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                    $sqlArea .= " AND id NOT IN ($placeholders) ";
                 }
+                $sqlArea .= " ORDER BY RAND() LIMIT ?";
 
-                $remaining = max(0, $cantidadRest - $assignedTotal);
-                while ($remaining > 0) {
-                    $bestIdx = null;
-                    $bestRem = -1.0;
-                    foreach ($areas as $idx => $area) {
-                        $cap = $area['available'] - $area['assigned'];
-                        if ($cap <= 0) {
-                            continue;
-                        }
-                        if ($area['rem'] > $bestRem) {
-                            $bestRem = $area['rem'];
-                            $bestIdx = $idx;
-                        }
-                    }
-                    if ($bestIdx === null) {
-                        break;
-                    }
-                    $areas[$bestIdx]['assigned']++;
-                    $remaining--;
+                $params = [$data['id_servicio'], $data['id_agrupacion'], (int)$areaId];
+                if (!empty($excludeIds)) {
+                    $params = array_merge($params, $excludeIds);
                 }
-
-                foreach ($areas as $area) {
-                    if ($area['assigned'] <= 0) {
-                        continue;
-                    }
-                    $sqlArea = "
-                        SELECT id, pregunta, id_servicio, imagen, peso, tipo_pregunta, obligatoria
-                        FROM ceo_formacion_preguntas_servicios
-                        WHERE id_servicio = ?
-                          AND id_agrupacion = ?
-                          AND estado = 'S'
-                          AND areacomp = ?
-                    ";
-                    $excludeIds = array_map(static fn($q) => (int)$q['id'], $preguntas);
-                    if (!empty($excludeIds)) {
-                        $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
-                        $sqlArea .= " AND id NOT IN ($placeholders) ";
-                    }
-                    $sqlArea .= " ORDER BY RAND() LIMIT ?";
-
-                    $params = [$data['id_servicio'], $data['id_agrupacion'], $area['area']];
-                    if (!empty($excludeIds)) {
-                        $params = array_merge($params, $excludeIds);
-                    }
-                    $params[] = $area['assigned'];
-                    $stmtAreaQ = $pdo->prepare($sqlArea);
-                    $stmtAreaQ->execute($params);
-                    $preguntas = array_merge($preguntas, $stmtAreaQ->fetchAll(PDO::FETCH_ASSOC));
-                }
+                $params[] = (int)$assigned;
+                $stmtAreaQ = $pdo->prepare($sqlArea);
+                $stmtAreaQ->execute($params);
+                $preguntas = array_merge($preguntas, $stmtAreaQ->fetchAll(PDO::FETCH_ASSOC));
             }
         }
 

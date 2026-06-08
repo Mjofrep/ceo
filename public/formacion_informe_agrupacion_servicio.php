@@ -29,6 +29,20 @@ if ($idServicio > 0) {
 }
 
 $excelUrl = 'formacion_informe_agrupacion_servicio_excel.php?id_servicio=' . $idServicio;
+
+$summaryTotal = (int)($data['summary']['TOTAL'] ?? 0);
+$summaryPendiente = (int)($data['summary']['PENDIENTE'] ?? 0);
+$summaryAprobada = (int)($data['summary']['APROBADA'] ?? 0);
+$summaryReprobada = (int)($data['summary']['REPROBADA'] ?? 0);
+
+$pieRadius = 44;
+$pieCircumference = 2 * M_PI * $pieRadius;
+$piePendienteLen = $summaryTotal > 0 ? ($summaryPendiente / $summaryTotal) * $pieCircumference : 0.0;
+$pieAprobadaLen = $summaryTotal > 0 ? ($summaryAprobada / $summaryTotal) * $pieCircumference : 0.0;
+$pieReprobadaLen = max(0.0, $pieCircumference - $piePendienteLen - $pieAprobadaLen);
+$piePendienteOffset = 0.0;
+$pieAprobadaOffset = -$piePendienteLen;
+$pieReprobadaOffset = -($piePendienteLen + $pieAprobadaLen);
 ?>
 <!doctype html>
 <html lang="es">
@@ -45,6 +59,18 @@ $excelUrl = 'formacion_informe_agrupacion_servicio_excel.php?id_servicio=' . $id
     .report-group{background:#fff;border-radius:1rem;box-shadow:0 2px 8px rgba(0,0,0,.05);}
     .report-group .table thead th{background:#eaf2fb;white-space:nowrap;}
     .text-low-score{color:#c62828;font-weight:700;}
+    .summary-stat{height:100%;}
+    .pie-card{background:#f9fbfe;border:1px solid #e6ebf2;border-radius:1rem;padding:1rem;height:100%;}
+    .pie-chart{width:180px;height:180px;position:relative;flex:0 0 auto;}
+    .pie-chart svg{display:block;width:100%;height:100%;overflow:visible;}
+    .pie-chart-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1;text-align:center;}
+    .pie-chart-center strong{font-size:1.8rem;line-height:1;}
+    .legend-dot{display:inline-block;width:12px;height:12px;border-radius:999px;flex:0 0 auto;}
+    .legend-pendiente{background:#f7e7a9;}
+    .legend-aprobada{background:#bfe7c6;}
+    .legend-reprobada{background:#f4c2c2;}
+    .capture-target{position:relative;}
+    .capture-button{width:30px;height:30px;padding:0;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;}
   </style>
 </head>
 <body>
@@ -93,17 +119,62 @@ $excelUrl = 'formacion_informe_agrupacion_servicio_excel.php?id_servicio=' . $id
   <?php endif; ?>
 
   <?php if ($data !== null): ?>
-    <div class="summary-box p-4 mb-4">
+    <div class="summary-box p-4 mb-4 capture-target" id="serviceSummaryCapture">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
         <div>
           <h5 class="mb-1">Servicio: <?= fisEsc((string)$data['servicio']) ?></h5>
           <div class="text-muted small">Grupos cargados: <?= count($data['groups']) ?> | Registros: <?= (int)($data['summary']['TOTAL'] ?? 0) ?></div>
         </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm capture-button" id="downloadSummaryImage" title="Descargar resumen como imagen" aria-label="Descargar resumen como imagen">
+          <i class="bi bi-image"></i>
+        </button>
       </div>
-      <div class="row g-3">
-        <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">Pendientes</div><div class="fs-4 fw-bold"><?= (int)($data['summary']['PENDIENTE'] ?? 0) ?></div></div></div>
-        <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">Aprobadas</div><div class="fs-4 fw-bold"><?= (int)($data['summary']['APROBADA'] ?? 0) ?></div></div></div>
-        <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">Reprobadas</div><div class="fs-4 fw-bold"><?= (int)($data['summary']['REPROBADA'] ?? 0) ?></div></div></div>
+      <div class="row g-3 align-items-stretch">
+        <div class="col-md-6 col-xl-2"><div class="border rounded p-3 bg-light summary-stat"><div class="small text-muted">Pendientes</div><div class="fs-4 fw-bold"><?= $summaryPendiente ?></div></div></div>
+        <div class="col-md-6 col-xl-2"><div class="border rounded p-3 bg-light summary-stat"><div class="small text-muted">Aprobadas</div><div class="fs-4 fw-bold"><?= $summaryAprobada ?></div></div></div>
+        <div class="col-md-6 col-xl-2"><div class="border rounded p-3 bg-light summary-stat"><div class="small text-muted">Reprobadas</div><div class="fs-4 fw-bold"><?= $summaryReprobada ?></div></div></div>
+        <div class="col-12 col-xl-6">
+          <div class="pie-card d-flex flex-column flex-md-row align-items-center justify-content-center gap-4">
+            <div class="border rounded p-3 bg-white summary-stat text-center" style="min-width:120px;">
+              <div class="small text-muted">Total</div>
+              <div class="fs-2 fw-bold"><?= $summaryTotal ?></div>
+            </div>
+            <div class="pie-chart">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="60" cy="60" r="<?= fisEsc((string)$pieRadius) ?>" fill="none" stroke="#eef2f7" stroke-width="24"></circle>
+                <?php if ($summaryTotal > 0 && $piePendienteLen > 0): ?>
+                  <circle cx="60" cy="60" r="<?= fisEsc((string)$pieRadius) ?>" fill="none" stroke="#f7e7a9" stroke-width="24" stroke-linecap="butt" stroke-dasharray="<?= fisEsc(number_format($piePendienteLen, 4, '.', '')) ?> <?= fisEsc(number_format($pieCircumference, 4, '.', '')) ?>" stroke-dashoffset="<?= fisEsc(number_format($piePendienteOffset, 4, '.', '')) ?>" transform="rotate(-90 60 60)"></circle>
+                <?php endif; ?>
+                <?php if ($summaryTotal > 0 && $pieAprobadaLen > 0): ?>
+                  <circle cx="60" cy="60" r="<?= fisEsc((string)$pieRadius) ?>" fill="none" stroke="#bfe7c6" stroke-width="24" stroke-linecap="butt" stroke-dasharray="<?= fisEsc(number_format($pieAprobadaLen, 4, '.', '')) ?> <?= fisEsc(number_format($pieCircumference, 4, '.', '')) ?>" stroke-dashoffset="<?= fisEsc(number_format($pieAprobadaOffset, 4, '.', '')) ?>" transform="rotate(-90 60 60)"></circle>
+                <?php endif; ?>
+                <?php if ($summaryTotal > 0 && $pieReprobadaLen > 0): ?>
+                  <circle cx="60" cy="60" r="<?= fisEsc((string)$pieRadius) ?>" fill="none" stroke="#f4c2c2" stroke-width="24" stroke-linecap="butt" stroke-dasharray="<?= fisEsc(number_format($pieReprobadaLen, 4, '.', '')) ?> <?= fisEsc(number_format($pieCircumference, 4, '.', '')) ?>" stroke-dashoffset="<?= fisEsc(number_format($pieReprobadaOffset, 4, '.', '')) ?>" transform="rotate(-90 60 60)"></circle>
+                <?php endif; ?>
+                <circle cx="60" cy="60" r="30" fill="#ffffff"></circle>
+              </svg>
+              <div class="pie-chart-center">
+                <strong><?= $summaryTotal ?></strong>
+                <span class="small text-muted">Total</span>
+              </div>
+            </div>
+            <div class="w-100">
+              <div class="fw-semibold mb-2">Distribución</div>
+              <div class="d-flex align-items-center justify-content-between gap-3 py-1 border-bottom border-light-subtle">
+                <div class="d-flex align-items-center gap-2"><span class="legend-dot legend-pendiente"></span><span>Pendientes</span></div>
+                <strong><?= $summaryPendiente ?></strong>
+              </div>
+              <div class="d-flex align-items-center justify-content-between gap-3 py-1 border-bottom border-light-subtle">
+                <div class="d-flex align-items-center gap-2"><span class="legend-dot legend-aprobada"></span><span>Aprobadas</span></div>
+                <strong><?= $summaryAprobada ?></strong>
+              </div>
+              <div class="d-flex align-items-center justify-content-between gap-3 py-1">
+                <div class="d-flex align-items-center gap-2"><span class="legend-dot legend-reprobada"></span><span>Reprobadas</span></div>
+                <strong><?= $summaryReprobada ?></strong>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -164,5 +235,43 @@ $excelUrl = 'formacion_informe_agrupacion_servicio_excel.php?id_servicio=' . $id
     <?php endforeach; ?>
   <?php endif; ?>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script>
+  (() => {
+    const button = document.getElementById('downloadSummaryImage');
+    const target = document.getElementById('serviceSummaryCapture');
+    if (!button || !target || typeof html2canvas === 'undefined') {
+      return;
+    }
+
+    button.addEventListener('click', async () => {
+      const originalIcon = button.innerHTML;
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>';
+
+      try {
+        const canvas = await html2canvas(target, {
+          backgroundColor: '#f7f9fc',
+          scale: 2,
+          useCORS: true,
+        });
+
+        const link = document.createElement('a');
+        const serviceName = <?= json_encode((string)($data['servicio'] ?? 'servicio'), JSON_UNESCAPED_UNICODE) ?>
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'servicio';
+        link.download = `resumen-${serviceName}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } catch (error) {
+        window.alert('No fue posible generar la imagen del resumen.');
+      } finally {
+        button.disabled = false;
+        button.innerHTML = originalIcon;
+      }
+    });
+  })();
+</script>
 </body>
 </html>

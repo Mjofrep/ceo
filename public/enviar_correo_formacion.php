@@ -133,6 +133,8 @@ try {
   }
 
   $mail->isHTML(true);
+  $mail->CharSet = 'UTF-8';
+  $mail->Encoding = 'base64';
   $mail->Subject = "Nueva Formacion N {$idSolicitud} registrada";
   $mail->Body = $mensaje;
 

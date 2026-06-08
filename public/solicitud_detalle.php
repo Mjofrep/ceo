@@ -388,8 +388,8 @@ h4, h5, h6 {font-weight:500;}
 
           <?php foreach($participantes as $p): ?>
               <?php
-    // Si el usuario es "registro asistencia", ocultar personas NO autorizadas
-    if ($isregasist && !(int)$p['autorizado']) {
+    // En solicitudes no autorizadas, Registro Asistencia mantiene ocultos los no autorizados.
+    if ($isregasist && !$solAutorizada && !(int)$p['autorizado']) {
         continue; // saltar esta fila
     }
     ?>

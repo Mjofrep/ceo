@@ -61,7 +61,7 @@ try {
         FROM ceo_resultado_formacion_pruebat rpt
         INNER JOIN ceo_formacion_preguntas_servicios ps
             ON ps.id = rpt.id_pregunta
-        LEFT JOIN ceo_areacompetencias ac
+        LEFT JOIN ceo_areacompetencia_formacion ac
             ON ac.id = ps.areacomp
            AND ac.id_servicio = ps.id_servicio
         LEFT JOIN ceo_formacion_areacompetencias_pct cfg

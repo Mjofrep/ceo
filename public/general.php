@@ -86,7 +86,7 @@ $apps = [
     [
         'title' => 'Salud',
         'description' => 'Seguimiento y acceso a procesos vinculados a salud ocupacional.',
-        'url' => 'https://www.noetica.cl/ceo_salud/auth/login.php',
+        'url' => '#',
         'tag' => 'Seguridad y cuidado',
         'accent' => '#18a36f',
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2318a36f'/%3E%3Cstop offset='100%25' stop-color='%2385e2bb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Cpath d='M160 255s-78-45-78-108c0-28 21-49 48-49 17 0 31 8 40 21 9-13 23-21 40-21 27 0 48 21 48 49 0 63-78 108-78 108z' fill='white' opacity='.9'/%3E%3Ccircle cx='160' cy='146' r='18' fill='%2318a36f'/%3E%3C/svg%3E",

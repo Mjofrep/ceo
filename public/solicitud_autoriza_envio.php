@@ -312,7 +312,6 @@ try {
 
   $mail2->setFrom('ceo@noetica.cl', 'Autorización CEO');
   $mail2->addAddress('patricio.acuna@enel.com', 'Patricio Acuña');
-  $mail2->addAddress('prevencionistaceoenel@gmail.com', 'Prevensionista');
   $mail2->addAddress('yanett.henriquez@enel.com', 'Yanett Henriquez');
   $mail2->addAddress('leonel.morales2.external@enel.com', 'Leonel Morales');
   if (!empty($sol['correo']) && filter_var($sol['correo'], FILTER_VALIDATE_EMAIL)) {

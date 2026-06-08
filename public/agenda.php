@@ -80,7 +80,11 @@ $uos = $pdo->query($sqlUO)->fetchAll(PDO::FETCH_ASSOC);
 /* ========================================================
    2) SERVICIOS
    ======================================================== */
-$sqlServ = "SELECT id, servicio, descripcion FROM ceo_servicios_pruebas ORDER BY servicio";
+$sqlServ = "
+SELECT DISTINCT sp.id, sp.servicio, sp.descripcion
+FROM ceo_servicios_pruebas sp
+INNER JOIN temp_servicio_cargados_habilitacion t ON t.id_servicio = sp.id
+ORDER BY sp.servicio";
 $servicios = $pdo->query($sqlServ)->fetchAll(PDO::FETCH_ASSOC);
 
 /* ========================================================

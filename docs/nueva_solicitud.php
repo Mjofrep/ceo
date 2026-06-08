@@ -117,13 +117,13 @@ if ($next === 5030) {
     $rows = json_decode($_POST['participantes'] ?? '[]', true);
     // === VALIDACIÓN CRÍTICA: no permitir solicitud sin participantes ===
         if (empty($rows) || !is_array($rows)) {
-            throw new RuntimeException('No se recibieron participantes para la solicitud.');
+            throw new RuntimeException('No se recibieron participantes desde el archivo Excel.');
         }
         
         // Contar participantes válidos (con RUT)
         $validCount = 0;
         foreach ($rows as $r) {
-            if (!empty(trim((string)($r['rut'] ?? '')))) {
+            if (!empty(trim($r['rut'] ?? ''))) {
                 $validCount++;
             }
         }
@@ -189,13 +189,13 @@ if (!empty($rows)) {
 
   foreach ($rows as $r) {
 
-    $rut = trim((string)($r['rut'] ?? ''));
+    $rut = trim($r['rut'] ?? '');
     if ($rut === '') continue;
 
     // ---------------------------
     // Resolver cargo
     // ---------------------------
-    $cargoNombre = trim((string)($r['cargo'] ?? ''));
+    $cargoNombre = trim($r['cargo'] ?? '');
 
     if ($cargoNombre === '') {
       throw new RuntimeException('Participante sin cargo: ' . $rut);
@@ -218,9 +218,9 @@ if (!empty($rows)) {
     $partStmt->execute([
       ':id'    => $next,
       ':rut'   => $rut,
-      ':n'     => trim((string)($r['nombre'] ?? '')),
-      ':ap'    => trim((string)($r['apellidop'] ?? '')),
-      ':am'    => trim((string)($r['apellidom'] ?? '')),
+      ':n'     => trim($r['nombre'] ?? ''),
+      ':ap'    => trim($r['apellidop'] ?? ''),
+      ':am'    => trim($r['apellidom'] ?? ''),
       ':cargo' => $idCargo
     ]);
 
@@ -338,7 +338,6 @@ if (isset($_GET['action'])) {
 // =========================
 if (
     $idRol === 1 ||                // Administrador
-    $idRol === 6 ||                // Ingreso Especial
     ($idRol === 5 && $idEmpresa === 39) // Rol 5 ENEL
 ) {
     $where = '1=1'; // Todas las empresas
@@ -579,7 +578,7 @@ body{background:#f7f9fc}
       </div>
     </div>
 
-    <!-- Participantes -->
+    <!-- Participantes Excel -->
     <div class="col-lg-6">
       <div class="card h-100 rounded-4">
         <div class="card-body">
@@ -633,7 +632,6 @@ body{background:#f7f9fc}
 
 <!--  🔥 INPUT MOVIDO FUERA DEL DIV QUE SE BORRA 🔥 -->
 <input type="file" id="inputExcel" accept=".xlsx,.xls,.csv" style="display:none;">
-
 </div>
 
 <div id="bloqueManual" class="d-none">
@@ -662,7 +660,7 @@ body{background:#f7f9fc}
     <table class="table table-bordered table-sm align-middle mb-0">
       <thead class="table-light">
         <tr class="text-center">
-          <th style="min-width:130px;">RUT / DNI</th>
+          <th style="min-width:130px;">RUT</th>
           <th style="min-width:140px;">Nombre</th>
           <th style="min-width:140px;">Apellido Paterno</th>
           <th style="min-width:140px;">Apellido Materno</th>
@@ -675,7 +673,7 @@ body{background:#f7f9fc}
   </div>
 </div>
 
-           
+          
         </div>
       </div>
     </div>
@@ -923,11 +921,6 @@ function validarRut(rutRaw) {
   return dvEsperado === dv;
 }
 
-function esRutConFormato(rutRaw) {
-  if (!rutRaw) return false;
-  return /^\s*\d[\d.]*-[0-9kK]\s*$/.test(String(rutRaw));
-}
-
 function filtrarRutsInvalidos(rows){
   const hdr=(rows[0]||[]).map(c=>String(c||'').toUpperCase().trim());
   const idx=hdr.findIndex(h=>h.includes('RUT'));
@@ -935,8 +928,7 @@ function filtrarRutsInvalidos(rows){
   for(let i=1;i<rows.length;i++){
     const rut=String(rows[i][idx]||'').trim();
     if(rut==='')continue;
-    if(!esRutConFormato(rut) || validarRut(rut)) valid.push(rows[i]);
-    else invalid.push(rut);
+    if(validarRut(rut))valid.push(rows[i]);else invalid.push(rut);
   }
   return{validRows:valid,invalids:invalid};
 }
@@ -968,12 +960,6 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
-function identificadorEsValido(identificador) {
-  const valor = String(identificador || '').trim();
-  if (valor === '') return false;
-  return !esRutConFormato(valor) || validarRut(valor);
-}
-
 function setModoParticipantes(modo) {
   modoParticipantes = modo;
   bloqueExcel.classList.toggle('d-none', modo !== 'excel');
@@ -985,7 +971,6 @@ function setModoParticipantes(modo) {
 
   if (modo === 'manual' && participantesManual.length === 0) {
     agregarFilaManual(false);
-    renderTablaManual();
   }
 }
 
@@ -1004,7 +989,7 @@ function renderTablaManual() {
 
   tbodyManualParticipantes.innerHTML = participantesManual.map((p, i) => `
     <tr data-index="${i}">
-      <td><input type="text" class="form-control form-control-sm manual-rut" value="${escapeHtml(p.rut)}" placeholder="12345678-9 o DNI"></td>
+      <td><input type="text" class="form-control form-control-sm manual-rut" value="${escapeHtml(p.rut)}" placeholder="12345678-9"></td>
       <td><input type="text" class="form-control form-control-sm manual-nombre" value="${escapeHtml(p.nombre)}"></td>
       <td><input type="text" class="form-control form-control-sm manual-apellidop" value="${escapeHtml(p.apellidop)}"></td>
       <td><input type="text" class="form-control form-control-sm manual-apellidom" value="${escapeHtml(p.apellidom)}"></td>
@@ -1079,10 +1064,10 @@ function construirParticipantesManual() {
 
     const [rut, nombre, apellidop, apellidom, cargo] = valores;
     if (!rut || !nombre || !apellidop || !apellidom || !cargo) {
-      errores.push(`Fila ${fila}: todos los campos son obligatorios${rut ? ' (RUT / DNI ' + rut + ')' : ''}.`);
+      errores.push(`Fila ${fila}: todos los campos son obligatorios${rut ? ' (RUT ' + rut + ')' : ''}.`);
       return;
     }
-    if (!identificadorEsValido(rut)) {
+    if (!validarRut(rut)) {
       errores.push(`Fila ${fila}: RUT inválido ${rut}.`);
       return;
     }

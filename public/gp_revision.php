@@ -174,10 +174,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
+                    if ($action === 'enviar_operacion_todo') {
+                        $idsToMove = array_values(array_unique(array_filter(array_map('intval', is_array($questionIds) ? $questionIds : [$questionIds]), static fn(int $id): bool => $id > 0)));
+                        if (!$idsToMove) {
+                            throw new RuntimeException('No hay preguntas en REVISION u OBSERVADA para enviar en el lote seleccionado.');
+                        }
+                    }
+
                     if (str_contains($action, 'enviar_operacion')) {
                         $idsToCheck = array_values(array_unique(array_filter(array_map('intval', is_array($questionIds) ? $questionIds : [$questionIds]), static fn(int $id): bool => $id > 0)));
                         if (!$idsToCheck) {
-                            throw new RuntimeException('Debes seleccionar al menos una pregunta.');
+                            throw new RuntimeException($action === 'enviar_operacion_todo'
+                                ? 'No hay preguntas en REVISION u OBSERVADA para enviar en el lote seleccionado.'
+                                : 'Debes seleccionar al menos una pregunta.');
                         }
                         $placeholders = implode(',', array_fill(0, count($idsToCheck), '?'));
                         $stmtAgr = $pdo->prepare("SELECT COUNT(*) FROM ceo_gp_preguntas WHERE id IN ($placeholders) AND (id_agrupacion IS NULL OR id_agrupacion <= 0)");
@@ -238,70 +247,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$buckets = gpFetchWorkflowBuckets($pdo, ['REVISION', 'OBSERVADA', 'APROBADA_OPERACION']);
+$buckets = [];
 $agrupaciones = [];
-foreach ($buckets as $bucket) {
-    $idAgrupacion = (int)($bucket['id_agrupacion'] ?? 0);
-    $optionId = $idAgrupacion > 0 ? $idAgrupacion : -1;
-    $agrupaciones[$optionId] = [
-        'id' => $optionId,
-        'nombre' => $idAgrupacion > 0 ? (string)($bucket['agrupacion'] ?? 'Sin agrupacion') : 'Sin agrupacion asignada',
-        'destino' => (string)($bucket['destino'] ?? ''),
-        'servicio' => (string)($bucket['servicio'] ?? ''),
-    ];
-}
-uasort($agrupaciones, static function (array $a, array $b): int {
-    if ((int)$a['id'] < 0) {
-        return -1;
-    }
-    if ((int)$b['id'] < 0) {
-        return 1;
-    }
-    return strcmp($a['nombre'], $b['nombre']);
-});
-
-$filteredBuckets = array_values(array_filter($buckets, static function (array $bucket) use ($selectedAgrupacion): bool {
-    if ($selectedAgrupacion === 0) {
-        return false;
-    }
-    if ($selectedAgrupacion < 0) {
-        return (int)($bucket['id_agrupacion'] ?? 0) === 0;
-    }
-    return (int)($bucket['id_agrupacion'] ?? 0) === $selectedAgrupacion;
-}));
-
-if ($selectedBucket !== '') {
-    $bucketExists = false;
-    foreach ($filteredBuckets as $bucket) {
-        if (($bucket['bucket_token'] ?? '') === $selectedBucket) {
-            $bucketExists = true;
-            break;
-        }
-    }
-    if (!$bucketExists) {
-        $selectedBucket = '';
-    }
-}
-
+$filteredBuckets = [];
 $questions = [];
 $selectedBucketRow = null;
-if ($selectedBucket !== '') {
-    foreach ($filteredBuckets as $bucket) {
-        if (($bucket['bucket_token'] ?? '') === $selectedBucket) {
-            $selectedBucketRow = $bucket;
-            break;
+$availableOperators = [];
+
+try {
+    $buckets = gpFetchWorkflowBuckets($pdo, ['REVISION', 'OBSERVADA', 'APROBADA_OPERACION']);
+    foreach ($buckets as $bucket) {
+        $idAgrupacion = (int)($bucket['id_agrupacion'] ?? 0);
+        $optionId = $idAgrupacion > 0 ? $idAgrupacion : -1;
+        $agrupaciones[$optionId] = [
+            'id' => $optionId,
+            'nombre' => $idAgrupacion > 0 ? (string)($bucket['agrupacion'] ?? 'Sin agrupacion') : 'Sin agrupacion asignada',
+            'destino' => (string)($bucket['destino'] ?? ''),
+            'servicio' => (string)($bucket['servicio'] ?? ''),
+        ];
+    }
+    uasort($agrupaciones, static function (array $a, array $b): int {
+        if ((int)$a['id'] < 0) {
+            return -1;
+        }
+        if ((int)$b['id'] < 0) {
+            return 1;
+        }
+        return strcmp($a['nombre'], $b['nombre']);
+    });
+
+    $filteredBuckets = array_values(array_filter($buckets, static function (array $bucket) use ($selectedAgrupacion): bool {
+        if ($selectedAgrupacion === 0) {
+            return false;
+        }
+        if ($selectedAgrupacion < 0) {
+            return (int)($bucket['id_agrupacion'] ?? 0) === 0;
+        }
+        return (int)($bucket['id_agrupacion'] ?? 0) === $selectedAgrupacion;
+    }));
+
+    if ($selectedBucket !== '') {
+        $bucketExists = false;
+        foreach ($filteredBuckets as $bucket) {
+            if (($bucket['bucket_token'] ?? '') === $selectedBucket) {
+                $bucketExists = true;
+                break;
+            }
+        }
+        if (!$bucketExists) {
+            $selectedBucket = '';
         }
     }
-    if ($selectedBucketRow) {
-        $filters = gpWorkflowBucketFiltersFromToken($selectedBucket);
-        $filters['id_agrupacion'] = (int)$selectedBucketRow['id_agrupacion'];
-        $questions = gpFetchWorkflowQuestions($pdo, ['REVISION', 'OBSERVADA', 'APROBADA_OPERACION'], $filters);
-    }
-}
 
-$availableOperators = [];
-if ($selectedBucketRow) {
-    $availableOperators = gpFetchOperacionUsers($pdo, (string)($selectedBucketRow['destino'] ?? ''), (int)($selectedBucketRow['id_servicio'] ?? 0));
+    if ($selectedBucket !== '') {
+        foreach ($filteredBuckets as $bucket) {
+            if (($bucket['bucket_token'] ?? '') === $selectedBucket) {
+                $selectedBucketRow = $bucket;
+                break;
+            }
+        }
+        if ($selectedBucketRow) {
+            $filters = gpWorkflowBucketFiltersFromToken($selectedBucket);
+            $filters['id_agrupacion'] = (int)$selectedBucketRow['id_agrupacion'];
+            $questions = gpFetchWorkflowQuestions($pdo, ['REVISION', 'OBSERVADA', 'APROBADA_OPERACION'], $filters);
+        }
+    }
+
+    if ($selectedBucketRow) {
+        $availableOperators = gpFetchOperacionUsers($pdo, (string)($selectedBucketRow['destino'] ?? ''), (int)($selectedBucketRow['id_servicio'] ?? 0));
+    }
+} catch (Throwable $e) {
+    error_log('gp_revision bootstrap error: ' . $e->getMessage());
+    $error = 'Error al cargar Revision: ' . $e->getMessage();
 }
 
 $csrf = Csrf::token();

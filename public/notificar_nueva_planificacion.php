@@ -37,6 +37,7 @@ function notificarNuevaPlanificacion(
             SELECT correo
             FROM ceo_usuarios
             WHERE id_rol = 1
+              AND estado = 'A'
               AND correo IS NOT NULL
               AND correo <> ''
         ");
@@ -66,8 +67,8 @@ function notificarNuevaPlanificacion(
         $mail->send();
 
     } catch (Throwable $e) {
-        // ❗ Nunca romper el flujo principal
-        error_log("ERROR correo planificación: " . $e->getMessage());
+        // 锟�7锟�5 Nunca romper el flujo principal
+        error_log("ERROR correo planificaci锟斤拷n: " . $e->getMessage());
     }
 }
 

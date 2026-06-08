@@ -149,9 +149,6 @@ function gpEnsureTables(PDO $pdo): void
         "ALTER TABLE ceo_gp_generaciones ADD COLUMN id_agrupacion INT NULL AFTER id_servicio",
         "ALTER TABLE ceo_gp_generaciones ADD COLUMN id_area INT NULL AFTER id_agrupacion",
         "ALTER TABLE ceo_gp_generaciones ADD KEY idx_gp_generaciones_contexto (destino, id_servicio, id_agrupacion, id_area)",
-        "ALTER TABLE ceo_gp_preguntas ADD COLUMN id_operador_asignado INT NULL AFTER estado",
-        "ALTER TABLE ceo_gp_preguntas ADD COLUMN fecha_asignacion_operacion DATETIME NULL AFTER id_operador_asignado",
-        "ALTER TABLE ceo_gp_preguntas ADD COLUMN asignado_operacion_por INT NULL AFTER fecha_asignacion_operacion",
     ] as $sqlAlter) {
         try {
             $pdo->exec($sqlAlter);
@@ -220,6 +217,18 @@ function gpEnsureTables(PDO $pdo): void
         $pdo->exec("ALTER TABLE ceo_gp_preguntas ADD COLUMN import_referencia VARCHAR(255) NULL AFTER referencia");
     } catch (Throwable $e) {
         // Existing installations may already have this column.
+    }
+
+    foreach ([
+        "ALTER TABLE ceo_gp_preguntas ADD COLUMN id_operador_asignado INT NULL AFTER estado",
+        "ALTER TABLE ceo_gp_preguntas ADD COLUMN fecha_asignacion_operacion DATETIME NULL AFTER id_operador_asignado",
+        "ALTER TABLE ceo_gp_preguntas ADD COLUMN asignado_operacion_por INT NULL AFTER fecha_asignacion_operacion",
+    ] as $sqlAlterPregunta) {
+        try {
+            $pdo->exec($sqlAlterPregunta);
+        } catch (Throwable $e) {
+            // Existing installations may already have these columns.
+        }
     }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS ceo_gp_publicacion (

@@ -112,16 +112,16 @@ function gpImpExtractSheetLines(string $path): array
 
 function gpImpAlternativeMatch(string $line): ?array
 {
-    if (preg_match('/^\s*-?\s*([a-eA-E])[\)\.]\s*(.+)$/u', $line, $m)) {
-        return [strtoupper($m[1]), gpImpClean($m[2])];
+    if (preg_match('/^\s*-?\s*([a-fA-F]|[1-6])[\)\.]\s*(.+)$/u', $line, $m)) {
+        return [mb_strtoupper($m[1], 'UTF-8'), gpImpClean($m[2])];
     }
     return null;
 }
 
 function gpImpCorrectLetter(string $line): string
 {
-    if (preg_match('/respuesta\s+correcta\s*:\s*([a-eA-E])/iu', $line, $m)) {
-        return strtoupper($m[1]);
+    if (preg_match('/respuesta\s+correcta\s*:\s*([a-fA-F]|[1-6])/iu', $line, $m)) {
+        return mb_strtoupper($m[1], 'UTF-8');
     }
     return '';
 }
@@ -214,8 +214,8 @@ function gpImpParsePdfQuestions(string $text): array
     $text = preg_replace('/([\.\?\!])\s+(?:Pregunta\s*)?(\d{1,3})[\.)]\s+/iu', "$1\n$2. ", $text) ?? $text;
     $text = preg_replace('/\s+(\d{1,3})[\.)]\s+(?=[¿A-ZÁÉÍÓÚÑ])/u', "\n$1. ", $text) ?? $text;
     $text = preg_replace('/\n\s*Pregunta\s+(\d{1,3})\s*:?\s*/iu', "\n$1. ", $text) ?? $text;
-    $text = preg_replace('/(?<![\p{L}\p{N}])[-–]?\s*([a-eA-E])[\)\.]\s+/u', "\n$1. ", $text) ?? $text;
-    $text = preg_replace('/\n([a-eA-E])\.\s+/u', "\n$1. ", $text) ?? $text;
+    $text = preg_replace('/(?<![\p{L}\p{N}])[-–]?\s*([a-fA-F]|[1-6])[\)\.]\s+/u', "\n$1. ", $text) ?? $text;
+    $text = preg_replace('/\n([a-fA-F]|[1-6])\.\s+/u', "\n$1. ", $text) ?? $text;
     $text = gpImpClean($text);
 
     preg_match_all('/(?:^|\n)\s*(?:Pregunta\s*)?(\d{1,3})[\.)]\s+/iu', $text, $matches, PREG_OFFSET_CAPTURE);
@@ -226,7 +226,7 @@ function gpImpParsePdfQuestions(string $text): array
         $end = $i + 1 < $count ? $matches[0][$i + 1][1] : strlen($text);
         $block = trim(substr($text, $start, $end - $start));
         $block = preg_replace('/^(?:Pregunta\s*)?\d{1,3}[\.)]\s*/iu', '', $block) ?? $block;
-        if (!preg_match_all('/(?:^|\n)\s*-?\s*([a-eA-E])[\)\.]\s+/u', $block, $altMatches, PREG_OFFSET_CAPTURE)) {
+        if (!preg_match_all('/(?:^|\n)\s*-?\s*([a-fA-F]|[1-6])[\)\.]\s+/u', $block, $altMatches, PREG_OFFSET_CAPTURE)) {
             continue;
         }
         $altCount = count($altMatches[0]);
@@ -239,7 +239,7 @@ function gpImpParsePdfQuestions(string $text): array
             $texto = gpImpClean(substr($block, $altStart, $altEnd - $altStart));
             $texto = preg_replace('/\s+(?=\d{1,3}[\.)]\s+)/u', '', $texto) ?? $texto;
             if ($texto !== '') {
-                $alts[] = ['letra' => strtoupper($altMatches[1][$j][0]), 'texto' => $texto, 'correcta' => false];
+                $alts[] = ['letra' => mb_strtoupper($altMatches[1][$j][0], 'UTF-8'), 'texto' => $texto, 'correcta' => false];
             }
         }
         if ($pregunta !== '' && count($alts) >= 2) {

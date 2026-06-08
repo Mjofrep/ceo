@@ -117,9 +117,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
    LISTADO
    ============================================================ */
 $stmt = $pdo->query('
-    SELECT ac.id, ac.descripcion, ac.id_servicio, fs.servicio
+    SELECT ac.id, ac.descripcion, ac.id_servicio, fs.servicio, COUNT(fp.id) AS total_preguntas
     FROM ceo_areacompetencia_formacion ac
     INNER JOIN ceo_formacion_servicios fs ON fs.id = ac.id_servicio
+    LEFT JOIN ceo_formacion_preguntas_servicios fp
+        ON fp.areacomp = ac.id
+       AND fp.id_servicio = ac.id_servicio
+       AND fp.estado = "S"
+    GROUP BY ac.id, ac.descripcion, ac.id_servicio, fs.servicio
     ORDER BY fs.servicio, ac.id
 ');
 $areas = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -216,6 +221,7 @@ table th, table td { vertical-align: middle; }
           <th>ID</th>
           <th>Descripcion</th>
           <th>Servicio Formacion</th>
+          <th>Total Preguntas</th>
           <th>Pct Formacion</th>
           <th>Accion</th>
         </tr>
@@ -226,6 +232,7 @@ table th, table td { vertical-align: middle; }
           <td><?= htmlspecialchars((string)$a['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
           <td><?= htmlspecialchars((string)$a['descripcion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
           <td><?= htmlspecialchars((string)$a['servicio'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
+          <td><?= (int)($a['total_preguntas'] ?? 0) ?></td>
           <td>
             <?php $pctKey = (int)$a['id_servicio'] . ':' . (int)$a['id']; ?>
             <form method="post" class="d-flex gap-2 align-items-center">

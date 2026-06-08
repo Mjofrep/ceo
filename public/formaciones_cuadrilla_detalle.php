@@ -156,6 +156,8 @@ body {background:#f7f9fc;}
 .brand-title {color:#0065a4; font-weight:600;}
 .table thead th {background:#eaf2fb; position: sticky; top: 0; z-index: 1;}
 .scroll-box {max-height: 70vh; overflow: auto; border:1px solid #dee2e6; border-radius:8px; background:#fff;}
+.area-note-good {background:#d1e7dd !important; color:#111 !important; font-weight:600;}
+.area-note-bad {background:#dc3545 !important; color:#fff !important; font-weight:600;}
 </style>
 </head>
 <body>
@@ -193,7 +195,22 @@ body {background:#f7f9fc;}
           <div class="col-md-3"><strong>Servicio:</strong> <?= esc((string)$formacion['servicio']) ?></div>
           <div class="col-md-3"><strong>Empresa:</strong> <?= esc((string)$formacion['empresa']) ?></div>
           <div class="col-md-3"><strong>UO:</strong> <?= esc((string)$formacion['uo']) ?></div>
-          <div class="col-md-3"><strong>Jornada:</strong> <?= esc((string)$formacion['jornada']) ?></div>
+          <div class="col-md-3 d-flex align-items-center justify-content-between gap-2">
+            <div><strong>Jornada:</strong> <?= esc((string)$formacion['jornada']) ?></div>
+            <button
+                type="button"
+                class="btn btn-outline-secondary btn-sm"
+                id="btnResumenAreasJornada"
+                data-bs-toggle="modal"
+                data-bs-target="#modalResumenAreasJornada"
+                data-cuadrilla="<?= (int)$formacion['cuadrilla'] ?>"
+                data-id-servicio="<?= (int)$formacion['id_servicio'] ?>"
+                data-jornada="<?= esc((string)$formacion['jornada']) ?>"
+                data-servicio="<?= esc((string)$formacion['servicio']) ?>"
+                title="Ver resumen por áreas de competencia">
+              <i class="bi bi-grid-3x3-gap"></i>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -299,12 +316,38 @@ body {background:#f7f9fc;}
   </div>
 </div>
 
+<div class="modal fade" id="modalResumenAreasJornada" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">Resumen por áreas de competencia</h5>
+          <div id="modalResumenAreasSubtitulo" class="small text-muted"></div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <a id="modalResumenAreasExport" href="#" class="btn btn-success btn-sm" target="_blank" rel="noopener">
+            <i class="bi bi-file-earmark-excel"></i> Exportar Excel
+          </a>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="modalResumenAreasBody" class="small text-muted">Cargando...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
 (function () {
   const modalBody = document.getElementById('modalAreasBody');
   const modalPersona = document.getElementById('modalAreasPersona');
+  const modalResumenBody = document.getElementById('modalResumenAreasBody');
+  const modalResumenSubtitulo = document.getElementById('modalResumenAreasSubtitulo');
+  const modalResumenExport = document.getElementById('modalResumenAreasExport');
+  const btnResumenAreasJornada = document.getElementById('btnResumenAreasJornada');
 
   function escapeHtml(str) {
     return String(str)
@@ -359,6 +402,54 @@ body {background:#f7f9fc;}
     return html;
   }
 
+  function renderResumenJornada(data) {
+    if (!data || !Array.isArray(data.participants) || data.participants.length === 0) {
+      return '<div class="text-muted">No hay participantes aprobados o reprobados para mostrar.</div>';
+    }
+
+    const areas = Array.isArray(data.areas) ? data.areas : [];
+    let html = '<div class="table-responsive">';
+    html += '<table class="table table-bordered table-sm align-middle">';
+    html += '<thead><tr>';
+    html += '<th>RUT</th>';
+    html += '<th>Empresa</th>';
+    html += '<th>Nombre / Apellidos</th>';
+    html += '<th>Nota</th>';
+    areas.forEach(area => {
+      html += '<th>' + escapeHtml(area.area || '') + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    data.participants.forEach(participant => {
+      html += '<tr>';
+      html += '<td>' + escapeHtml(participant.rut || '') + '</td>';
+      html += '<td>' + escapeHtml(participant.empresa || '') + '</td>';
+      html += '<td>' + escapeHtml(participant.nombre_completo || '') + '</td>';
+      html += '<td>' + escapeHtml(participant.nota_final || '') + '</td>';
+
+      areas.forEach(area => {
+        const areaData = participant.areas && participant.areas[String(area.id_area)]
+          ? participant.areas[String(area.id_area)]
+          : null;
+
+        if (!areaData || areaData.nota === null || areaData.nota === '') {
+          html += '<td>&nbsp;</td>';
+          return;
+        }
+
+        const cls = areaData.aprobada ? 'area-note-good' : 'area-note-bad';
+        const title = (areaData.correctas ?? '') + ' / ' + (areaData.total ?? '')
+          + ' | ' + (areaData.porcentaje ?? '') + '%';
+        html += '<td class="text-center ' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(areaData.nota) + '</td>';
+      });
+
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
   document.querySelectorAll('.btn-area-detalle').forEach(btn => {
     btn.addEventListener('click', () => {
       const rut = btn.getAttribute('data-rut');
@@ -396,6 +487,42 @@ body {background:#f7f9fc;}
           modalBody.innerHTML = '<div class="text-danger">No se pudo cargar el detalle.</div>';
         });
     });
+  });
+
+  btnResumenAreasJornada?.addEventListener('click', () => {
+    const cuadrilla = btnResumenAreasJornada.getAttribute('data-cuadrilla') || '';
+    const idServicio = btnResumenAreasJornada.getAttribute('data-id-servicio') || '';
+    const jornada = btnResumenAreasJornada.getAttribute('data-jornada') || '';
+    const servicio = btnResumenAreasJornada.getAttribute('data-servicio') || '';
+
+    if (modalResumenSubtitulo) {
+      modalResumenSubtitulo.innerHTML = 'Cuadrilla <strong>' + escapeHtml(cuadrilla) + '</strong>'
+        + ' | Jornada: <strong>' + escapeHtml(jornada) + '</strong>'
+        + ' | Servicio: ' + escapeHtml(servicio);
+    }
+
+    if (modalResumenExport) {
+      modalResumenExport.href = 'formaciones_cuadrilla_areas_excel.php?cuadrilla=' + encodeURIComponent(cuadrilla)
+        + '&id_servicio=' + encodeURIComponent(idServicio);
+    }
+
+    if (modalResumenBody) {
+      modalResumenBody.innerHTML = '<div class="text-muted">Cargando...</div>';
+    }
+
+    fetch('ajax_formacion_area_resumen_jornada.php?cuadrilla=' + encodeURIComponent(cuadrilla) + '&id_servicio=' + encodeURIComponent(idServicio), { cache: 'no-store' })
+      .then(r => r.json())
+      .then(r => {
+        if (!r || !r.ok) {
+          const msg = r && r.error ? r.error : 'No se pudo cargar el resumen.';
+          modalResumenBody.innerHTML = '<div class="text-danger">' + escapeHtml(msg) + '</div>';
+          return;
+        }
+        modalResumenBody.innerHTML = renderResumenJornada(r);
+      })
+      .catch(() => {
+        modalResumenBody.innerHTML = '<div class="text-danger">No se pudo cargar el resumen.</div>';
+      });
   });
 
   document.querySelectorAll('.btn-reiniciar-prueba').forEach(btn => {
