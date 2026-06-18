@@ -1,5 +1,6 @@
 {
     "require": {
-        "bacon/bacon-qr-code": "1.0.3"
+        "bacon/bacon-qr-code": "^3.0",
+        "phpoffice/phpspreadsheet": "^5.8"
     }
 }

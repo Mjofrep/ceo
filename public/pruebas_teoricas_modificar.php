@@ -67,13 +67,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   try {
     if ($action === 'update') {
       $idPregunta = (int)$_POST['id_pregunta'];
+      $areaComp = (int)($_POST['areacomp'] ?? 0);
       $texto = $_POST['pregunta_texto'] ?? '';
       $retroPos = $_POST['retropos'] ?? '';
       $retroNeg = $_POST['retroneg'] ?? '';
       $correctaAlt = $_POST['correcta_alt'] ?? '';
 
-      $uploadDir = __DIR__ . '/../uploads/';
-      if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
+      $stmtPreguntaMeta = $pdo->prepare("
+        SELECT p.id, p.id_servicio, p.id_agrupacion
+        FROM ceo_preguntas_servicios p
+        WHERE p.id = :id
+          AND p.id_agrupacion = :id_agrupacion
+        LIMIT 1
+      ");
+      $stmtPreguntaMeta->execute([
+        ':id' => $idPregunta,
+        ':id_agrupacion' => $idSelPost,
+      ]);
+      $preguntaMeta = $stmtPreguntaMeta->fetch(PDO::FETCH_ASSOC);
+      if (!$preguntaMeta) {
+        throw new RuntimeException('La pregunta no existe o no pertenece a la agrupación seleccionada.');
+      }
+
+      if ($areaComp <= 0) {
+        throw new RuntimeException('Debe seleccionar un Área de Competencia válida.');
+      }
+
+      $stmtArea = $pdo->prepare("
+        SELECT 1
+        FROM ceo_areacompetencias
+        WHERE id = :id_area
+          AND id_servicio = :id_servicio
+        LIMIT 1
+      ");
+      $stmtArea->execute([
+        ':id_area' => $areaComp,
+        ':id_servicio' => (int)$preguntaMeta['id_servicio'],
+      ]);
+      if (!$stmtArea->fetchColumn()) {
+        throw new RuntimeException('El Área de Competencia no corresponde al servicio de la pregunta.');
+      }
+	
+	      $uploadDir = __DIR__ . '/../uploads/';
+	      if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 
       // === Imagen / Video de la pregunta ===
       $imagen = trim($_POST['pregunta_imagen_actual'] ?? '');
@@ -85,10 +121,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
       if (!empty($_POST['pregunta_video'])) $imagen = trim($_POST['pregunta_video']);
 
-      $pdo->prepare("UPDATE ceo_preguntas_servicios 
-                       SET pregunta=?, imagen=?, retropos=?, retroneg=? 
-                     WHERE id=?")
-          ->execute([$texto, $imagen, $retroPos, $retroNeg, $idPregunta]);
+	      $pdo->prepare("UPDATE ceo_preguntas_servicios 
+	                       SET pregunta=?, imagen=?, retropos=?, retroneg=?, areacomp=?
+	                     WHERE id=?")
+	          ->execute([$texto, $imagen, $retroPos, $retroNeg, $areaComp, $idPregunta]);
 
       // === Actualizar alternativas existentes ===
       foreach ($_POST as $k => $v) {
@@ -201,9 +237,26 @@ $idPreguntaSel = (int)($_GET['id_pregunta'] ?? 0);
 $preguntasNav = [];
 $preguntaActiva = null;
 $alternativasActivas = [];
+$areasCompetencia = [];
+$idServicioAgrupacion = 0;
 $indiceActual = 0;
 
 if ($idSel > 0) {
+  $stmtAgrupacion = $pdo->prepare("SELECT id_servicio FROM ceo_agrupacion WHERE id = :id LIMIT 1");
+  $stmtAgrupacion->execute([':id' => $idSel]);
+  $idServicioAgrupacion = (int)($stmtAgrupacion->fetchColumn() ?: 0);
+
+  if ($idServicioAgrupacion > 0) {
+    $stmtAreas = $pdo->prepare("
+      SELECT id, descripcion
+      FROM ceo_areacompetencias
+      WHERE id_servicio = :id_servicio
+      ORDER BY descripcion ASC
+    ");
+    $stmtAreas->execute([':id_servicio' => $idServicioAgrupacion]);
+    $areasCompetencia = $stmtAreas->fetchAll(PDO::FETCH_ASSOC) ?: [];
+  }
+
   $stmtNav = $pdo->prepare("SELECT id FROM ceo_preguntas_servicios WHERE id_agrupacion = :id ORDER BY id ASC");
   $stmtNav->execute([':id' => $idSel]);
   $preguntasNav = $stmtNav->fetchAll(PDO::FETCH_ASSOC);
@@ -224,12 +277,12 @@ if ($idSel > 0) {
     $indiceActual = 1;
   }
 
-  if ($idPreguntaSel > 0) {
-    $stmt = $pdo->prepare("
-    SELECT p.id, p.pregunta, p.imagen, p.retropos, p.retroneg,
-           (SELECT JSON_ARRAYAGG(JSON_OBJECT(
-              'id', a.id,
-              'alternativa', a.alternativa,
+	  if ($idPreguntaSel > 0) {
+	    $stmt = $pdo->prepare("
+	    SELECT p.id, p.id_servicio, p.pregunta, p.imagen, p.retropos, p.retroneg, p.areacomp,
+	           (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+	              'id', a.id,
+	              'alternativa', a.alternativa,
               'correcta', a.correcta,
               'imagen', a.imagen
             )) FROM ceo_alternativas_preguntas a WHERE a.id_pregunta = p.id
@@ -365,13 +418,25 @@ body{background:#f7f9fc;font-size:0.9rem;}
         </div>
       <?php endif; ?>
 
-      <input type="hidden" name="pregunta_imagen_actual" value="<?= htmlspecialchars((string)($preguntaActiva['imagen'] ?? '')) ?>">
-      <label class="form-label">Reemplazar imagen</label>
-      <input type="file" name="pregunta_imagen" accept="image/*" class="form-control mb-2">
-      <label class="form-label">O URL de video</label>
-      <input type="url" name="pregunta_video" class="form-control mb-3" placeholder="https://...">
+	      <input type="hidden" name="pregunta_imagen_actual" value="<?= htmlspecialchars((string)($preguntaActiva['imagen'] ?? '')) ?>">
+	      <label class="form-label">Reemplazar imagen</label>
+	      <input type="file" name="pregunta_imagen" accept="image/*" class="form-control mb-2">
+	      <label class="form-label">O URL de video</label>
+	      <input type="url" name="pregunta_video" class="form-control mb-3" placeholder="https://...">
 
-      <fieldset class="mb-3">
+        <div class="mb-3">
+          <label class="form-label">Área de Competencia</label>
+          <select name="areacomp" class="form-select" required>
+            <option value="">-- Seleccione --</option>
+            <?php foreach ($areasCompetencia as $area): ?>
+              <option value="<?= (int)$area['id'] ?>" <?= (int)($preguntaActiva['areacomp'] ?? 0) === (int)$area['id'] ? 'selected' : '' ?>>
+                <?= htmlspecialchars((string)$area['descripcion']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+	
+	      <fieldset class="mb-3">
           <legend>Alternativas</legend>
           <div id="alt_container_<?= (int)$preguntaActiva['id'] ?>">
             <?php foreach ($alternativasActivas as $a): ?>

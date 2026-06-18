@@ -140,20 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $puntajeMaximo = (float)($calc['auto_max'] ?? 0) + (float)($calc['txt_max'] ?? 0);
         $porcentaje = ($puntajeMaximo > 0) ? round(($puntajeObtenido / $puntajeMaximo) * 100, 2) : 0.0;
 
-        $stmtPorc = $pdo->prepare("
-            SELECT porcentaje
-            FROM ceo_porcentaje_agrupacion
-            WHERE id_agrupacion = :id_agrupacion
-              AND fechadesde <= CURDATE()
-              AND activo = 'S'
-            ORDER BY fechadesde DESC
-            LIMIT 1
-        ");
-        $stmtPorc->execute([':id_agrupacion' => $idAgrupacion]);
-        $porcentajeMinimo = (float)$stmtPorc->fetchColumn();
-        if ($porcentajeMinimo <= 0) {
-            $porcentajeMinimo = 80.0;
-        }
+        $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, $idAgrupacion);
 
         $resultado = ($porcentaje >= $porcentajeMinimo) ? 'APROBADO' : 'REPROBADO';
         if ($pendientes > 0) {

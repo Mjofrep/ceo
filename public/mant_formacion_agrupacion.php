@@ -5,6 +5,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/functions.php';
 
 // Validación de sesión
 if (empty($_SESSION['auth'])) {
@@ -13,6 +14,7 @@ if (empty($_SESSION['auth'])) {
 }
 
 $pdo = db();
+asegurarColumnaPorcentajeFormacionAgrupacion($pdo);
 $msg = '';
 
 /* ============================================================
@@ -27,19 +29,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $tiempo      = $_POST['tiempo'] ?? null;
   $cantidad    = (int)($_POST['cantidad'] ?? 0);
   $total       = (int)($_POST['total'] ?? 0);   // ✅ NUEVO
+  $porcentaje  = isset($_POST['porcentaje']) ? (float)$_POST['porcentaje'] : 80.0;
+
+  if (($accion === 'crear' || $accion === 'editar') && ($porcentaje <= 0 || $porcentaje > 100)) {
+    $msg = '⚠️ El porcentaje mínimo debe ser mayor que 0 y menor o igual que 100.';
+    $accion = '';
+  }
 
   // CREAR
   if ($accion === 'crear' && $titulo && $id_servicio > 0) {
     $stmt = $pdo->prepare("
-    INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, tiempo, cantidad, total)
-    VALUES (:titulo, :servicio, :tiempo, :cantidad, :total)
+    INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, tiempo, cantidad, total, porcentaje)
+    VALUES (:titulo, :servicio, :tiempo, :cantidad, :total, :porcentaje)
     ");
     $stmt->execute([
       ':titulo'   => $titulo,
       ':servicio' => $id_servicio,
       ':tiempo'   => $tiempo,
       ':cantidad' => $cantidad,
-      ':total'    => $total
+      ':total'    => $total,
+      ':porcentaje' => $porcentaje
     ]);
 
     $msg = "✅ Agrupación creada correctamente.";
@@ -52,7 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             id_servicio = :servicio,
             tiempo = :tiempo,
             cantidad = :cantidad,
-            total = :total
+            total = :total,
+            porcentaje = :porcentaje
        WHERE id = :id
     ");
     $stmt->execute([
@@ -61,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ':tiempo'   => $tiempo,
       ':cantidad' => $cantidad,
       ':total'    => $total,
+      ':porcentaje' => $porcentaje,
       ':id'       => $id
     ]);
 
@@ -167,6 +178,11 @@ table th, table td { vertical-align:middle; }
   <input type="number" name="total" id="total" class="form-control" min="0">
 </div>
 
+<div class="col-md-3">
+  <label class="form-label">Porcentaje mínimo</label>
+  <input type="number" name="porcentaje" id="porcentaje" class="form-control" min="1" max="100" step="0.01" value="80" required>
+</div>
+
 <div class="col-md-12 text-end mt-3">
   <button name="accion" value="crear" id="btnGuardar" class="btn btn-primary">Guardar</button>
   <button name="accion" value="editar" id="btnActualizar" class="btn btn-warning d-none">Actualizar</button>
@@ -199,6 +215,7 @@ table th, table td { vertical-align:middle; }
   <th>Tiempo</th>
   <th>Cantidad Preguntas</th>
   <th>Total Preguntas</th>
+  <th>% Mínimo</th>
   <th>Acciones</th>
 </tr>
 </thead>
@@ -211,6 +228,7 @@ table th, table td { vertical-align:middle; }
   <td><?= $a['tiempo'] ?></td>
   <td><?= $a['cantidad'] ?></td>
   <td><?= (int)$a['total'] ?></td>
+  <td><?= number_format((float)($a['porcentaje'] ?? 80), 2, '.', '') ?>%</td>
   <td>
     <button class="btn btn-sm btn-info btnEditar"
       data-id="<?= $a['id'] ?>"
@@ -218,7 +236,8 @@ table th, table td { vertical-align:middle; }
       data-servicio="<?= $a['id_servicio'] ?>"
       data-tiempo="<?= $a['tiempo'] ?>"
       data-cantidad="<?= $a['cantidad'] ?>"
-      data-total="<?= $a['total'] ?>">   <!-- ✅ -->
+      data-total="<?= $a['total'] ?>"
+      data-porcentaje="<?= htmlspecialchars((string)($a['porcentaje'] ?? 80)) ?>">   <!-- ✅ -->
       Editar
     </button>
 
@@ -251,6 +270,7 @@ document.querySelectorAll('.btnEditar').forEach(btn => {
     tiempo.value = d.tiempo;
     cantidad.value = d.cantidad;
     total.value = d.total; 
+    porcentaje.value = d.porcentaje || 80;
 
     btnGuardar.classList.add('d-none');
     btnActualizar.classList.remove('d-none');

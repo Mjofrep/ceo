@@ -45,28 +45,52 @@ if (isset($_POST['action']) && $_POST['action'] === 'guardar_solicitud') {
   try {
     $pdo->beginTransaction();
 
-    $next = (int)$pdo->query("SELECT COALESCE(MAX(nsolicitud),0)+1 FROM ceo_solicitudes")->fetchColumn();
-if ($next === 5030) {
-    $next = 5528;
-}
-      
-    $solicitante = $_SESSION['auth']['id'] ?? 'Desconocido';
+	    $next = (int)$pdo->query("SELECT COALESCE(MAX(nsolicitud),0)+1 FROM ceo_solicitudes")->fetchColumn();
+	if ($next === 5030) {
+	    $next = 5528;
+	}
+	      
+	    $solicitante = $_SESSION['auth']['id'] ?? 'Desconocido';
+	    $tipoVisita = trim((string)($_POST['tipo_visita'] ?? ''));
+	    $tiposVisitaPermitidos = [
+	      'Colegio',
+	      'Institutos profesionales',
+	      'Universidades',
+	      'Municipios',
+	      'Carabineros',
+	      'Bomberos',
+	      'PDI',
+	      'Aduana',
+	    ];
+	    if (!in_array($tipoVisita, $tiposVisitaPermitidos, true)) {
+	      $tipoVisita = null;
+	    }
 
-    // Inserta la solicitud base
-    $stmt = $pdo->prepare("
-    INSERT INTO ceo_solicitudes
-    (nsolicitud, fecha, horainicio, horatermino, contratista, proceso, habilitacionceo,
-     tipohabilitacion, patio, resphse, resplinea, uo, servicio, responsable,
-     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, fechacreacion, estado)
-      VALUES
-    (:nsolicitud,:fecha,:hini,:hfin,:empresa,:proceso,:habceo,:tipohab,:patio,
-     :rhse,:rlinea,:uo,:servicio,:ruo,:obs,:charla,:motivoreinduccion,
-     :numerohallazgo,:solicitante,CURDATE(),'I')
-    ");
-    $stmt->execute([
-      ':nsolicitud' => $next,
-      ':fecha'      => $_POST['fecha'] ?? null,
-      ':hini'       => $_POST['hora_inicio'] ?? null,
+	    $columnaTipoVisitaExiste = false;
+	    try {
+	      $stTipoVisita = $pdo->query("SHOW COLUMNS FROM ceo_solicitudes LIKE 'tipo_visita'");
+	      $columnaTipoVisitaExiste = (bool)$stTipoVisita->fetch(PDO::FETCH_ASSOC);
+	    } catch (Throwable $e) {
+	      $columnaTipoVisitaExiste = false;
+	    }
+	    $sqlColumnaTipoVisita = $columnaTipoVisitaExiste ? ', tipo_visita' : '';
+	    $sqlValorTipoVisita   = $columnaTipoVisitaExiste ? ', :tipo_visita' : '';
+
+	    // Inserta la solicitud base
+	    $stmt = $pdo->prepare("
+	    INSERT INTO ceo_solicitudes
+	    (nsolicitud, fecha, horainicio, horatermino, contratista, proceso, habilitacionceo,
+	     tipohabilitacion, patio, resphse, resplinea, uo, servicio, responsable,
+	     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, fechacreacion, estado{$sqlColumnaTipoVisita})
+	      VALUES
+	    (:nsolicitud,:fecha,:hini,:hfin,:empresa,:proceso,:habceo,:tipohab,:patio,
+	     :rhse,:rlinea,:uo,:servicio,:ruo,:obs,:charla,:motivoreinduccion,
+	     :numerohallazgo,:solicitante,CURDATE(),'I'{$sqlValorTipoVisita})
+	    ");
+	    $paramsSolicitud = [
+	      ':nsolicitud' => $next,
+	      ':fecha'      => $_POST['fecha'] ?? null,
+	      ':hini'       => $_POST['hora_inicio'] ?? null,
       ':hfin'       => $_POST['hora_termino'] ?? null,
       ':empresa'    => $_POST['empresa'] ?? null,
       ':proceso'    => $_POST['proceso'] ?? null,
@@ -78,12 +102,16 @@ if ($next === 5030) {
       ':uo'         => $_POST['uo'] ?? null,
       ':servicio'   => $_POST['servicio'] ?? null,
       ':ruo'        => $_POST['resp_uo'] ?? null,
-      ':obs'        => $_POST['observacion'] ?? null,
-      ':charla'     => $_POST['charla'] ?? null,
-      ':motivoreinduccion' => $_POST['motivoreinduccion'] ?? null,
-      ':numerohallazgo'    => $_POST['numerohallazgo'] ?? null,
-      ':solicitante'=> $solicitante
-    ]);
+	      ':obs'        => $_POST['observacion'] ?? null,
+	      ':charla'     => $_POST['charla'] ?? null,
+	      ':motivoreinduccion' => $_POST['motivoreinduccion'] ?? null,
+	      ':numerohallazgo'    => $_POST['numerohallazgo'] ?? null,
+	      ':solicitante'=> $solicitante
+	    ];
+	    if ($columnaTipoVisitaExiste) {
+	      $paramsSolicitud[':tipo_visita'] = $tipoVisita;
+	    }
+	    $stmt->execute($paramsSolicitud);
 
     // Actualiza calendario a OCUPADO si aplica
     $fecha = $_POST['fecha'] ?? null;
@@ -546,18 +574,33 @@ body{background:#f7f9fc}
               <option value="">&nbsp;</option><?php foreach($responsables as $i=>$t):?><option value="<?=$i?>"><?=esc($t)?></option><?php endforeach;?>
             </select></div>
             
-            <div class="col-md-6 d-none" id="bloqueCharla">
-              <label class="form-label">Capacitación</label>
-              <select name="charla" class="form-select form-select-sm">
-                <option value="">&nbsp;</option>&nbsp;
-                <?php foreach($charlas as $i=>$t): ?>
-                  <option value="<?=$i?>"><?=esc($t)?></option>
-                <?php endforeach; ?>
-              </select>
-            </div>
+	            <div class="col-md-6 d-none" id="bloqueCharla">
+	              <label class="form-label">Capacitación</label>
+	              <select name="charla" class="form-select form-select-sm">
+	                <option value="">&nbsp;</option>&nbsp;
+	                <?php foreach($charlas as $i=>$t): ?>
+	                  <option value="<?=$i?>"><?=esc($t)?></option>
+	                <?php endforeach; ?>
+	              </select>
+	            </div>
 
-            <!-- Campo Motivo Reinducción -->
-            <div class="col-md-6 d-none" id="bloqueMotivoReinduccion">
+	            <div class="col-md-6 d-none" id="bloqueTipoVisita">
+	              <label class="form-label">Tipo de visita</label>
+	              <select name="tipo_visita" class="form-select form-select-sm">
+	                <option value="">&nbsp;</option>
+	                <option value="Colegio">Colegio</option>
+	                <option value="Institutos profesionales">Institutos profesionales</option>
+	                <option value="Universidades">Universidades</option>
+	                <option value="Municipios">Municipios</option>
+	                <option value="Carabineros">Carabineros</option>
+	                <option value="Bomberos">Bomberos</option>
+	                <option value="PDI">PDI</option>
+	                <option value="Aduana">Aduana</option>
+	              </select>
+	            </div>
+	
+	            <!-- Campo Motivo Reinducción -->
+	            <div class="col-md-6 d-none" id="bloqueMotivoReinduccion">
               <label class="form-label">Motivo Reinducción</label>
               <select name="motivoreinduccion" class="form-select form-select-sm">
                 <option value="">&nbsp;</option>
@@ -1528,18 +1571,19 @@ selHabCeo.addEventListener('change', function () {
     }
 });
 
-// ========================= Mostrar campos Reinducción =========================
-const bloqueMotivo = document.getElementById('bloqueMotivoReinduccion');
-const bloqueHallazgo = document.getElementById('bloqueNumeroHallazgo');
+	// ========================= Mostrar campos Reinducción =========================
+	const bloqueMotivo = document.getElementById('bloqueMotivoReinduccion');
+	const bloqueHallazgo = document.getElementById('bloqueNumeroHallazgo');
+	const bloqueTipoVisita = document.getElementById('bloqueTipoVisita');
 
 selHabCeo.addEventListener('change', function () {
     const texto = this.options[this.selectedIndex].text.trim().toLowerCase();
 
     // Mostrar Capacitación
-    if (texto === "capacitación" || texto === "capacitacion") {
-        bloqueCharla.classList.remove('d-none');
-        bloqueCharla.querySelector('select').setAttribute('required','required');
-    } else {
+	    if (texto === "capacitación" || texto === "capacitacion") {
+	        bloqueCharla.classList.remove('d-none');
+	        bloqueCharla.querySelector('select').setAttribute('required','required');
+	    } else {
         bloqueCharla.classList.add('d-none');
         bloqueCharla.querySelector('select').removeAttribute('required');
         bloqueCharla.querySelector('select').value = "";
@@ -1560,10 +1604,18 @@ selHabCeo.addEventListener('change', function () {
         bloqueMotivo.querySelector('select').removeAttribute('required');
         bloqueHallazgo.querySelector('input').removeAttribute('required');
 
-        bloqueMotivo.querySelector('select').value = "";
-        bloqueHallazgo.querySelector('input').value = "";
-    }
-});
+	        bloqueMotivo.querySelector('select').value = "";
+	        bloqueHallazgo.querySelector('input').value = "";
+	    }
+
+	    if (texto === "visita" || texto === "visitas") {
+	        bloqueTipoVisita.classList.remove('d-none');
+	    } else {
+	        bloqueTipoVisita.classList.add('d-none');
+	        bloqueTipoVisita.querySelector('select').removeAttribute('required');
+	        bloqueTipoVisita.querySelector('select').value = "";
+	    }
+	});
 
 // === Validación visual de campos ===
 (function () {

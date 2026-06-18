@@ -22,6 +22,28 @@ $data = [
     'proceso'       => 0
 ];
 
+function cargarEvaluacionProgramada(PDO $pdo, int $idProgramada, string $rut): ?array
+{
+    if ($idProgramada <= 0 || $rut === '') {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT id, rut, id_servicio, cuadrilla, intento, tipo, id_proceso_habilitacion
+        FROM ceo_evaluaciones_programadas
+        WHERE id = :id
+          AND rut = :rut
+        LIMIT 1
+    ");
+    $stmt->execute([
+        ':id' => $idProgramada,
+        ':rut' => $rut,
+    ]);
+
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
 /* ===========================================================
    1) RECIBIR PARAMETROS
    =========================================================== */
@@ -40,6 +62,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $preguntas = $_POST['preguntas'] ?? [];
 
+        $procRow = cargarEvaluacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
+        if ($data['id_servicio'] <= 0 && $procRow) {
+            $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+        }
+
         if (!$preguntas) {
             throw new Exception('No se recibieron las preguntas rendidas.');
         }
@@ -53,22 +80,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // =====================================================
                 // RESOLVER CUADRILLA REAL DESDE EL PROCESO PROGRAMADO
                 // =====================================================
-                $sqlProc = "
-                    SELECT cuadrilla, intento, tipo, id_servicio, id_proceso_habilitacion
-                    FROM ceo_evaluaciones_programadas
-                    WHERE id = :id_programada
-                      AND rut = :rut
-                    LIMIT 1
-                ";
-
-                $stmtProc = $pdo->prepare($sqlProc);
-                $stmtProc->execute([
-                    ':id_programada' => $data['proceso'],
-                    ':rut'           => $data['rut_alumno']
-                ]);
-
-                $procRow = $stmtProc->fetch(PDO::FETCH_ASSOC);
-
                 if (!$procRow) {
                     throw new Exception('No se pudo determinar la cuadrilla del proceso.');
                 }
@@ -371,6 +382,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data['nsolicitud']    = (int)($_GET['nsolicitud'] ?? 0);
     $data['proceso']       = (int)($_GET['id_programada'] ?? 0);
 
+    $procRow = cargarEvaluacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
+    if ($data['id_servicio'] <= 0 && $procRow) {
+        $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+    }
+
     if ($data['id_servicio'] <= 0) {
         $err = "No se indicó servicio.";
     }
@@ -436,26 +452,105 @@ if ($err === '' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
         /* ===========================================================
            3) CONSULTA PREGUNTAS
            =========================================================== */
-        $cantidadPreguntas = (int)$agrupacion['cantidad'];
+	        $cantidadPreguntas = (int)$agrupacion['cantidad'];
+	        $preguntas = [];
 
-        $sqlP = "
-            SELECT id, pregunta, id_servicio, imagen
-            FROM ceo_preguntas_servicios
-            WHERE id_servicio = :id_servicio
-              AND id_agrupacion = :id_agrupacion
-              AND estado = 'S'
-            ORDER BY RAND()
-            LIMIT :cantidad
-        ";
+            $stmtAvail = $pdo->prepare("
+                SELECT areacomp, COUNT(*) AS total
+                FROM ceo_preguntas_servicios
+                WHERE id_servicio = :id_servicio
+                  AND id_agrupacion = :id_agrupacion
+                  AND estado = 'S'
+                  AND areacomp IS NOT NULL
+                GROUP BY areacomp
+            ");
+            $stmtAvail->execute([
+                ':id_servicio' => $data['id_servicio'],
+                ':id_agrupacion' => $data['id_agrupacion'],
+            ]);
+            $availableRows = $stmtAvail->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmtP = $pdo->prepare($sqlP);
-        $stmtP->bindValue(':id_servicio', $data['id_servicio'], PDO::PARAM_INT);
-        $stmtP->bindValue(':id_agrupacion', $data['id_agrupacion'], PDO::PARAM_INT);
-        $stmtP->bindValue(':cantidad', $cantidadPreguntas, PDO::PARAM_INT);
-        $stmtP->execute();
+            $availableMap = [];
+            foreach ($availableRows as $row) {
+                $areaId = (int)($row['areacomp'] ?? 0);
+                if ($areaId <= 0) {
+                    continue;
+                }
+                $availableMap[$areaId] = (int)($row['total'] ?? 0);
+            }
 
-        $preguntas = $stmtP->fetchAll(PDO::FETCH_ASSOC);
-        $totalPreguntas = count($preguntas);
+            $stmtCfg = $pdo->prepare("
+                SELECT id_area, porcentaje
+                FROM ceo_habilitacion_areascompetencias_pct
+                WHERE id_servicio = :id_servicio
+            ");
+            $stmtCfg->execute([':id_servicio' => $data['id_servicio']]);
+            $configRows = $stmtCfg->fetchAll(PDO::FETCH_ASSOC);
+
+            $useConfig = $cantidadPreguntas > 0 && !empty($configRows) && !empty($availableMap);
+
+            if ($useConfig) {
+                $distribution = formacionDistribuirCuotasPorArea($cantidadPreguntas, $configRows, $availableMap);
+                foreach (($distribution['additional'] ?? []) as $areaId => $assigned) {
+                    if ((int)$assigned <= 0) {
+                        continue;
+                    }
+
+                    $sqlArea = "
+                        SELECT id, pregunta, id_servicio, imagen, areacomp
+                        FROM ceo_preguntas_servicios
+                        WHERE id_servicio = ?
+                          AND id_agrupacion = ?
+                          AND estado = 'S'
+                          AND areacomp = ?
+                    ";
+                    $excludeIds = array_map(static fn($q) => (int)$q['id'], $preguntas);
+                    if (!empty($excludeIds)) {
+                        $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                        $sqlArea .= " AND id NOT IN ($placeholders) ";
+                    }
+                    $sqlArea .= " ORDER BY RAND() LIMIT ?";
+
+                    $params = [$data['id_servicio'], $data['id_agrupacion'], (int)$areaId];
+                    if (!empty($excludeIds)) {
+                        $params = array_merge($params, $excludeIds);
+                    }
+                    $params[] = (int)$assigned;
+
+                    $stmtArea = $pdo->prepare($sqlArea);
+                    $stmtArea->execute($params);
+                    $preguntas = array_merge($preguntas, $stmtArea->fetchAll(PDO::FETCH_ASSOC));
+                }
+            }
+
+            if (count($preguntas) < $cantidadPreguntas) {
+                $faltantes = $cantidadPreguntas - count($preguntas);
+                $excludeIds = array_map(static fn($q) => (int)$q['id'], $preguntas);
+                $sqlExtra = "
+                    SELECT id, pregunta, id_servicio, imagen, areacomp
+                    FROM ceo_preguntas_servicios
+                    WHERE id_servicio = ?
+                      AND id_agrupacion = ?
+                      AND estado = 'S'
+                ";
+                if (!empty($excludeIds)) {
+                    $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                    $sqlExtra .= " AND id NOT IN ($placeholders) ";
+                }
+                $sqlExtra .= " ORDER BY RAND() LIMIT ?";
+
+                $params = [$data['id_servicio'], $data['id_agrupacion']];
+                if (!empty($excludeIds)) {
+                    $params = array_merge($params, $excludeIds);
+                }
+                $params[] = $faltantes;
+
+                $stmtExtra = $pdo->prepare($sqlExtra);
+                $stmtExtra->execute($params);
+                $preguntas = array_merge($preguntas, $stmtExtra->fetchAll(PDO::FETCH_ASSOC));
+            }
+
+	        $totalPreguntas = count($preguntas);
 
         if ($totalPreguntas === 0) {
             $err = "No hay preguntas configuradas.";
@@ -743,6 +838,22 @@ $csrfToken = Csrf::token();
     const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
     const keepaliveIntervalMs = 5 * 60 * 1000;
     let keepaliveId = null;
+    let envioEnCurso = false;
+
+    function syncTiempoRestante() {
+        window.ceoTiempoRestante = tiempoRestante;
+    }
+
+    function enviarFormularioFinal() {
+        if (!formPrueba || envioEnCurso) {
+            return;
+        }
+
+        envioEnCurso = true;
+        window.pruebaFinalizada = true;
+        stopKeepalive();
+        formPrueba.submit();
+    }
 
     function startKeepalive() {
         if (keepaliveId) return;
@@ -776,11 +887,11 @@ $csrfToken = Csrf::token();
         if (inputTiempo) {
             inputTiempo.value = tiempoRestante;
         }
+        syncTiempoRestante();
 
         if (tiempoRestante <= 0) {
             if (btnFinalizar) btnFinalizar.disabled = true;
-            stopKeepalive();
-            if (formPrueba) formPrueba.submit();
+            enviarFormularioFinal();
             return;
         }
 
@@ -789,6 +900,7 @@ $csrfToken = Csrf::token();
 
     if (formPrueba && timerSpan) {
         timerSpan.textContent = formatoTiempo(tiempoRestante);
+        syncTiempoRestante();
         setTimeout(tick, 1000);
         startKeepalive();
     }
@@ -796,8 +908,7 @@ $csrfToken = Csrf::token();
     if (btnFinalizar && formPrueba) {
         btnFinalizar.addEventListener('click', function () {
             if (confirm('¿Seguro que deseas finalizar la prueba? Una vez enviada no podrás modificar las respuestas.')) {
-                stopKeepalive();
-                formPrueba.submit();
+                enviarFormularioFinal();
             }
         });
     }
@@ -940,11 +1051,11 @@ window.addEventListener("popstate", function () {
     );
 });
 
-let pruebaFinalizada = false;
+window.pruebaFinalizada = false;
 
 function finalizarPruebaPorSalida() {
-    if (pruebaFinalizada) return;
-    pruebaFinalizada = true;
+    if (window.pruebaFinalizada) return;
+    window.pruebaFinalizada = true;
 
     const form = document.getElementById("form-prueba");
 
@@ -962,7 +1073,7 @@ function finalizarPruebaPorSalida() {
 }
 
 window.addEventListener("beforeunload", function (e) {
-    if (typeof tiempoRestante !== "undefined" && tiempoRestante > 0 && !pruebaFinalizada) {
+    if ((window.ceoTiempoRestante ?? 0) > 0 && !window.pruebaFinalizada) {
         if (window.ceoStopKeepalive) {
             window.ceoStopKeepalive();
         }
@@ -972,13 +1083,13 @@ window.addEventListener("beforeunload", function (e) {
 });
 
 document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden" && !pruebaFinalizada && tiempoRestante > 0) {
+    if (document.visibilityState === "hidden" && !window.pruebaFinalizada && (window.ceoTiempoRestante ?? 0) > 0) {
         finalizarPruebaPorSalida();
     }
 });
 
 window.addEventListener("blur", function () {
-    if (!pruebaFinalizada && tiempoRestante > 0) {
+    if (!window.pruebaFinalizada && (window.ceoTiempoRestante ?? 0) > 0) {
         setTimeout(() => {
             if (document.visibilityState === "hidden") {
                 finalizarPruebaPorSalida();

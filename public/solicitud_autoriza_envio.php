@@ -61,6 +61,8 @@ $sqlCab = "
          pa.desc_patios AS patio,
          h.desc_tipo AS habilitacion,
          ch.desc_charlas AS charla_nombre,
+         rd.reinduccion AS motivoreinduccion_nombre,
+         s.tipo_visita,
          r1.nombre AS resp_hse,
          ev.nombre AS eval_nombre, ev.apellidop AS eval_ap, ev.apellidom AS eval_am
     FROM ceo_solicitudes s
@@ -70,6 +72,7 @@ $sqlCab = "
     LEFT JOIN ceo_patios pa        ON pa.id = s.patio
     LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
     LEFT JOIN ceo_charlas ch       ON ch.id = s.charla
+    LEFT JOIN ceo_reinduccion rd   ON rd.id = s.motivoreinduccion
     LEFT JOIN ceo_responsablehse r1   ON r1.id = s.resphse
     LEFT JOIN ceo_evaluador ev     ON ev.id = s.resplinea
    WHERE s.nsolicitud = :id
@@ -92,6 +95,8 @@ $servicio  = $S['servicio'] ?? '';
 $patio     = $S['patio'] ?? '';
 $habMotivo = $S['habilitacion'] ?? '';
 $charla    = $S['charla_nombre'] ?? '';
+$motivoReinduccion = $S['motivoreinduccion_nombre'] ?? '';
+$tipoVisita = $S['tipo_visita'] ?? '';
 $respHSE   = $S['resp_hse'] ?? '';
 $respLinea = trim(($S['eval_nombre'] ?? '') . ' ' . ($S['eval_ap'] ?? '') . ' ' . ($S['eval_am'] ?? ''));
 
@@ -189,7 +194,9 @@ body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; font-size: 11px; 
     <td><b>Patio</b> <span class="box"><?= htmlspecialchars($patio) ?></span></td>
   </tr>
   <tr>
-    <td colspan="5"><b>Habilitación/Motivo</b> <span class="box"><?= htmlspecialchars($habMotivo ?: 'Habilitación') ?></span></td>
+    <td><b>Habilitación/Motivo</b> <span class="box"><?= htmlspecialchars($habMotivo ?: 'Habilitación') ?></span></td>
+    <td colspan="2"><b>Motivo Reinducción</b> <span class="box"><?= htmlspecialchars($motivoReinduccion) ?></span></td>
+    <td colspan="2"><b>Tipo de visita</b> <span class="box"><?= htmlspecialchars($tipoVisita) ?></span></td>
   </tr>
 </table>
 

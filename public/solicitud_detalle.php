@@ -44,30 +44,32 @@ $puedeAsistir     = $isregasist;
    CABECERA DE SOLICITUD
    =============================================================== */
 $stmt = $pdo->prepare("
-  SELECT s.*, 
-         e.nombre AS empresa_nombre,
-         p.desc_proceso AS proceso_nombre,
-         pa.desc_patios AS patio_nombre,
-         u.desc_uo AS uo_nombre,
+	  SELECT s.*, 
+	         e.nombre AS empresa_nombre,
+	         p.desc_proceso AS proceso_nombre,
+	         pa.desc_patios AS patio_nombre,
+	         u.desc_uo AS uo_nombre,
           sv.servicio AS servicio_nombre,
           r.responsable AS resp_uo_nombre,
-          TRIM(CONCAT(COALESCE(ev.nombre, ''), ' ', COALESCE(ev.apellidop, ''), ' ', COALESCE(ev.apellidom, ''))) AS resp_linea_nombre,
-          h.desc_tipo AS habceo_nombre,
-         ch.desc_charlas AS charla_nombre,
-         s.estado
-    FROM ceo_solicitudes s
-    LEFT JOIN ceo_empresas e ON e.id = s.contratista
-    LEFT JOIN ceo_procesos p ON p.id = s.proceso
-    LEFT JOIN ceo_patios pa ON pa.id = s.patio
+	          TRIM(CONCAT(COALESCE(ev.nombre, ''), ' ', COALESCE(ev.apellidop, ''), ' ', COALESCE(ev.apellidom, ''))) AS resp_linea_nombre,
+	          h.desc_tipo AS habceo_nombre,
+	         ch.desc_charlas AS charla_nombre,
+	         rd.reinduccion AS motivoreinduccion_nombre,
+	         s.estado
+	    FROM ceo_solicitudes s
+	    LEFT JOIN ceo_empresas e ON e.id = s.contratista
+	    LEFT JOIN ceo_procesos p ON p.id = s.proceso
+	    LEFT JOIN ceo_patios pa ON pa.id = s.patio
     LEFT JOIN ceo_uo u ON u.id = s.uo
     LEFT JOIN ceo_servicios sv ON sv.id = s.servicio
-    LEFT JOIN ceo_responsables r ON r.id = s.responsable
-    LEFT JOIN ceo_evaluador ev ON ev.id = s.resplinea
-    LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
-    LEFT JOIN ceo_charlas ch ON ch.id = s.charla
-   WHERE s.nsolicitud = :nsol
-   LIMIT 1
-");
+	    LEFT JOIN ceo_responsables r ON r.id = s.responsable
+	    LEFT JOIN ceo_evaluador ev ON ev.id = s.resplinea
+	    LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
+	    LEFT JOIN ceo_charlas ch ON ch.id = s.charla
+	    LEFT JOIN ceo_reinduccion rd ON rd.id = s.motivoreinduccion
+	   WHERE s.nsolicitud = :nsol
+	   LIMIT 1
+	");
 $stmt->execute([':nsol' => $id]);
 $sol = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -325,15 +327,25 @@ h4, h5, h6 {font-weight:500;}
           <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['resp_linea_nombre']) ?>" readonly>
         </div>
 
-        <div class="col-md-4">
-          <label class="form-label">Capacitación</label>
-          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['charla_nombre'] ?? '') ?>" readonly>
-        </div>
+	        <div class="col-md-4">
+	          <label class="form-label">Capacitación</label>
+	          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['charla_nombre'] ?? '') ?>" readonly>
+	        </div>
 
-        <div class="col-12">
-          <label class="form-label">Observación</label>
-          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['observacion'] ?? '') ?>" readonly>
-        </div>
+	        <div class="col-md-4">
+	          <label class="form-label">Motivo Reinducción</label>
+	          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['motivoreinduccion_nombre'] ?? '') ?>" readonly>
+	        </div>
+
+	        <div class="col-md-4">
+	          <label class="form-label">Tipo de visita</label>
+	          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['tipo_visita'] ?? '') ?>" readonly>
+	        </div>
+	
+	        <div class="col-12">
+	          <label class="form-label">Observación</label>
+	          <input type="text" class="form-control form-control-sm" value="<?= htmlspecialchars($sol['observacion'] ?? '') ?>" readonly>
+	        </div>
 
       </form>
     </div>

@@ -30,20 +30,6 @@ $stmtSrv = $pdo->query("
 $servicios = $stmtSrv->fetchAll(PDO::FETCH_ASSOC);
 
 /* ============================================================
-   PORCENTAJES FORMACIONES (por servicio/area)
-   ============================================================ */
-$stmtPct = $pdo->query("
-    SELECT id_servicio, id_area, porcentaje
-    FROM ceo_formacion_areacompetencias_pct
-");
-$pctRows = $stmtPct->fetchAll(PDO::FETCH_ASSOC);
-$pctMap = [];
-foreach ($pctRows as $row) {
-    $key = (int)$row['id_servicio'] . ':' . (int)$row['id_area'];
-    $pctMap[$key] = (float)$row['porcentaje'];
-}
-
-/* ============================================================
    CRUD
    ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -54,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id_servicio = (int)($_POST['id_servicio'] ?? 0);
     $porcentaje  = trim($_POST['porcentaje'] ?? '');
 
-    // GUARDAR PORCENTAJE FORMACIONES
+    // GUARDAR PORCENTAJE HABILITACIONES
     if ($accion === 'guardar_pct') {
         $idArea = (int)($_POST['id_area'] ?? 0);
         $idServicioPct = (int)($_POST['id_servicio_pct'] ?? 0);
@@ -66,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "❌ El porcentaje debe estar entre 0 y 100.";
         } else {
             $stmt = $pdo->prepare("
-                INSERT INTO ceo_formacion_areacompetencias_pct (id_servicio, id_area, porcentaje)
+                INSERT INTO ceo_habilitacion_areascompetencias_pct (id_servicio, id_area, porcentaje)
                 VALUES (:id_servicio, :id_area, :porcentaje)
                 ON DUPLICATE KEY UPDATE porcentaje = VALUES(porcentaje)
             ");
@@ -75,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':id_area' => $idArea,
                 ':porcentaje' => $pct
             ]);
-            $msg = "✅ Porcentaje de formaciones actualizado.";
+            $msg = "✅ Porcentaje de habilitaciones actualizado.";
         }
 
     // CREAR
@@ -120,6 +106,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "📝 Área de competencia actualizada.";
         }
     }
+}
+
+/* ============================================================
+   PORCENTAJES HABILITACIONES (por servicio/area)
+   ============================================================ */
+$stmtPct = $pdo->query("
+    SELECT id_servicio, id_area, porcentaje
+    FROM ceo_habilitacion_areascompetencias_pct
+");
+$pctRows = $stmtPct->fetchAll(PDO::FETCH_ASSOC);
+$pctMap = [];
+foreach ($pctRows as $row) {
+    $key = (int)$row['id_servicio'] . ':' . (int)$row['id_area'];
+    $pctMap[$key] = (float)$row['porcentaje'];
 }
 
 /* ============================================================
@@ -226,7 +226,7 @@ table th, table td { vertical-align: middle; }
           <th>ID</th>
           <th>Descripción</th>
           <th>Servicio</th>
-          <th>Pct Formaciones</th>
+          <th>Pct Habilitaciones</th>
           <th>Acción</th>
         </tr>
       </thead>

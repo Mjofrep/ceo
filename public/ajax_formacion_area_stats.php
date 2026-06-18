@@ -6,6 +6,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -27,6 +28,21 @@ if ($rut === '' || $cuadrilla <= 0 || $idServicio <= 0) {
 
 try {
     $pdo = db();
+
+    $stmtFormacion = $pdo->prepare("
+        SELECT id_agrupacion
+        FROM ceo_formacion
+        WHERE cuadrilla = :cuadrilla
+          AND id_servicio = :id_servicio
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $stmtFormacion->execute([
+        ':cuadrilla' => $cuadrilla,
+        ':id_servicio' => $idServicio,
+    ]);
+    $idAgrupacion = (int)($stmtFormacion->fetchColumn() ?: 0);
+    $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, $idAgrupacion);
 
     $stmtIntento = $pdo->prepare("
         SELECT intento
@@ -100,7 +116,7 @@ try {
             'ncontestadas' => (float)$row['ncontestadas'],
             'total' => $total,
             'porcentaje' => $porcentaje,
-            'reforzar' => $porcentaje < 80
+            'reforzar' => $porcentaje < $porcentajeMinimo
         ];
     }
 

@@ -62,7 +62,7 @@ if ($cuadrilla <= 0 || $idServicio <= 0) {
 $pdo = db();
 
 $stmtFormacion = $pdo->prepare('
-    SELECT f.cuadrilla, f.jornada, f.id_servicio, fs.servicio
+    SELECT f.cuadrilla, f.jornada, f.id_servicio, f.id_agrupacion, fs.servicio
     FROM ceo_formacion f
     LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
     WHERE f.cuadrilla = :cuadrilla
@@ -79,6 +79,8 @@ $formacion = $stmtFormacion->fetch(PDO::FETCH_ASSOC);
 if (!$formacion) {
     die('No se encontro la formacion solicitada');
 }
+
+$porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, (int)($formacion['id_agrupacion'] ?? 0));
 
 $stmtAreas = $pdo->prepare('
     SELECT MIN(id) AS id_area, descripcion AS area
@@ -161,10 +163,10 @@ if ($participants) {
             ep.rut,
             MIN(ac.id) AS id_area,
             COALESCE(ac.descripcion, \'\') AS area,
-            SUM(CASE WHEN rpt.validacion = 1 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS correctas,
-            SUM(CASE WHEN rpt.validacion = 0 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS incorrectas,
-            SUM(CASE WHEN rpt.validacion = -1 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS ncontestadas,
-            SUM(COALESCE(ps.peso, 1)) AS total_peso
+            SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+            SUM(CASE WHEN rpt.validacion = 0 THEN 1 ELSE 0 END) AS incorrectas,
+            SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS ncontestadas,
+            COUNT(*) AS total_preguntas
         FROM (
             SELECT ep1.rut, ep1.id_servicio, ep1.cuadrilla, ep1.intento, ep1.resultado
             FROM ceo_formacion_programadas ep1
@@ -204,18 +206,18 @@ if ($participants) {
             continue;
         }
 
-        $total = (float)$row['total_peso'];
+        $total = (float)$row['total_preguntas'];
         $correctas = (float)$row['correctas'];
         if ($total <= 0) {
             continue;
         }
 
         $porcentaje = round(($correctas / $total) * 100, 2);
-        $nota = calcularNotaFinalDesdePorcentaje($porcentaje, 80.0);
+        $nota = calcularNotaFinalDesdePorcentaje($porcentaje, $porcentajeMinimo);
         $participants[$rut]['areas'][(string)(int)$row['id_area']] = [
             'nota' => number_format($nota, 2, '.', ''),
-            'aprobada' => $porcentaje >= 80.0,
-            'porcentaje' => number_format($porcentaje, 2, '.', ''),
+            'aprobada' => $porcentaje >= $porcentajeMinimo,
+            'porcentaje' => number_format($porcentaje, 1, '.', ''),
             'correctas' => frmExcelMetricToString($row['correctas']),
             'total' => frmExcelMetricToString($total),
         ];
@@ -259,7 +261,7 @@ foreach (array_values($participants) as $participant) {
         $areaData = $participant['areas'][$key] ?? null;
         $cell = frmExcelColumn($col) . $rowNum;
         if ($areaData) {
-            $sheet->setCellValue($cell, $areaData['nota']);
+            $sheet->setCellValue($cell, $areaData['nota'] . "\n" . $areaData['porcentaje'] . '%');
             $sheet->getStyle($cell)->applyFromArray([
                 'fill' => [
                     'fillType' => Fill::FILL_SOLID,
@@ -272,6 +274,7 @@ foreach (array_values($participants) as $participant) {
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_CENTER,
                     'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
                 ],
             ]);
         }

@@ -29,6 +29,24 @@ function frmExcelMeses(): array
     ];
 }
 
+function frmExcelSelectedIds(string $key): array
+{
+    $raw = $_GET[$key] ?? [];
+    if (!is_array($raw)) {
+        $raw = $raw === '' ? [] : [$raw];
+    }
+
+    $ids = [];
+    foreach ($raw as $value) {
+        $id = (int)$value;
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+
+    return array_values($ids);
+}
+
 function frmExcelBaseSql(): string
 {
     return "
@@ -44,8 +62,8 @@ function frmExcelBaseSql(): string
                 f.jornada,
                 f.id_servicio,
                 fs.servicio,
-                f.empresa AS id_empresa,
-                e.nombre AS empresa,
+                COALESCE(c.id_empresa, f.empresa) AS id_empresa,
+                COALESCE(ec.nombre, e.nombre) AS empresa,
                 f.uo AS id_uo,
                 uo.desc_uo AS uo,
                 p.rut,
@@ -91,7 +109,9 @@ function frmExcelBaseSql(): string
             FROM ceo_formacion_participantes p
             INNER JOIN ceo_formacion f ON f.cuadrilla = p.id_cuadrilla
             LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
+            LEFT JOIN ceo_contratistas c ON c.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
             LEFT JOIN ceo_empresas e ON e.id = f.empresa
+            LEFT JOIN ceo_empresas ec ON ec.id = c.id_empresa
             LEFT JOIN ceo_uo uo ON uo.id = f.uo
             LEFT JOIN (
                 SELECT ep1.*
@@ -120,9 +140,14 @@ function frmExcelFetchRows(PDO $pdo, array $filters): array
         $where[] = 'q.id_servicio = :servicio';
         $params[':servicio'] = (int)$filters['servicio'];
     }
-    if ((int)$filters['empresa'] > 0) {
-        $where[] = 'q.id_empresa = :empresa';
-        $params[':empresa'] = (int)$filters['empresa'];
+    if (!empty($filters['empresa'])) {
+        $placeholders = [];
+        foreach ($filters['empresa'] as $index => $empresaId) {
+            $placeholder = ':empresa_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = (int)$empresaId;
+        }
+        $where[] = 'q.id_empresa IN (' . implode(', ', $placeholders) . ')';
     }
     if ((int)$filters['uo'] > 0) {
         $where[] = 'q.id_uo = :uo';
@@ -175,7 +200,7 @@ $filters = [
     'mes_desde' => $mesDesde,
     'mes_hasta' => $mesHasta,
     'servicio' => (int)($_GET['servicio'] ?? 0),
-    'empresa' => (int)($_GET['empresa'] ?? 0),
+    'empresa' => frmExcelSelectedIds('empresa'),
     'uo' => (int)($_GET['uo'] ?? 0),
     'estado' => strtoupper(trim((string)($_GET['estado'] ?? ''))),
 ];

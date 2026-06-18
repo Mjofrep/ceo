@@ -49,24 +49,32 @@ function scdBaseSql(): string
             s.nsolicitud,
             s.fecha,
             s.tipohabilitacion,
+            COALESCE(s.observacion, '') AS observacion,
+            COALESCE(s.tipo_visita, '') AS tipo_visita,
             COALESCE(e.nombre, '') AS empresa,
             TRIM(CONCAT(COALESCE(u.nombres, ''), ' ', COALESCE(u.apellidos, ''))) AS solicitante,
             COALESCE(pa.desc_patios, '') AS patio,
             COALESCE(pr.desc_proceso, '') AS proceso,
             COALESCE(ht.desc_tipo, '') AS habilitacionceo,
+            COALESCE(ch.desc_charlas, '') AS capacitacion,
+            COALESCE(rd.reinduccion, '') AS motivo_reinduccion,
             COALESCE(ps.rut, '') AS rut,
             COALESCE(ps.nombre, '') AS nombre,
             COALESCE(ps.apellidop, '') AS apellidop,
             COALESCE(ps.apellidom, '') AS apellidom,
+            COALESCE(cc.cargo, '') AS cargo,
             TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))) AS nombre_completo,
             COALESCE(ps.asistio, 0) AS asistio
         FROM ceo_solicitudes s
         INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
+        LEFT JOIN ceo_cargo_contratistas cc ON cc.id = ps.id_cargo
         LEFT JOIN ceo_empresas e ON e.id = s.contratista
         LEFT JOIN ceo_usuarios u ON u.id = s.solicitante
         LEFT JOIN ceo_patios pa ON pa.id = s.patio
         LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
         LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
+        LEFT JOIN ceo_charlas ch ON ch.id = s.charla
+        LEFT JOIN ceo_reinduccion rd ON rd.id = s.motivoreinduccion
     ";
 }
 
@@ -107,6 +115,22 @@ function scdFetchRows(PDO $pdo, array $filters): array
         $where[] = 's.tipohabilitacion = :tipohabilitacion';
         $params[':tipohabilitacion'] = $filters['tipohabilitacion'];
     }
+    if ($filters['charla'] > 0) {
+        $where[] = 's.charla = :charla';
+        $params[':charla'] = $filters['charla'];
+    }
+    if ($filters['motivoreinduccion'] > 0) {
+        $where[] = 's.motivoreinduccion = :motivoreinduccion';
+        $params[':motivoreinduccion'] = $filters['motivoreinduccion'];
+    }
+    if ($filters['tipo_visita'] !== '') {
+        $where[] = 'COALESCE(s.tipo_visita, \'\') = :tipo_visita';
+        $params[':tipo_visita'] = $filters['tipo_visita'];
+    }
+    if ($filters['asistio'] !== '') {
+        $where[] = 'COALESCE(ps.asistio, 0) = :asistio';
+        $params[':asistio'] = (int)$filters['asistio'];
+    }
 
     $sql = scdBaseSql() . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC';
     $stmt = $pdo->prepare($sql);
@@ -137,6 +161,10 @@ $filters = [
     'proceso' => max(0, (int)($_GET['proceso'] ?? 0)),
     'habilitacionceo' => max(0, (int)($_GET['habilitacionceo'] ?? 0)),
     'tipohabilitacion' => trim((string)($_GET['tipohabilitacion'] ?? '')),
+    'charla' => max(0, (int)($_GET['charla'] ?? 0)),
+    'motivoreinduccion' => max(0, (int)($_GET['motivoreinduccion'] ?? 0)),
+    'tipo_visita' => trim((string)($_GET['tipo_visita'] ?? '')),
+    'asistio' => in_array((string)($_GET['asistio'] ?? ''), ['0', '1'], true) ? (string)$_GET['asistio'] : '',
 ];
 
 $empresas = $pdo->query('SELECT id, nombre FROM ceo_empresas ORDER BY nombre')->fetchAll(PDO::FETCH_ASSOC);
@@ -145,6 +173,18 @@ $patios = $pdo->query('SELECT id, desc_patios FROM ceo_patios ORDER BY desc_pati
 $procesos = $pdo->query('SELECT id, desc_proceso FROM ceo_procesos ORDER BY desc_proceso')->fetchAll(PDO::FETCH_ASSOC);
 $habilitaciones = $pdo->query('SELECT id, desc_tipo FROM ceo_habilitaciontipo ORDER BY desc_tipo')->fetchAll(PDO::FETCH_ASSOC);
 $tiposHabilitacion = $pdo->query("SELECT DISTINCT TRIM(tipohabilitacion) AS tipohabilitacion FROM ceo_solicitudes WHERE TRIM(COALESCE(tipohabilitacion, '')) <> '' ORDER BY tipohabilitacion")->fetchAll(PDO::FETCH_ASSOC);
+$charlas = $pdo->query('SELECT id, desc_charlas FROM ceo_charlas ORDER BY desc_charlas')->fetchAll(PDO::FETCH_ASSOC);
+$reinducciones = $pdo->query('SELECT id, reinduccion FROM ceo_reinduccion ORDER BY reinduccion')->fetchAll(PDO::FETCH_ASSOC);
+$tiposVisita = [
+    'Colegio',
+    'Institutos profesionales',
+    'Universidades',
+    'Municipios',
+    'Carabineros',
+    'Bomberos',
+    'PDI',
+    'Aduana',
+];
 
 $rows = [];
 $error = '';
@@ -265,6 +305,41 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
             <?php endforeach; ?>
           </select>
         </div>
+        <div class="col-md-3">
+          <label class="form-label">Capacitación</label>
+          <select name="charla" class="form-select form-select-sm">
+            <option value="0">Todas</option>
+            <?php foreach ($charlas as $charla): ?>
+              <option value="<?= (int)$charla['id'] ?>" <?= $filters['charla'] === (int)$charla['id'] ? 'selected' : '' ?>><?= scdEsc($charla['desc_charlas']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Motivo Reinducción</label>
+          <select name="motivoreinduccion" class="form-select form-select-sm">
+            <option value="0">Todas</option>
+            <?php foreach ($reinducciones as $reinduccion): ?>
+              <option value="<?= (int)$reinduccion['id'] ?>" <?= $filters['motivoreinduccion'] === (int)$reinduccion['id'] ? 'selected' : '' ?>><?= scdEsc($reinduccion['reinduccion']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Tipo de visita</label>
+          <select name="tipo_visita" class="form-select form-select-sm">
+            <option value="">Todas</option>
+            <?php foreach ($tiposVisita as $tipoVisita): ?>
+              <option value="<?= scdEsc($tipoVisita) ?>" <?= $filters['tipo_visita'] === $tipoVisita ? 'selected' : '' ?>><?= scdEsc($tipoVisita) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Asistió</label>
+          <select name="asistio" class="form-select form-select-sm">
+            <option value="" <?= $filters['asistio'] === '' ? 'selected' : '' ?>>Todos</option>
+            <option value="1" <?= $filters['asistio'] === '1' ? 'selected' : '' ?>>Si</option>
+            <option value="0" <?= $filters['asistio'] === '0' ? 'selected' : '' ?>>No</option>
+          </select>
+        </div>
         <div class="col-12 d-flex gap-2">
           <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search"></i> Consultar</button>
           <a href="<?= scdEsc($excelUrl) ?>" class="btn btn-success btn-sm"><i class="bi bi-file-earmark-excel"></i> Exportar</a>
@@ -292,9 +367,14 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
               <th>Proceso</th>
               <th>Habilitación CEO</th>
               <th>Tipo Habilitación</th>
+              <th>Capacitación</th>
+              <th>Motivo Reinducción</th>
+              <th>Tipo de visita</th>
+              <th>Observación</th>
               <th>RUT</th>
               <th>Nombre</th>
               <th>Apellidos</th>
+              <th>Cargo</th>
               <th>Asistió</th>
             </tr>
           </thead>
@@ -310,15 +390,20 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
                 <td><?= scdEsc($row['proceso']) ?></td>
                 <td><?= scdEsc($row['habilitacionceo']) ?></td>
                 <td><?= scdEsc($row['tipohabilitacion']) ?></td>
+                <td><?= scdEsc($row['capacitacion']) ?></td>
+                <td><?= scdEsc($row['motivo_reinduccion']) ?></td>
+                <td><?= scdEsc($row['tipo_visita']) ?></td>
+                <td><?= scdEsc($row['observacion']) ?></td>
                 <td><?= scdEsc($row['rut']) ?></td>
                 <td><?= scdEsc($row['nombre']) ?></td>
                 <td><?= scdEsc(trim($row['apellidop'] . ' ' . $row['apellidom'])) ?></td>
+                <td><?= scdEsc($row['cargo']) ?></td>
                 <td class="text-center"><?= (int)$row['asistio'] === 1 ? 'Si' : 'No' ?></td>
               </tr>
             <?php endforeach; ?>
-          <?php else: ?>
+            <?php else: ?>
             <tr>
-              <td colspan="12" class="text-center text-muted py-4">No se encontraron registros para los filtros seleccionados.</td>
+              <td colspan="17" class="text-center text-muted py-4">No se encontraron registros para los filtros seleccionados.</td>
             </tr>
           <?php endif; ?>
           </tbody>

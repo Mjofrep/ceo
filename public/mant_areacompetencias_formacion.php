@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = trim((string)($_POST['id'] ?? ''));
     $descripcion = trim((string)($_POST['descripcion'] ?? ''));
     $idServicio = (int)($_POST['id_servicio'] ?? 0);
+    $idServicioOriginal = (int)($_POST['id_servicio_original'] ?? 0);
     $porcentaje = trim((string)($_POST['porcentaje'] ?? ''));
 
     if ($accion === 'guardar_pct') {
@@ -94,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } elseif ($accion === 'editar' && $id !== '') {
-        if ($descripcion === '' || $idServicio <= 0) {
+        if ($descripcion === '' || $idServicio <= 0 || $idServicioOriginal <= 0) {
             $msg = '❌ Debes completar Descripcion y Servicio.';
         } else {
             $stmt = $pdo->prepare('
@@ -102,11 +103,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    SET descripcion = :descripcion,
                        id_servicio = :id_servicio
                  WHERE id = :id
+                   AND id_servicio = :id_servicio_original
             ');
             $stmt->execute([
                 ':descripcion' => $descripcion,
                 ':id_servicio' => $idServicio,
                 ':id' => $id,
+                ':id_servicio_original' => $idServicioOriginal,
             ]);
             $msg = '📝 Area de competencia de formacion actualizada.';
         }
@@ -172,6 +175,7 @@ table th, table td { vertical-align: middle; }
 
   <form method="post" id="frmArea" class="row g-3">
     <input type="hidden" name="accion" id="accion" value="crear">
+    <input type="hidden" name="id_servicio_original" id="id_servicio_original" value="">
 
     <div class="col-md-2">
       <label class="form-label">ID</label>
@@ -274,6 +278,7 @@ document.querySelectorAll('.btnEditar').forEach(btn => {
     document.getElementById('id').value = btn.dataset.id;
     document.getElementById('descripcion').value = btn.dataset.descripcion;
     document.getElementById('id_servicio').value = btn.dataset.idservicio;
+    document.getElementById('id_servicio_original').value = btn.dataset.idservicio;
 
     document.getElementById('id').readOnly = true;
     document.getElementById('accion').value = 'editar';
@@ -290,6 +295,7 @@ document.querySelectorAll('.btnEditar').forEach(btn => {
 document.getElementById('btnCancelar').addEventListener('click', () => {
   document.getElementById('frmArea').reset();
   document.getElementById('id').readOnly = false;
+  document.getElementById('id_servicio_original').value = '';
   document.getElementById('accion').value = 'crear';
   document.getElementById('btnGuardar').textContent = 'Guardar';
   document.getElementById('btnCancelar').classList.add('d-none');

@@ -96,10 +96,195 @@ function fmtDate(?DateTimeImmutable $dt): string
     return $dt ? $dt->format('d-m-Y') : '';
 }
 
+function fmtAreaPercent(?float $value): string
+{
+    if ($value === null) {
+        return '';
+    }
+    return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
+}
+
+function resumirAnalisisAreasServicio(array $areas, array $meta = []): array
+{
+    if (empty($areas)) {
+        return $meta + [
+            'tiene_detalle' => false,
+            'estado' => 'sin_detalle',
+            'areas_evaluadas' => 0,
+            'areas_con_objetivo' => 0,
+            'areas_debiles' => 0,
+            'resumen_corto' => 'Sin detalle',
+            'detalle' => 'Sin detalle por area.',
+        ];
+    }
+
+    $areasDebiles = [];
+    $areasConObjetivo = 0;
+
+    foreach ($areas as $area) {
+        $objetivo = $area['objetivo'];
+        $porcentaje = $area['porcentaje'];
+        if ($objetivo === null) {
+            continue;
+        }
+        $areasConObjetivo++;
+        if ($porcentaje < $objetivo) {
+            $areasDebiles[] = $area;
+        }
+    }
+
+    if (!empty($areasDebiles)) {
+        $partes = [];
+        foreach (array_slice($areasDebiles, 0, 3) as $area) {
+            $partes[] = $area['area'] . ' (' . fmtAreaPercent($area['porcentaje']) . '%/' . fmtAreaPercent($area['objetivo']) . '%)';
+        }
+        if (count($areasDebiles) > 3) {
+            $partes[] = '+' . (count($areasDebiles) - 3) . ' area(s)';
+        }
+
+        return $meta + [
+            'tiene_detalle' => true,
+            'estado' => 'debil',
+            'areas_evaluadas' => count($areas),
+            'areas_con_objetivo' => $areasConObjetivo,
+            'areas_debiles' => count($areasDebiles),
+            'resumen_corto' => (string)count($areasDebiles),
+            'detalle' => implode(', ', $partes),
+        ];
+    }
+
+    if ($areasConObjetivo > 0) {
+        return $meta + [
+            'tiene_detalle' => true,
+            'estado' => 'ok',
+            'areas_evaluadas' => count($areas),
+            'areas_con_objetivo' => $areasConObjetivo,
+            'areas_debiles' => 0,
+            'resumen_corto' => '0',
+            'detalle' => 'Sin debilidades detectadas.',
+        ];
+    }
+
+    return $meta + [
+        'tiene_detalle' => true,
+        'estado' => 'sin_objetivo',
+        'areas_evaluadas' => count($areas),
+        'areas_con_objetivo' => 0,
+        'areas_debiles' => 0,
+        'resumen_corto' => 'S/O',
+        'detalle' => 'Sin objetivos configurados.',
+    ];
+}
+
+function cargarAnalisisAreasTeoricasPorRut(PDO $pdo, int $idServicio): array
+{
+    $stmtIntentos = $pdo->prepare("
+        SELECT
+            rpt.rut,
+            rpt.proceso,
+            rpt.intento,
+            MAX(CONCAT(COALESCE(rpt.fecha_rendicion, '0000-00-00'), ' ', COALESCE(rpt.hora_rendicion, '00:00:00'))) AS fecha_hora
+        FROM ceo_resultado_pruebat rpt
+        INNER JOIN ceo_preguntas_servicios ps
+            ON ps.id = rpt.id_pregunta
+           AND ps.id_servicio = :id_servicio
+        GROUP BY rpt.rut, rpt.proceso, rpt.intento
+        ORDER BY rpt.rut ASC, fecha_hora DESC, rpt.intento DESC, rpt.proceso DESC
+    ");
+    $stmtIntentos->execute([':id_servicio' => $idServicio]);
+
+    $ultimoIntentoPorRut = [];
+    foreach ($stmtIntentos->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rut = (string)$row['rut'];
+        if (!isset($ultimoIntentoPorRut[$rut])) {
+            $ultimoIntentoPorRut[$rut] = [
+                'proceso' => isset($row['proceso']) ? (int)$row['proceso'] : null,
+                'intento' => isset($row['intento']) ? (int)$row['intento'] : null,
+                'fecha_hora' => (string)($row['fecha_hora'] ?? ''),
+            ];
+        }
+    }
+
+    if (empty($ultimoIntentoPorRut)) {
+        return [];
+    }
+
+    $stmtAreas = $pdo->prepare("
+        SELECT
+            rpt.rut,
+            rpt.proceso,
+            rpt.intento,
+            COALESCE(ac.id, 0) AS id_area,
+            COALESCE(ac.descripcion, 'Sin area de competencia') AS area,
+            cfg.porcentaje AS objetivo,
+            SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+            SUM(CASE WHEN rpt.validacion = 0 THEN 1 ELSE 0 END) AS incorrectas,
+            SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS ncontestadas,
+            COUNT(*) AS total
+        FROM ceo_resultado_pruebat rpt
+        INNER JOIN ceo_preguntas_servicios ps
+            ON ps.id = rpt.id_pregunta
+           AND ps.id_servicio = :id_servicio
+        LEFT JOIN ceo_areacompetencias ac
+            ON ac.id = ps.areacomp
+           AND ac.id_servicio = ps.id_servicio
+        LEFT JOIN ceo_habilitacion_areascompetencias_pct cfg
+            ON cfg.id_servicio = ps.id_servicio
+           AND cfg.id_area = ps.areacomp
+        GROUP BY
+            rpt.rut,
+            rpt.proceso,
+            rpt.intento,
+            COALESCE(ac.id, 0),
+            COALESCE(ac.descripcion, 'Sin area de competencia'),
+            cfg.porcentaje
+        ORDER BY rpt.rut ASC, area ASC
+    ");
+    $stmtAreas->execute([':id_servicio' => $idServicio]);
+
+    $areasPorRut = [];
+    foreach ($stmtAreas->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rut = (string)$row['rut'];
+        if (!isset($ultimoIntentoPorRut[$rut])) {
+            continue;
+        }
+
+        $meta = $ultimoIntentoPorRut[$rut];
+        if ((int)$row['proceso'] !== (int)$meta['proceso'] || (int)$row['intento'] !== (int)$meta['intento']) {
+            continue;
+        }
+
+        $total = (int)($row['total'] ?? 0);
+        if ($total <= 0) {
+            continue;
+        }
+
+        $correctas = (int)($row['correctas'] ?? 0);
+        $areasPorRut[$rut][] = [
+            'id_area' => (int)($row['id_area'] ?? 0),
+            'area' => (string)($row['area'] ?? ''),
+            'objetivo' => $row['objetivo'] !== null ? (float)$row['objetivo'] : null,
+            'correctas' => $correctas,
+            'incorrectas' => (int)($row['incorrectas'] ?? 0),
+            'ncontestadas' => (int)($row['ncontestadas'] ?? 0),
+            'total' => $total,
+            'porcentaje' => round(($correctas / $total) * 100, 2),
+        ];
+    }
+
+    $resumenPorRut = [];
+    foreach ($ultimoIntentoPorRut as $rut => $meta) {
+        $resumenPorRut[$rut] = resumirAnalisisAreasServicio($areasPorRut[$rut] ?? [], $meta);
+    }
+
+    return $resumenPorRut;
+}
+
 if ($idServicio > 0) {
     $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id LIMIT 1');
     $stmtServicio->execute([':id' => $idServicio]);
     $nombreServicio = (string)($stmtServicio->fetchColumn() ?: 'Servicio');
+    $analisisAreasPorRut = cargarAnalisisAreasTeoricasPorRut($pdo, $idServicio);
 
     $stmtTeorica = $pdo->prepare("
         SELECT rpi.rut, rpi.fecha_rendicion, rpi.hora_rendicion, rpi.puntaje_total, rpi.notafinal, ph.numero_proceso,
@@ -288,6 +473,8 @@ if ($idServicio > 0) {
             $empresaHistorica = trim((string)($teo['empresa_historica'] ?? ''));
         }
 
+        $analisisAreas = $analisisAreasPorRut[$rut] ?? resumirAnalisisAreasServicio([]);
+
         $personas[] = [
             'rut' => $rut,
             'numero_proceso' => $terr['numero_proceso'] ?? ($teo['numero_proceso'] ?? null),
@@ -305,6 +492,10 @@ if ($idServicio > 0) {
             'fecha_habilitacion' => $fechaHabilitacion,
             'vigencia_hasta' => $vigenciaHasta,
             'ultima_evaluacion' => $ultimaEvaluacion,
+            'areas_debiles' => (int)($analisisAreas['areas_debiles'] ?? 0),
+            'areas_resumen_corto' => (string)($analisisAreas['resumen_corto'] ?? 'Sin detalle'),
+            'areas_detalle' => (string)($analisisAreas['detalle'] ?? 'Sin detalle por area.'),
+            'areas_estado' => (string)($analisisAreas['estado'] ?? 'sin_detalle'),
             'estado' => $estado,
         ];
     }
@@ -450,12 +641,14 @@ $personasFiltradas = $selectedEstado !== ''
                 <th>Última evaluación</th>
                 <th>Fecha habilitación</th>
                 <th>Vigencia hasta</th>
+                <th>Áreas débiles</th>
+                <th>Detalle áreas</th>
                 <th>Estado</th>
               </tr>
             </thead>
             <tbody>
             <?php if (empty($personasFiltradas)): ?>
-              <tr><td colspan="15" class="text-center text-muted">No hay registros para el filtro seleccionado.</td></tr>
+              <tr><td colspan="17" class="text-center text-muted">No hay registros para el filtro seleccionado.</td></tr>
             <?php else: ?>
               <?php foreach ($personasFiltradas as $p): ?>
                 <?php
@@ -464,6 +657,14 @@ $personasFiltradas = $selectedEstado !== ''
                     $badge = 'success';
                   } elseif ($p['estado'] === 'No Habilitado') {
                     $badge = 'danger';
+                  }
+                  $badgeAreas = 'secondary';
+                  if ($p['areas_estado'] === 'debil') {
+                    $badgeAreas = 'warning';
+                  } elseif ($p['areas_estado'] === 'ok') {
+                    $badgeAreas = 'success';
+                  } elseif ($p['areas_estado'] === 'sin_objetivo') {
+                    $badgeAreas = 'info';
                   }
                 ?>
                 <tr>
@@ -481,6 +682,8 @@ $personasFiltradas = $selectedEstado !== ''
                   <td><?= esc(fmtDateTime($p['ultima_evaluacion'])) ?></td>
                   <td><?= esc(fmtDate($p['fecha_habilitacion'])) ?></td>
                   <td><?= esc(fmtDate($p['vigencia_hasta'])) ?></td>
+                  <td class="text-center"><span class="badge text-bg-<?= esc($badgeAreas) ?>"><?= esc($p['areas_resumen_corto']) ?></span></td>
+                  <td class="small"><?= esc($p['areas_detalle']) ?></td>
                   <td><span class="badge text-bg-<?= esc($badge) ?>"><?= esc($p['estado']) ?></span></td>
                 </tr>
               <?php endforeach; ?>

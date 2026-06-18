@@ -83,6 +83,12 @@ $wfRegistros = [];
 $agrupaciones = [];
 $detalleHistorialEvaluaciones = [];
 $historialConsolidado = [];
+$analisisAreasTeorica = [];
+$analisisAreasMeta = [
+    'intento' => null,
+    'fecha_hora' => null,
+];
+$idProcesoHabActual = 0;
 
 if ($rut) {
         $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, COALESCE(cc.cargo, b.cargo) AS cargo, c.id_cargo, e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion,
@@ -95,7 +101,16 @@ if ($rut) {
               AND ep.id_servicio = a.id_servicio
             ORDER BY ep.id DESC
             LIMIT 1
-        ) AS numero_proceso
+        ) AS numero_proceso,
+        (
+            SELECT ep.id_proceso_habilitacion
+            FROM ceo_evaluaciones_programadas ep
+            WHERE ep.rut = b.rut
+              AND ep.cuadrilla = a.cuadrilla
+              AND ep.id_servicio = a.id_servicio
+            ORDER BY ep.id DESC
+            LIMIT 1
+        ) AS id_proceso_habilitacion
         FROM ceo_habilitacion a
         INNER JOIN ceo_habilitacion_participantes b ON a.cuadrilla = b.id_cuadrilla 
         LEFT JOIN ceo_contratistas c ON b.rut COLLATE utf8mb4_unicode_ci = c.rut COLLATE utf8mb4_unicode_ci
@@ -126,7 +141,8 @@ if ($rut) {
                     u.desc_uo AS uo,
                     NULL AS id_servicio,
                     NULL AS servicio_descripcion,
-                    NULL AS numero_proceso
+                    NULL AS numero_proceso,
+                    NULL AS id_proceso_habilitacion
                 FROM ceo_contratistas c
                 LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
                 LEFT JOIN ceo_empresas e ON e.id = c.id_empresa
@@ -138,6 +154,8 @@ if ($rut) {
             $stmtPersona->execute(['rut' => $rut]);
             $trabajador = $stmtPersona->fetch(PDO::FETCH_ASSOC) ?: null;
         }
+
+        $idProcesoHabActual = (int)($trabajador['id_proceso_habilitacion'] ?? 0);
 
         // ============================================================
         // CONSULTA WF DEL TRABAJADOR
@@ -172,8 +190,20 @@ if ($rut) {
             $agrupaciones = $stmtAgr->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $simulado = historicoSimularProcesos($pdo, 0, $rut);
-        foreach ($simulado['rows'] as $evento) {
+        $simulado = historicoSimularProcesos($pdo, (int)($trabajador['id_servicio'] ?? 0), $rut);
+        $eventosHistorial = $simulado['rows'];
+        if ($idProcesoHabActual > 0) {
+            $eventosProcesoActual = array_values(array_filter(
+                $eventosHistorial,
+                static fn(array $evento): bool => (int)($evento['id_proceso_habilitacion'] ?? 0) === $idProcesoHabActual
+            ));
+            if (!empty($eventosProcesoActual)) {
+                $eventosHistorial = $eventosProcesoActual;
+            }
+        }
+
+        foreach ($eventosHistorial as $evento) {
+
             $idServicio = (int)($evento['id_servicio'] ?? 0);
             $proceso = $evento['proceso_real'] !== null ? (string)$evento['proceso_real'] : 'H-' . (string)$evento['proceso'];
             $key = $idServicio . '|' . $proceso;
@@ -293,16 +323,97 @@ if ($rut && !empty($trabajador['id_servicio'])) {
     ";
 
     $stmtPr = $pdo->prepare($sqlPruebas);
-    $stmtPr->execute([
-        'rut'      => $rut,
-        'servicio' => $trabajador['id_servicio']
-    ]);
+	    $stmtPr->execute([
+	        'rut'      => $rut,
+	        'servicio' => $trabajador['id_servicio']
+	    ]);
+	
+	    $intentos = $stmtPr->fetchAll(PDO::FETCH_ASSOC);
 
-    $intentos = $stmtPr->fetchAll(PDO::FETCH_ASSOC);
+        $stmtUltimoIntentoArea = $pdo->prepare("
+            SELECT
+                rpt.intento,
+                MAX(CONCAT(COALESCE(rpt.fecha_rendicion, CURDATE()), ' ', COALESCE(rpt.hora_rendicion, CURTIME()))) AS fecha_hora
+            FROM ceo_resultado_pruebat rpt
+            INNER JOIN ceo_preguntas_servicios ps
+                ON ps.id = rpt.id_pregunta
+               AND ps.id_servicio = :servicio
+            WHERE rpt.rut = :rut
+              AND rpt.proceso = :proceso
+            GROUP BY rpt.intento
+            ORDER BY rpt.intento DESC, fecha_hora DESC
+            LIMIT 1
+        ");
+        $stmtUltimoIntentoArea->execute([
+            'rut' => $rut,
+            'proceso' => $cuadrillaProceso,
+            'servicio' => $trabajador['id_servicio'],
+        ]);
+        $ultimoIntentoArea = $stmtUltimoIntentoArea->fetch(PDO::FETCH_ASSOC) ?: null;
 
-    $sqlHist = "
-        SELECT
-            rpi.fecha_rendicion AS fecha,
+        if ($ultimoIntentoArea) {
+            $analisisAreasMeta['intento'] = isset($ultimoIntentoArea['intento']) ? (int)$ultimoIntentoArea['intento'] : null;
+            $analisisAreasMeta['fecha_hora'] = $ultimoIntentoArea['fecha_hora'] ?? null;
+
+            $stmtAreas = $pdo->prepare("
+                SELECT
+                    COALESCE(ac.id, 0) AS id_area,
+                    COALESCE(ac.descripcion, 'Sin área de competencia') AS area,
+                    cfg.porcentaje AS objetivo,
+                    SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+                    SUM(CASE WHEN rpt.validacion = 0 THEN 1 ELSE 0 END) AS incorrectas,
+                    SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS ncontestadas,
+                    COUNT(*) AS total
+                FROM ceo_resultado_pruebat rpt
+                INNER JOIN ceo_preguntas_servicios ps
+                    ON ps.id = rpt.id_pregunta
+                   AND ps.id_servicio = :servicio
+                LEFT JOIN ceo_areacompetencias ac
+                    ON ac.id = ps.areacomp
+                   AND ac.id_servicio = ps.id_servicio
+                LEFT JOIN ceo_habilitacion_areascompetencias_pct cfg
+                    ON cfg.id_servicio = ps.id_servicio
+                   AND cfg.id_area = ps.areacomp
+                WHERE rpt.rut = :rut
+                  AND rpt.proceso = :proceso
+                  AND rpt.intento = :intento
+                GROUP BY COALESCE(ac.id, 0), COALESCE(ac.descripcion, 'Sin área de competencia'), cfg.porcentaje
+                ORDER BY area ASC
+            ");
+            $stmtAreas->execute([
+                'rut' => $rut,
+                'proceso' => $cuadrillaProceso,
+                'intento' => (int)$ultimoIntentoArea['intento'],
+                'servicio' => $trabajador['id_servicio'],
+            ]);
+
+            foreach ($stmtAreas->fetchAll(PDO::FETCH_ASSOC) as $rowArea) {
+                $totalArea = (int)($rowArea['total'] ?? 0);
+                if ($totalArea <= 0) {
+                    continue;
+                }
+
+                $correctasArea = (int)($rowArea['correctas'] ?? 0);
+                $porcentajeArea = round(($correctasArea / $totalArea) * 100, 2);
+                $objetivoArea = $rowArea['objetivo'] !== null ? (float)$rowArea['objetivo'] : null;
+
+                $analisisAreasTeorica[] = [
+                    'id_area' => (int)($rowArea['id_area'] ?? 0),
+                    'area' => (string)($rowArea['area'] ?? ''),
+                    'objetivo' => $objetivoArea,
+                    'correctas' => $correctasArea,
+                    'incorrectas' => (int)($rowArea['incorrectas'] ?? 0),
+                    'ncontestadas' => (int)($rowArea['ncontestadas'] ?? 0),
+                    'total' => $totalArea,
+                    'porcentaje' => $porcentajeArea,
+                    'debil' => $objetivoArea !== null && $objetivoArea > 0 ? $porcentajeArea < $objetivoArea : false,
+                ];
+            }
+        }
+	
+	    $sqlHist = "
+	        SELECT
+	            rpi.fecha_rendicion AS fecha,
             'Teórica'           AS tipo,
             rpi.notafinal       AS resultado,
             sp.servicio         AS servicio
@@ -705,6 +816,78 @@ body {background:#f7f9fc;}
             </table>
         </div>
 
+    </div>
+</div>
+
+
+<!-- ============================================================
+     ANALISIS POR AREAS
+============================================================ -->
+<div class="card shadow-sm rounded-4 mb-4">
+    <div class="card-body">
+        <div class="section-title">
+            <i class="bi bi-bullseye me-2"></i>Desempeño por Áreas de Competencia
+        </div>
+        <div class="small text-muted mb-3">
+            Análisis secundario del último intento teórico de esta habilitación. No afecta la aprobación global.
+            <?php if (($analisisAreasMeta['intento'] ?? null) !== null): ?>
+                Intento: <strong><?= esc((string)$analisisAreasMeta['intento']) ?></strong>
+                <?php if (!empty($analisisAreasMeta['fecha_hora'])): ?>
+                    · Fecha: <strong><?= esc(revFmtFechaHora($analisisAreasMeta['fecha_hora'])) ?></strong>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
+                <thead>
+                    <tr class="text-center">
+                        <th>Área</th>
+                        <th>Objetivo</th>
+                        <th>Correctas</th>
+                        <th>Incorrectas</th>
+                        <th>No contestadas</th>
+                        <th>Total</th>
+                        <th>Porcentaje</th>
+                        <th>Señal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php if (empty($analisisAreasTeorica)): ?>
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">
+                            Sin detalle por áreas disponible para esta habilitación.
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($analisisAreasTeorica as $areaRow): ?>
+                        <?php
+                            if (($areaRow['objetivo'] ?? null) === null || (float)($areaRow['objetivo'] ?? 0) <= 0) {
+                                $senalTexto = 'Sin objetivo';
+                                $senalClass = 'secondary';
+                            } elseif (!empty($areaRow['debil'])) {
+                                $senalTexto = 'Debilidad';
+                                $senalClass = 'danger';
+                            } else {
+                                $senalTexto = 'Dentro objetivo';
+                                $senalClass = 'success';
+                            }
+                        ?>
+                        <tr>
+                            <td><?= esc((string)$areaRow['area']) ?></td>
+                            <td class="text-end"><?= $areaRow['objetivo'] !== null ? esc(number_format((float)$areaRow['objetivo'], 2, '.', '')) . '%' : '-' ?></td>
+                            <td class="text-center"><?= esc((string)$areaRow['correctas']) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRow['incorrectas']) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRow['ncontestadas']) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRow['total']) ?></td>
+                            <td class="text-end fw-semibold"><?= esc(number_format((float)$areaRow['porcentaje'], 2, '.', '')) ?>%</td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($senalClass) ?>"><?= esc($senalTexto) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 

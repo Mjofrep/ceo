@@ -18,6 +18,7 @@ if (empty($_SESSION['auth'])) {
 }
 
 $pdo = db();
+asegurarColumnaPorcentajeFormacionAgrupacion($pdo);
 $msg = "";
 
 function formEnsureAgrupacionOriginTable(PDO $pdo): void {
@@ -54,12 +55,16 @@ try {
       $titulo = trim($_POST['titulo'] ?? '');
       $id_servicio = (int)($_POST['id_servicio'] ?? 0);
       $id_agrupacion_base = (int)($_POST['id_agrupacion_base'] ?? 0);
+      $porcentaje = isset($_POST['porcentaje']) ? (float)$_POST['porcentaje'] : 80.0;
+      if ($porcentaje <= 0 || $porcentaje > 100) {
+        throw new RuntimeException('El porcentaje mínimo debe ser mayor que 0 y menor o igual que 100.');
+      }
       if ($titulo !== '' && $id_servicio > 0) {
         $pdo->beginTransaction();
 
         $agrupacionBase = null;
         if ($id_agrupacion_base > 0) {
-          $stmtBase = $pdo->prepare("SELECT id, id_servicio, tiempo, cantidad, total FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
+          $stmtBase = $pdo->prepare("SELECT id, id_servicio, tiempo, cantidad, total, porcentaje FROM ceo_formacion_agrupacion WHERE id = :id LIMIT 1");
           $stmtBase->execute([':id' => $id_agrupacion_base]);
           $agrupacionBase = $stmtBase->fetch(PDO::FETCH_ASSOC);
 
@@ -73,17 +78,18 @@ try {
         }
 
         if ($agrupacionBase) {
-          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, tiempo, cantidad, total) VALUES (:titulo, :id_servicio, :tiempo, :cantidad, :total)");
+          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, tiempo, cantidad, total, porcentaje) VALUES (:titulo, :id_servicio, :tiempo, :cantidad, :total, :porcentaje)");
           $stmt->execute([
             ':titulo' => $titulo,
             ':id_servicio' => $id_servicio,
             ':tiempo' => $agrupacionBase['tiempo'],
             ':cantidad' => $agrupacionBase['cantidad'],
             ':total' => $agrupacionBase['total'],
+            ':porcentaje' => $porcentaje,
           ]);
         } else {
-          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio) VALUES (:titulo, :id_servicio)");
-          $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio]);
+          $stmt = $pdo->prepare("INSERT INTO ceo_formacion_agrupacion (titulo, id_servicio, porcentaje) VALUES (:titulo, :id_servicio, :porcentaje)");
+          $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio, ':porcentaje' => $porcentaje]);
         }
         $idNuevaAgrupacion = (int)$pdo->lastInsertId();
         formSetAgrupacionOrigin($pdo, $idNuevaAgrupacion, 'FORMACION_PRUEBAS_TEORICAS');
@@ -164,9 +170,13 @@ try {
       $id = (int)($_POST['id_edit'] ?? 0);
       $titulo = trim($_POST['titulo_edit'] ?? '');
       $id_servicio = (int)($_POST['id_servicio_edit'] ?? 0);
+      $porcentaje = isset($_POST['porcentaje_edit']) ? (float)$_POST['porcentaje_edit'] : 80.0;
+      if ($porcentaje <= 0 || $porcentaje > 100) {
+        throw new RuntimeException('El porcentaje mínimo debe ser mayor que 0 y menor o igual que 100.');
+      }
       if ($id > 0 && $titulo !== '' && $id_servicio > 0) {
-        $stmt = $pdo->prepare("UPDATE ceo_formacion_agrupacion SET titulo=:titulo, id_servicio=:id_servicio WHERE id=:id");
-        $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio, ':id'=>$id]);
+        $stmt = $pdo->prepare("UPDATE ceo_formacion_agrupacion SET titulo=:titulo, id_servicio=:id_servicio, porcentaje=:porcentaje WHERE id=:id");
+        $stmt->execute([':titulo'=>$titulo, ':id_servicio'=>$id_servicio, ':porcentaje' => $porcentaje, ':id'=>$id]);
         $msg = "<div class='alert alert-success mt-3'>✏️ Agrupación actualizada correctamente.</div>";
       }
     }
@@ -192,7 +202,7 @@ try {
    =============================================================== */
 $servicios = $pdo->query("SELECT id, servicio FROM ceo_formacion_servicios  ")->fetchAll(PDO::FETCH_ASSOC);
 $agrup = $pdo->query("
-  SELECT a.id, a.titulo, a.id_servicio, s.servicio
+  SELECT a.id, a.titulo, a.id_servicio, a.porcentaje, s.servicio
   FROM ceo_formacion_agrupacion a
   JOIN ceo_formacion_servicios s ON s.id = a.id_servicio
   LEFT JOIN ceo_gp_agrupacion_origen go ON go.destino = 'FORMACION' AND go.id_agrupacion = a.id
@@ -267,11 +277,15 @@ body {background:#f7f9fc; font-size:0.9rem;}
           <select name="id_agrupacion_base" id="id_agrupacion_base" class="form-select" disabled>
             <option value="">Seleccione primero un servicio</option>
             <?php foreach ($agrup as $a): ?>
-              <option value="<?= $a['id'] ?>" data-servicio="<?= $a['id_servicio'] ?>" data-template="1">
+              <option value="<?= $a['id'] ?>" data-servicio="<?= $a['id_servicio'] ?>" data-template="1" data-porcentaje="<?= htmlspecialchars((string)($a['porcentaje'] ?? 80)) ?>">
                 <?= htmlspecialchars($a['id'] . ' - ' . short_clean($a['titulo'])) ?>
               </option>
             <?php endforeach; ?>
           </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Porcentaje mínimo</label>
+          <input type="number" name="porcentaje" id="porcentaje_create" class="form-control" min="1" max="100" step="0.01" value="80" required>
         </div>
         <div class="col-12 text-end">
           <button type="submit" class="btn btn-success px-4"><i class="bi bi-save me-2"></i>Guardar</button>
@@ -292,19 +306,21 @@ body {background:#f7f9fc; font-size:0.9rem;}
       <th style="width:80px;">ID</th>
       <th>Título</th>
       <th>Servicio</th>
+      <th>% Mínimo</th>
       <th class="text-center" style="width:150px;">Acciones</th>
     </tr>
   </thead>
   <tbody>
     <?php if (empty($agrup)): ?>
       <tr>
-        <td colspan="4" class="text-center text-muted">No hay registros</td>
+        <td colspan="5" class="text-center text-muted">No hay registros</td>
       </tr>
     <?php else: foreach ($agrup as $a): ?>
-      <tr data-id="<?= $a['id'] ?>" data-titulo="<?= htmlspecialchars($a['titulo']) ?>" data-servicio="<?= $a['id_servicio'] ?>">
+      <tr data-id="<?= $a['id'] ?>" data-titulo="<?= htmlspecialchars($a['titulo']) ?>" data-servicio="<?= $a['id_servicio'] ?>" data-porcentaje="<?= htmlspecialchars((string)($a['porcentaje'] ?? 80)) ?>">
         <td><?= $a['id'] ?></td>
         <td><?= htmlspecialchars(short_clean($a['titulo'])) ?></td>
         <td><?= htmlspecialchars($a['servicio']) ?></td>
+        <td><?= number_format((float)($a['porcentaje'] ?? 80), 2, '.', '') ?>%</td>
         <td class="text-center">
           <!-- Crear preguntas -->
           <a href="formacion_pruebas_teoricas_preguntas.php?id_agrupacion=<?= $a['id'] ?>"
@@ -353,6 +369,8 @@ body {background:#f7f9fc; font-size:0.9rem;}
               <option value="<?= $s['id'] ?>"><?= htmlspecialchars($s['servicio']) ?></option>
             <?php endforeach; ?>
           </select>
+          <label class="form-label mt-3">Porcentaje mínimo</label>
+          <input type="number" name="porcentaje_edit" id="porcentaje_edit" class="form-control" min="1" max="100" step="0.01" required>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
@@ -405,6 +423,7 @@ document.querySelectorAll('.btn-edit').forEach(btn => {
     const tr = btn.closest('tr');
     document.getElementById('id_edit').value = tr.dataset.id;
     document.getElementById('id_servicio_edit').value = tr.dataset.servicio;
+    document.getElementById('porcentaje_edit').value = tr.dataset.porcentaje || '80';
     const contenido = tr.dataset.titulo;
     document.getElementById('titulo_edit').value = contenido;
     modalEdit.show();
@@ -456,10 +475,12 @@ document.querySelectorAll('.btn-del').forEach(btn => {
   const formCreate = document.getElementById('form-create');
   const servicioCreate = document.getElementById('id_servicio_create');
   const pruebaBaseCreate = document.getElementById('id_agrupacion_base');
+  const porcentajeCreate = document.getElementById('porcentaje_create');
   const pruebaBaseTemplates = pruebaBaseCreate
     ? Array.from(pruebaBaseCreate.querySelectorAll('option[data-template="1"]')).map(option => ({
         value: option.value,
         servicio: option.dataset.servicio || '',
+        porcentaje: option.dataset.porcentaje || '80',
         text: option.textContent || ''
       }))
     : [];
@@ -476,6 +497,9 @@ document.querySelectorAll('.btn-del').forEach(btn => {
       option.value = '';
       option.textContent = 'Seleccione primero un servicio';
       pruebaBaseCreate.appendChild(option);
+      if (porcentajeCreate && (!porcentajeCreate.value || porcentajeCreate.value === '')) {
+        porcentajeCreate.value = '80';
+      }
       return;
     }
 
@@ -491,9 +515,15 @@ document.querySelectorAll('.btn-del').forEach(btn => {
       .forEach(option => {
         const item = document.createElement('option');
         item.value = option.value;
+        item.dataset.porcentaje = option.porcentaje;
         item.textContent = option.text;
         pruebaBaseCreate.appendChild(item);
       });
+
+    if (porcentajeCreate) {
+      const optionSeleccionada = pruebaBaseCreate.selectedOptions[0] || null;
+      porcentajeCreate.value = (optionSeleccionada && optionSeleccionada.dataset.porcentaje) || '80';
+    }
   }
 
   if (formCreate){
@@ -506,6 +536,12 @@ document.querySelectorAll('.btn-del').forEach(btn => {
 
   if (servicioCreate && pruebaBaseCreate) {
     servicioCreate.addEventListener('change', syncPruebaBaseOptions);
+    pruebaBaseCreate.addEventListener('change', () => {
+      const optionSeleccionada = pruebaBaseCreate.selectedOptions[0] || null;
+      if (porcentajeCreate) {
+        porcentajeCreate.value = (optionSeleccionada && optionSeleccionada.dataset.porcentaje) || '80';
+      }
+    });
     syncPruebaBaseOptions();
   }
 

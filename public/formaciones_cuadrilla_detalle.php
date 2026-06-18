@@ -158,6 +158,7 @@ body {background:#f7f9fc;}
 .scroll-box {max-height: 70vh; overflow: auto; border:1px solid #dee2e6; border-radius:8px; background:#fff;}
 .area-note-good {background:#d1e7dd !important; color:#111 !important; font-weight:600;}
 .area-note-bad {background:#dc3545 !important; color:#fff !important; font-weight:600;}
+.area-note-meta {font-size:.72rem; line-height:1.2; white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -276,6 +277,12 @@ body {background:#f7f9fc;}
                       title="Ver detalle por areas">
                     <i class="bi bi-pie-chart"></i>
                   </button>
+                  <a
+                      href="formaciones_cuadrilla_preguntas_detalle.php?rut=<?= urlencode((string)$p['rut']) ?>&cuadrilla=<?= (int)$formacion['cuadrilla'] ?>&id_servicio=<?= (int)$formacion['id_servicio'] ?>"
+                      class="btn btn-outline-secondary btn-sm"
+                      title="Ver preguntas realizadas en la prueba">
+                    <i class="bi bi-list-check"></i>
+                  </a>
                   <?php if ($esAdmin && $estado !== 'PENDIENTE'): ?>
                     <button
                         type="button"
@@ -438,9 +445,13 @@ body {background:#f7f9fc;}
         }
 
         const cls = areaData.aprobada ? 'area-note-good' : 'area-note-bad';
+        const porcentaje = areaData.porcentaje ?? '';
         const title = (areaData.correctas ?? '') + ' / ' + (areaData.total ?? '')
-          + ' | ' + (areaData.porcentaje ?? '') + '%';
-        html += '<td class="text-center ' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(areaData.nota) + '</td>';
+          + ' | ' + porcentaje + '%';
+        html += '<td class="text-center ' + cls + '" title="' + escapeHtml(title) + '">';
+        html += '<div>' + escapeHtml(areaData.nota) + '</div>';
+        html += '<div class="area-note-meta">' + escapeHtml(porcentaje) + '%</div>';
+        html += '</td>';
       });
 
       html += '</tr>';

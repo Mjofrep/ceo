@@ -31,6 +31,24 @@ function frmMeses(): array
     ];
 }
 
+function frmSelectedIds(string $key): array
+{
+    $raw = $_GET[$key] ?? [];
+    if (!is_array($raw)) {
+        $raw = $raw === '' ? [] : [$raw];
+    }
+
+    $ids = [];
+    foreach ($raw as $value) {
+        $id = (int)$value;
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+
+    return array_values($ids);
+}
+
 function frmBaseSql(): string
 {
     return "
@@ -46,8 +64,8 @@ function frmBaseSql(): string
                 f.jornada,
                 f.id_servicio,
                 fs.servicio,
-                f.empresa AS id_empresa,
-                e.nombre AS empresa,
+                COALESCE(c.id_empresa, f.empresa) AS id_empresa,
+                COALESCE(ec.nombre, e.nombre) AS empresa,
                 f.uo AS id_uo,
                 uo.desc_uo AS uo,
                 p.rut,
@@ -93,7 +111,9 @@ function frmBaseSql(): string
             FROM ceo_formacion_participantes p
             INNER JOIN ceo_formacion f ON f.cuadrilla = p.id_cuadrilla
             LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
+            LEFT JOIN ceo_contratistas c ON c.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
             LEFT JOIN ceo_empresas e ON e.id = f.empresa
+            LEFT JOIN ceo_empresas ec ON ec.id = c.id_empresa
             LEFT JOIN ceo_uo uo ON uo.id = f.uo
             LEFT JOIN (
                 SELECT ep1.*
@@ -124,9 +144,14 @@ function frmFetchRows(PDO $pdo, array $filters): array
         $where[] = 'q.id_servicio = :servicio';
         $params[':servicio'] = (int)$filters['servicio'];
     }
-    if ((int)$filters['empresa'] > 0) {
-        $where[] = 'q.id_empresa = :empresa';
-        $params[':empresa'] = (int)$filters['empresa'];
+    if (!empty($filters['empresa'])) {
+        $placeholders = [];
+        foreach ($filters['empresa'] as $index => $empresaId) {
+            $placeholder = ':empresa_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = (int)$empresaId;
+        }
+        $where[] = 'q.id_empresa IN (' . implode(', ', $placeholders) . ')';
     }
     if ((int)$filters['uo'] > 0) {
         $where[] = 'q.id_uo = :uo';
@@ -154,7 +179,7 @@ $filters = [
     'mes_desde' => $mesDesde,
     'mes_hasta' => $mesHasta,
     'servicio' => (int)($_GET['servicio'] ?? 0),
-    'empresa' => (int)($_GET['empresa'] ?? 0),
+    'empresa' => frmSelectedIds('empresa'),
     'uo' => (int)($_GET['uo'] ?? 0),
     'estado' => strtoupper(trim((string)($_GET['estado'] ?? ''))),
 ];
@@ -299,7 +324,7 @@ canvas{max-height:320px;}
         <div class="col-md-2"><label class="form-label">Mes desde</label><select name="mes_desde" class="form-select form-select-sm"><?php foreach ($meses as $n => $m): ?><option value="<?= $n ?>" <?= $mesDesde === $n ? 'selected' : '' ?>><?= frmEsc($m) ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Mes hasta</label><select name="mes_hasta" class="form-select form-select-sm"><?php foreach ($meses as $n => $m): ?><option value="<?= $n ?>" <?= $mesHasta === $n ? 'selected' : '' ?>><?= frmEsc($m) ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Servicio</label><select name="servicio" class="form-select form-select-sm"><option value="0">Todos</option><?php foreach ($servicios as $s): ?><option value="<?= (int)$s['id'] ?>" <?= (int)$filters['servicio'] === (int)$s['id'] ? 'selected' : '' ?>><?= frmEsc($s['servicio']) ?></option><?php endforeach; ?></select></div>
-        <div class="col-md-2"><label class="form-label">Empresa</label><select name="empresa" class="form-select form-select-sm"><option value="0">Todas</option><?php foreach ($empresas as $e): ?><option value="<?= (int)$e['id'] ?>" <?= (int)$filters['empresa'] === (int)$e['id'] ? 'selected' : '' ?>><?= frmEsc($e['nombre']) ?></option><?php endforeach; ?></select></div>
+        <div class="col-md-3"><label class="form-label">Empresa</label><select name="empresa[]" class="form-select form-select-sm" multiple size="5"><?php foreach ($empresas as $e): ?><option value="<?= (int)$e['id'] ?>" <?= in_array((int)$e['id'], $filters['empresa'], true) ? 'selected' : '' ?>><?= frmEsc($e['nombre']) ?></option><?php endforeach; ?></select><div class="form-text">Puedes seleccionar varias con Ctrl o Cmd.</div></div>
         <div class="col-md-1"><label class="form-label">Estado</label><select name="estado" class="form-select form-select-sm"><option value="">Todos</option><?php foreach ($estados as $estado): ?><option value="<?= frmEsc($estado) ?>" <?= $filters['estado'] === $estado ? 'selected' : '' ?>><?= frmEsc($estado) ?></option><?php endforeach; ?></select></div>
         <div class="col-md-1"><label class="form-label">UO</label><select name="uo" class="form-select form-select-sm"><option value="0">Todas</option><?php foreach ($uos as $uo): ?><option value="<?= (int)$uo['id'] ?>" <?= (int)$filters['uo'] === (int)$uo['id'] ? 'selected' : '' ?>><?= frmEsc($uo['desc_uo']) ?></option><?php endforeach; ?></select></div>
         <div class="col-md-1 d-flex gap-2"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-search"></i></button><a href="formacion_resumen_mensual.php" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></a></div>

@@ -244,22 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // =====================================================
                 // OBTENER PORCENTAJE MINIMO DE APROBACION
                 // =====================================================
-                $sqlPorc = "
-                    SELECT porcentaje
-                    FROM ceo_porcentaje_agrupacion
-                    WHERE id_agrupacion = :id_agrupacion
-                      AND fechadesde <= CURDATE()
-                      AND activo = 'S'
-                    ORDER BY fechadesde DESC
-                    LIMIT 1
-                ";
-
-                $stmtPorc = $pdo->prepare($sqlPorc);
-                $stmtPorc->execute([
-                    ':id_agrupacion' => $data['id_agrupacion']
-                ]);
-
-                $porcentajeMinimo = (float)$stmtPorc->fetchColumn();
+                $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, (int)$data['id_agrupacion']);
 
                 if ($porcentajeMinimo <= 0) {
                     throw new Exception('No existe porcentaje mínimo de aprobación vigente.');

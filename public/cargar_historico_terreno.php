@@ -85,7 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $payload['evaluaciones_validas'],
                 $payload['normalizacion_detalles'],
                 (int)$payload['id_servicio'],
-                (int)$payload['id_grupo']
+                (int)$payload['id_grupo'],
+                $payload['process_links'] ?? [],
+                $payload['process_history'] ?? []
             );
 
             deleteTerrainPayload((string)$analisis['payload_file']);
@@ -138,6 +140,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
         'evaluaciones_validas' => $mainInfo['evaluaciones_validas'],
         'normalizacion_detalles' => $normalizacion['detalles'],
         'process_links' => $mainInfo['process_links'] ?? [],
+        'process_history' => $historyInfo['processes'] ?? [],
     ]);
 
     return [
@@ -189,6 +192,7 @@ function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServi
         'evaluaciones_validas' => $mainInfo['evaluaciones_validas'],
         'normalizacion_detalles' => $normalizacion['detalles'],
         'process_links' => $mainInfo['process_links'] ?? [],
+        'process_history' => $historyInfo['processes'] ?? [],
     ]);
 
     return [
@@ -340,7 +344,7 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
             $fechaInicio = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAINICIAL'), 'DMY');
             $fechaFin = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAFINAL'), 'DMY');
             $fechaAprob = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHADEAPROBACION'), 'DMY');
-            $fechaEval = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHA'), 'MDY');
+            $fechaEval = resolveTerrenoFechaEvaluacion(cellByHeader($row, $resolved, 'FECHA'), $rut, $processLinks);
             $nombreMain = trim((string)cellByHeader($row, $resolved, 'NOMBRE'));
             $cargoMain = trim((string)cellByHeader($row, $resolved, 'CARGO'));
             $empresaMain = trim((string)cellByHeader($row, $resolved, 'CONTRATISTA'));
@@ -510,16 +514,19 @@ function detectCsvDelimiter(string $path): string
     return $candidates[$best] > 1 ? $best : ';';
 }
 
-function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array $normalizacionDetalles, int $idServicio, int $idGrupo): array
+function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array $normalizacionDetalles, int $idServicio, int $idGrupo, array $processLinks = [], array $processHistory = []): array
 {
     $stmtExisteContratista = $pdo->prepare('SELECT 1 FROM ceo_contratistas WHERE rut = :rut LIMIT 1');
     $stmtInsertContratista = $pdo->prepare('INSERT INTO ceo_contratistas (rut, nombre, apellidos, correo, telefono, id_cargo, fecha_ingreso, id_empresa, uo) VALUES (:rut, :nombre, :apellidos, NULL, NULL, :id_cargo, CURDATE(), :id_empresa, :uo)');
-    $stmtExisteEval = $pdo->prepare('SELECT 1 FROM ceo_evaluacion_terreno WHERE codigo_evaluacion = :codigo AND rut = :rut AND id_servicio = :servicio LIMIT 1');
+    $stmtExisteEval = $pdo->prepare('SELECT id, id_proceso_habilitacion FROM ceo_evaluacion_terreno WHERE codigo_evaluacion = :codigo AND rut = :rut AND id_servicio = :servicio LIMIT 1');
     $stmtEval = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno (codigo_evaluacion, rut, nombre, cargo, contratista, evaluador, usuario, resultado, id_servicio, id_proceso_habilitacion, fecha_evaluacion, fecha_inicio, fecha_fin, fecha_aprobacion, comentarios_finales) VALUES (:codigo, :rut, :nombre, :cargo, :contratista, :evaluador, :usuario, :resultado, :servicio, :id_proceso_habilitacion, :fecha_eval, :fecha_inicio, :fecha_fin, :fecha_aprobacion, :comentarios_finales)');
     $stmtEvalDet = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno_detalle (id_evaluacion_terreno, codigo_area, area, codigo_item, item, respuesta, peso, resultado_item, comentario_item, plan_accion) VALUES (:id_eval, :codigo_area, :area, :codigo_item, :item, :respuesta, :peso, :resultado_item, :comentario_item, :plan_accion)');
     $stmtSecRes = $pdo->prepare('INSERT INTO ceo_seccion_resultado_terreno (id_empresa, fecha_examen, hora_examen, id_servicio, nsolicitud) VALUES (:id_empresa, :fecha_examen, :hora_examen, :id_servicio, :nsolicitud)');
     $stmtResPruebaTerr = $pdo->prepare('INSERT INTO ceo_resultado_prueba_terreno (id_resultado, cumple, no_cumple, no_aplica, observaciones, id_pregunta, id_seccion, rut_contratista, practico, referente, fecha) VALUES (:id_resultado, :cumple, :no_cumple, :no_aplica, :observaciones, :id_pregunta, :id_seccion, :rut_contratista, :practico, :referente, :fecha)');
     $stmtIntento = $pdo->prepare('INSERT INTO ceo_resultado_terreno_intento (rut, id_servicio, id_proceso_habilitacion, id_evaluador, fecha_rendicion, hora_rendicion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal) VALUES (:rut, :id_servicio, :id_proceso_habilitacion, :id_evaluador, :fecha, :hora, :puntaje_total, :correctas, :incorrectas, :ncontestadas, :noaplica, :notafinal)');
+    $stmtUpdateEvalProceso = $pdo->prepare('UPDATE ceo_evaluacion_terreno SET id_proceso_habilitacion = :id_proceso WHERE id = :id');
+    $stmtFindIntento = $pdo->prepare('SELECT id, id_proceso_habilitacion FROM ceo_resultado_terreno_intento WHERE rut = :rut AND id_servicio = :id_servicio AND fecha_rendicion = :fecha AND hora_rendicion = :hora ORDER BY id ASC LIMIT 1');
+    $stmtUpdateIntentoProceso = $pdo->prepare('UPDATE ceo_resultado_terreno_intento SET id_proceso_habilitacion = :id_proceso WHERE id = :id');
 
     $threshold = obtenerPorcentajeMinimoTerreno($pdo, $idGrupo);
     $normalizacionMap = [];
@@ -528,6 +535,16 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
             $normalizacionMap[$detalle['rut']] = $detalle;
         }
     }
+
+    $processHistoryMap = [];
+    foreach ($processHistory as $process) {
+        $processKey = (string)($process['key'] ?? '');
+        if ($processKey !== '') {
+            $processHistoryMap[$processKey] = $process;
+        }
+    }
+
+    $resolvedProcessIds = [];
 
     $evaluadorId = (int)($_SESSION['auth']['id'] ?? 0);
     $importadas = 0;
@@ -577,19 +594,66 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 }
             }
 
+            $fechaEvaluacionProceso = (string)($eval['fecha_evaluacion'] ?? '');
+            $processLinkKey = ($rut !== '' && $fechaEvaluacionProceso !== '') ? historicoClaveTerrenoProceso($rut, $fechaEvaluacionProceso) : '';
+            $processLink = ($processLinkKey !== '' && isset($processLinks[$processLinkKey]) && is_array($processLinks[$processLinkKey])) ? $processLinks[$processLinkKey] : null;
+            $processKey = ($processLink && !empty($processLink['rut']) && !empty($processLink['numero_historico']))
+                ? ((string)$processLink['rut'] . '|' . (int)$processLink['numero_historico'])
+                : '';
+            $idProcesoHabilitacion = (int)($eval['id_proceso_habilitacion'] ?? 0);
+            if ($idProcesoHabilitacion <= 0 && $processKey !== '') {
+                if (!isset($resolvedProcessIds[$processKey])) {
+                    $resolvedProcessIds[$processKey] = ensureProcesoHistoricoTerreno($pdo, $processHistoryMap[$processKey] ?? null, $idServicio, $rut);
+                }
+                $idProcesoHabilitacion = (int)$resolvedProcessIds[$processKey];
+            }
+
+            $fechaHoraIntento = !empty($eval['fecha_fin'])
+                ? new DateTimeImmutable($eval['fecha_fin'])
+                : (!empty($eval['fecha_inicio'])
+                    ? new DateTimeImmutable($eval['fecha_inicio'])
+                    : new DateTimeImmutable($eval['fecha_evaluacion'] . ' 00:00:00'));
+
             $currentStep = 'verificar_evaluacion_existente';
             $stmtExisteEval->execute([
                 ':codigo' => $eval['codigo_evaluacion'],
                 ':rut' => $rut,
                 ':servicio' => $idServicio,
             ]);
-            if ($stmtExisteEval->fetchColumn()) {
+            $evalExistente = $stmtExisteEval->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($evalExistente) {
+                if ($idProcesoHabilitacion > 0) {
+                    $currentStep = 'actualizar_proceso_evaluacion_existente';
+                    $stmtUpdateEvalProceso->execute([
+                        ':id_proceso' => $idProcesoHabilitacion,
+                        ':id' => (int)$evalExistente['id'],
+                    ]);
+
+                    $currentStep = 'buscar_intento_existente';
+                    $stmtFindIntento->execute([
+                        ':rut' => $rut,
+                        ':id_servicio' => $idServicio,
+                        ':fecha' => $fechaHoraIntento->format('Y-m-d'),
+                        ':hora' => $fechaHoraIntento->format('H:i:s'),
+                    ]);
+                    $intentoExistente = $stmtFindIntento->fetch(PDO::FETCH_ASSOC) ?: null;
+                    if ($intentoExistente) {
+                        $currentStep = 'actualizar_proceso_intento_existente';
+                        $stmtUpdateIntentoProceso->execute([
+                            ':id_proceso' => $idProcesoHabilitacion,
+                            ':id' => (int)$intentoExistente['id'],
+                        ]);
+                    }
+                }
+
                 $duplicadas++;
                 $detalles[] = [
                     'rut' => $rut,
                     'codigo' => $eval['codigo_evaluacion'],
                     'estado' => 'DUPLICADA',
-                    'motivo' => 'La evaluación ya existe en ceo_evaluacion_terreno.',
+                    'motivo' => $idProcesoHabilitacion > 0
+                        ? 'La evaluación ya existe en ceo_evaluacion_terreno. Se completó la asociación al proceso histórico.'
+                        : 'La evaluación ya existe en ceo_evaluacion_terreno.',
                 ];
                 continue;
             }
@@ -605,7 +669,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 ':usuario' => $eval['usuario'],
                 ':resultado' => $eval['resultado'],
                 ':servicio' => $idServicio,
-                ':id_proceso_habilitacion' => (int)($eval['id_proceso_habilitacion'] ?? 0) ?: null,
+                ':id_proceso_habilitacion' => $idProcesoHabilitacion > 0 ? $idProcesoHabilitacion : null,
                 ':fecha_eval' => $eval['fecha_evaluacion'],
                 ':fecha_inicio' => $eval['fecha_inicio'],
                 ':fecha_fin' => $eval['fecha_fin'],
@@ -692,18 +756,12 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 }
             }
 
-            $fechaHoraIntento = !empty($eval['fecha_fin'])
-                ? new DateTimeImmutable($eval['fecha_fin'])
-                : (!empty($eval['fecha_inicio'])
-                    ? new DateTimeImmutable($eval['fecha_inicio'])
-                    : new DateTimeImmutable($eval['fecha_evaluacion'] . ' 00:00:00'));
-
             $notaFinal = calcularNotaFinalDesdePorcentaje((float)$eval['resultado'], $threshold);
             $currentStep = 'insertar_resultado_terreno_intento';
             executeTerrainStatement($stmtIntento, [
                 ':rut' => $rut,
                 ':id_servicio' => $idServicio,
-                ':id_proceso_habilitacion' => (int)($eval['id_proceso_habilitacion'] ?? 0) ?: null,
+                ':id_proceso_habilitacion' => $idProcesoHabilitacion > 0 ? $idProcesoHabilitacion : null,
                 ':id_evaluador' => resolverIdEvaluadorTerreno($pdo, (string)$eval['usuario'], (string)$eval['evaluador']) ?: ($evaluadorId > 0 ? $evaluadorId : null),
                 ':fecha' => $fechaHoraIntento->format('Y-m-d'),
                 ':hora' => $fechaHoraIntento->format('H:i:s'),
@@ -746,6 +804,57 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
         'detalles_mapeados' => $detallesMapeados,
         'detalles' => $detalles,
     ];
+}
+
+function ensureProcesoHistoricoTerreno(PDO $pdo, ?array $processHistory, int $idServicio, string $rut): int
+{
+    if (!is_array($processHistory)) {
+        return 0;
+    }
+
+    $estado = strtoupper(trim((string)($processHistory['estado'] ?? '')));
+    $fechaInicioBase = trim((string)($processHistory['fecha_inicio'] ?? ''));
+    if ($fechaInicioBase === '') {
+        return 0;
+    }
+
+    $fechaInicio = $fechaInicioBase . ' 00:00:00';
+    $fechaCierreBase = trim((string)($processHistory['fecha_cierre'] ?? ''));
+    $fechaCierre = ($estado === 'CERRADO' && $fechaCierreBase !== '') ? ($fechaCierreBase . ' 00:00:00') : null;
+
+    $stmtBusca = $pdo->prepare('SELECT id FROM ceo_proceso_habilitacion WHERE rut = :rut AND id_servicio = :id_servicio AND origen = :origen AND estado = :estado AND fecha_inicio = :fecha_inicio AND ((:fecha_cierre_null IS NULL AND fecha_cierre IS NULL) OR fecha_cierre = :fecha_cierre_value) ORDER BY id ASC LIMIT 1');
+    $stmtBusca->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':origen' => 'HISTORICO_CYR',
+        ':estado' => $estado,
+        ':fecha_inicio' => $fechaInicio,
+        ':fecha_cierre_null' => $fechaCierre,
+        ':fecha_cierre_value' => $fechaCierre,
+    ]);
+    $idExistente = (int)($stmtBusca->fetchColumn() ?: 0);
+    if ($idExistente > 0) {
+        return $idExistente;
+    }
+
+    $stmtCargo = $pdo->prepare('SELECT id_cargo FROM ceo_contratistas WHERE rut = :rut LIMIT 1');
+    $stmtCargo->execute([':rut' => $rut]);
+    $idCargo = (int)($stmtCargo->fetchColumn() ?: 0);
+
+    $numeroProceso = (int)$pdo->query('SELECT COALESCE(MAX(numero_proceso), 0) + 1 FROM ceo_proceso_habilitacion')->fetchColumn();
+    $stmtInsert = $pdo->prepare('INSERT INTO ceo_proceso_habilitacion (rut, id_servicio, id_cargo, numero_proceso, estado, origen, fecha_inicio, fecha_cierre) VALUES (:rut, :id_servicio, :id_cargo, :numero_proceso, :estado, :origen, :fecha_inicio, :fecha_cierre)');
+    $stmtInsert->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':id_cargo' => $idCargo > 0 ? $idCargo : null,
+        ':numero_proceso' => $numeroProceso,
+        ':estado' => $estado,
+        ':origen' => 'HISTORICO_CYR',
+        ':fecha_inicio' => $fechaInicio,
+        ':fecha_cierre' => $fechaCierre,
+    ]);
+
+    return (int)$pdo->lastInsertId();
 }
 
 function analizarNormalizacionContratistasTerreno(PDO $pdo, array $rutsNormalizacion): array
@@ -1297,6 +1406,31 @@ function parseHistoricalDateTimeByMode($value, string $preferredMode): ?DateTime
     return parseExcelDateTimeValue(trim($normalized . ' ' . $timePart));
 }
 
+function resolveTerrenoFechaEvaluacion($value, string $rut, array $processLinks): ?DateTimeImmutable
+{
+    $fechaMdy = parseHistoricalDateTimeByMode($value, 'MDY');
+    $fechaDmy = parseHistoricalDateTimeByMode($value, 'DMY');
+
+    if ($fechaMdy === null) {
+        return $fechaDmy;
+    }
+    if ($fechaDmy === null) {
+        return $fechaMdy;
+    }
+    if ($fechaMdy->format('Y-m-d H:i:s') === $fechaDmy->format('Y-m-d H:i:s')) {
+        return $fechaMdy;
+    }
+
+    if (isset($processLinks[historicoClaveTerrenoProceso($rut, $fechaDmy->format('Y-m-d'))])) {
+        return $fechaDmy;
+    }
+    if (isset($processLinks[historicoClaveTerrenoProceso($rut, $fechaMdy->format('Y-m-d'))])) {
+        return $fechaMdy;
+    }
+
+    return $fechaMdy;
+}
+
 function parseExcelDateTimeValue($value): ?DateTimeImmutable
 {
     if ($value === null || $value === '') {
@@ -1600,23 +1734,38 @@ function analizarHistoriaTerrenoRows(PDO $pdo, array $rows, int $idServicio): ar
     foreach (array_slice($rows, 1) as $row) {
         $numeroHistorico = (int)(parseNullableFloat(cellByHeader($row, $resolved, 'N')) ?? 0);
         $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
-        $fechaTerreno = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHATERRENO'), 'DMY');
-        if ($numeroHistorico <= 0 || $rut === '' || !$fechaTerreno) {
+        $fechasProceso = historicoTerrenoFechasProcesoDesdeRow($row, $headerMap, $resolved);
+        $fechaTerrenoStr = (string)($fechasProceso['fecha_terreno'] ?? '');
+        $fechaInicioStr = (string)($fechasProceso['fecha_inicio'] ?? '');
+        $fechaCierreStr = (string)($fechasProceso['fecha_cierre'] ?? '');
+        if ($numeroHistorico <= 0 || $rut === '' || $fechaTerrenoStr === '' || $fechaInicioStr === '') {
             continue;
         }
         $processKey = $rut . '|' . $numeroHistorico;
         $estado = strtoupper(trim((string)cellByHeader($row, $resolved, 'ESTADO'))) === 'SI' ? 'CERRADO' : 'ABIERTO';
-        $procesos[$processKey] = [
+        if (!isset($procesos[$processKey])) {
+            $procesos[$processKey] = [
+                'key' => $processKey,
+                'rut' => $rut,
+                'numero_historico' => $numeroHistorico,
+                'estado' => $estado,
+                'fecha_inicio' => $fechaInicioStr,
+                'fecha_cierre' => $fechaCierreStr,
+                'terreno_keys' => [],
+            ];
+        }
+        if ($fechaInicioStr < (string)$procesos[$processKey]['fecha_inicio']) {
+            $procesos[$processKey]['fecha_inicio'] = $fechaInicioStr;
+        }
+        if ($fechaCierreStr > (string)$procesos[$processKey]['fecha_cierre']) {
+            $procesos[$processKey]['fecha_cierre'] = $fechaCierreStr;
+        }
+        $procesos[$processKey]['estado'] = $estado;
+        $procesos[$processKey]['terreno_keys'][historicoClaveTerrenoProceso($rut, $fechaTerrenoStr)] = true;
+        $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerrenoStr)] = [
             'rut' => $rut,
             'numero_historico' => $numeroHistorico,
-            'estado' => $estado,
-            'fecha_inicio' => $fechaTerreno->format('Y-m-d') . ' 00:00:00',
-            'fecha_cierre' => $estado === 'CERRADO' ? $fechaTerreno->format('Y-m-d') . ' 00:00:00' : null,
-        ];
-        $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerreno->format('Y-m-d'))] = [
-            'rut' => $rut,
-            'numero_historico' => $numeroHistorico,
-            'fecha_terreno' => $fechaTerreno->format('Y-m-d'),
+            'fecha_terreno' => $fechaTerrenoStr,
         ];
     }
 
@@ -1627,9 +1776,9 @@ function analizarHistoriaTerrenoRows(PDO $pdo, array $rows, int $idServicio): ar
             ':id_servicio' => $idServicio,
             ':origen' => 'HISTORICO_CYR',
             ':estado' => $proceso['estado'],
-            ':fecha_inicio' => $proceso['fecha_inicio'],
-            ':fecha_cierre_null' => $proceso['fecha_cierre'],
-            ':fecha_cierre_value' => $proceso['fecha_cierre'],
+            ':fecha_inicio' => (string)$proceso['fecha_inicio'] . ' 00:00:00',
+            ':fecha_cierre_null' => ((string)$proceso['estado'] === 'CERRADO' ? (string)$proceso['fecha_cierre'] . ' 00:00:00' : null),
+            ':fecha_cierre_value' => ((string)$proceso['estado'] === 'CERRADO' ? (string)$proceso['fecha_cierre'] . ' 00:00:00' : null),
         ]);
         $match = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         foreach ($processLinks as $key => $link) {
@@ -1642,6 +1791,13 @@ function analizarHistoriaTerrenoRows(PDO $pdo, array $rows, int $idServicio): ar
 
     return [
         'process_links' => $processLinks,
+        'processes' => array_values(array_map(static function (array $proceso): array {
+            $proceso['terreno_keys'] = array_keys($proceso['terreno_keys']);
+            if ((string)$proceso['estado'] !== 'CERRADO') {
+                $proceso['fecha_cierre'] = null;
+            }
+            return $proceso;
+        }, $procesos)),
         'summary' => [
             'procesos_detectados' => count($procesos),
             'procesos_resueltos' => count(array_filter($processLinks, static fn(array $row): bool => (int)($row['id_proceso_habilitacion'] ?? 0) > 0)),
@@ -1652,6 +1808,35 @@ function analizarHistoriaTerrenoRows(PDO $pdo, array $rows, int $idServicio): ar
 function historicoClaveTerrenoProceso(string $rut, string $fecha): string
 {
     return strtoupper(str_replace(['.', '-', ' '], '', $rut)) . '|' . $fecha;
+}
+
+function historicoTerrenoFechasProcesoDesdeRow(array $row, array $headerMap, array $resolved): array
+{
+    $fechas = [];
+
+    $fechaTerreno = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHATERRENO'), 'DMY');
+    if ($fechaTerreno) {
+        $fechas[] = $fechaTerreno->format('Y-m-d');
+    }
+
+    foreach (['FECHAPRUEBA', 'FECHAEVALUACION', 'FECHAEVALUACION', 'FECHA'] as $header) {
+        if (!array_key_exists($header, $headerMap)) {
+            continue;
+        }
+        $fechaExtra = parseHistoricalDateTimeByMode(cellByHeader($row, $headerMap, $header), 'DMY');
+        if ($fechaExtra) {
+            $fechas[] = $fechaExtra->format('Y-m-d');
+        }
+    }
+
+    $fechas = array_values(array_unique($fechas));
+    sort($fechas);
+
+    return [
+        'fecha_terreno' => $fechaTerreno?->format('Y-m-d'),
+        'fecha_inicio' => $fechas[0] ?? null,
+        'fecha_cierre' => !empty($fechas) ? $fechas[count($fechas) - 1] : null,
+    ];
 }
 
 function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): array
@@ -1680,23 +1865,38 @@ function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): ar
         while (($row = fgetcsv($fh, 0, $delimiter, '"', '')) !== false) {
             $numeroHistorico = (int)(parseNullableFloat(cellByHeader($row, $resolved, 'N')) ?? 0);
             $rut = normalizarRutHistorico((string)cellByHeader($row, $resolved, 'RUT'));
-            $fechaTerreno = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHATERRENO'), 'DMY');
-            if ($numeroHistorico <= 0 || $rut === '' || !$fechaTerreno) {
+            $fechasProceso = historicoTerrenoFechasProcesoDesdeRow($row, $headerMap, $resolved);
+            $fechaTerrenoStr = (string)($fechasProceso['fecha_terreno'] ?? '');
+            $fechaInicioStr = (string)($fechasProceso['fecha_inicio'] ?? '');
+            $fechaCierreStr = (string)($fechasProceso['fecha_cierre'] ?? '');
+            if ($numeroHistorico <= 0 || $rut === '' || $fechaTerrenoStr === '' || $fechaInicioStr === '') {
                 continue;
             }
             $processKey = $rut . '|' . $numeroHistorico;
             $estado = strtoupper(trim((string)cellByHeader($row, $resolved, 'ESTADO'))) === 'SI' ? 'CERRADO' : 'ABIERTO';
-            $procesos[$processKey] = [
+            if (!isset($procesos[$processKey])) {
+                $procesos[$processKey] = [
+                    'key' => $processKey,
+                    'rut' => $rut,
+                    'numero_historico' => $numeroHistorico,
+                    'estado' => $estado,
+                    'fecha_inicio' => $fechaInicioStr,
+                    'fecha_cierre' => $fechaCierreStr,
+                    'terreno_keys' => [],
+                ];
+            }
+            if ($fechaInicioStr < (string)$procesos[$processKey]['fecha_inicio']) {
+                $procesos[$processKey]['fecha_inicio'] = $fechaInicioStr;
+            }
+            if ($fechaCierreStr > (string)$procesos[$processKey]['fecha_cierre']) {
+                $procesos[$processKey]['fecha_cierre'] = $fechaCierreStr;
+            }
+            $procesos[$processKey]['estado'] = $estado;
+            $procesos[$processKey]['terreno_keys'][historicoClaveTerrenoProceso($rut, $fechaTerrenoStr)] = true;
+            $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerrenoStr)] = [
                 'rut' => $rut,
                 'numero_historico' => $numeroHistorico,
-                'estado' => $estado,
-                'fecha_inicio' => $fechaTerreno->format('Y-m-d') . ' 00:00:00',
-                'fecha_cierre' => $estado === 'CERRADO' ? $fechaTerreno->format('Y-m-d') . ' 00:00:00' : null,
-            ];
-            $processLinks[historicoClaveTerrenoProceso($rut, $fechaTerreno->format('Y-m-d'))] = [
-                'rut' => $rut,
-                'numero_historico' => $numeroHistorico,
-                'fecha_terreno' => $fechaTerreno->format('Y-m-d'),
+                'fecha_terreno' => $fechaTerrenoStr,
             ];
         }
     } finally {
@@ -1710,9 +1910,9 @@ function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): ar
             ':id_servicio' => $idServicio,
             ':origen' => 'HISTORICO_CYR',
             ':estado' => $proceso['estado'],
-            ':fecha_inicio' => $proceso['fecha_inicio'],
-            ':fecha_cierre_null' => $proceso['fecha_cierre'],
-            ':fecha_cierre_value' => $proceso['fecha_cierre'],
+            ':fecha_inicio' => (string)$proceso['fecha_inicio'] . ' 00:00:00',
+            ':fecha_cierre_null' => ((string)$proceso['estado'] === 'CERRADO' ? (string)$proceso['fecha_cierre'] . ' 00:00:00' : null),
+            ':fecha_cierre_value' => ((string)$proceso['estado'] === 'CERRADO' ? (string)$proceso['fecha_cierre'] . ' 00:00:00' : null),
         ]);
         $match = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         foreach ($processLinks as $key => $link) {
@@ -1725,6 +1925,13 @@ function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): ar
 
     return [
         'process_links' => $processLinks,
+        'processes' => array_values(array_map(static function (array $proceso): array {
+            $proceso['terreno_keys'] = array_keys($proceso['terreno_keys']);
+            if ((string)$proceso['estado'] !== 'CERRADO') {
+                $proceso['fecha_cierre'] = null;
+            }
+            return $proceso;
+        }, $procesos)),
         'summary' => [
             'procesos_detectados' => count($procesos),
             'procesos_resueltos' => count(array_filter($processLinks, static fn(array $row): bool => (int)($row['id_proceso_habilitacion'] ?? 0) > 0)),
@@ -1811,7 +2018,7 @@ function loadTerrenoHistoriSheetFromContext(array $context, string $sheetName, i
         $fechaInicio = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAINICIAL'), 'DMY');
         $fechaFin = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAFINAL'), 'DMY');
         $fechaAprob = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHADEAPROBACION'), 'DMY');
-        $fechaEval = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHA'), 'MDY');
+        $fechaEval = resolveTerrenoFechaEvaluacion(cellByHeader($row, $resolved, 'FECHA'), $rut, $processLinks);
         if ($fechaEval === null) {
             $errores++;
             appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Fecha principal inválida.'], TERRENO_PREVIEW_LIMIT);
@@ -2000,7 +2207,7 @@ function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $worker
         $fechaInicio = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAINICIAL'), 'DMY');
         $fechaFin = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHAFINAL'), 'DMY');
         $fechaAprob = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHADEAPROBACION'), 'DMY');
-        $fechaEval = parseHistoricalDateTimeByMode(cellByHeader($row, $resolved, 'FECHA'), 'MDY');
+        $fechaEval = resolveTerrenoFechaEvaluacion(cellByHeader($row, $resolved, 'FECHA'), $rut, $processLinks);
         if ($fechaEval === null) {
             $errores++;
             appendLimited($detallesFilas, ['fila' => $excelRow, 'codigo' => $codigoEvaluacion, 'rut' => $rut, 'estado' => 'ERROR', 'motivo' => 'Fecha principal inválida.'], TERRENO_PREVIEW_LIMIT);

@@ -49,7 +49,7 @@ try {
     $pdo = db();
 
     $stmtFormacion = $pdo->prepare('
-        SELECT f.cuadrilla, f.jornada, f.id_servicio, fs.servicio, e.nombre AS empresa
+        SELECT f.cuadrilla, f.jornada, f.id_servicio, f.id_agrupacion, fs.servicio, e.nombre AS empresa
         FROM ceo_formacion f
         LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
         LEFT JOIN ceo_empresas e ON e.id = f.empresa
@@ -68,6 +68,8 @@ try {
         echo json_encode(['ok' => false, 'error' => 'No se encontro la formacion solicitada.']);
         exit;
     }
+
+    $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, (int)($formacion['id_agrupacion'] ?? 0));
 
     $stmtAreas = $pdo->prepare('
         SELECT MIN(id) AS id_area, descripcion AS area
@@ -164,10 +166,10 @@ try {
             ep.rut,
             MIN(ac.id) AS id_area,
             COALESCE(ac.descripcion, \'\') AS area,
-            SUM(CASE WHEN rpt.validacion = 1 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS correctas,
-            SUM(CASE WHEN rpt.validacion = 0 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS incorrectas,
-            SUM(CASE WHEN rpt.validacion = -1 THEN COALESCE(ps.peso, 1) ELSE 0 END) AS ncontestadas,
-            SUM(COALESCE(ps.peso, 1)) AS total_peso
+            SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+            SUM(CASE WHEN rpt.validacion = 0 THEN 1 ELSE 0 END) AS incorrectas,
+            SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS ncontestadas,
+            COUNT(*) AS total_preguntas
         FROM (
             SELECT ep1.rut, ep1.id_servicio, ep1.cuadrilla, ep1.intento, ep1.resultado
             FROM ceo_formacion_programadas ep1
@@ -207,14 +209,16 @@ try {
             continue;
         }
 
-        $total = (float)$row['total_peso'];
+        $total = (float)$row['total_preguntas'];
         $correctas = (float)$row['correctas'];
         if ($total <= 0) {
             continue;
         }
 
+        $incorrectas = (float)$row['incorrectas'];
+        $ncontestadas = (float)$row['ncontestadas'];
         $porcentaje = round(($correctas / $total) * 100, 2);
-        $nota = calcularNotaFinalDesdePorcentaje($porcentaje, 80.0);
+        $nota = calcularNotaFinalDesdePorcentaje($porcentaje, $porcentajeMinimo);
         $idArea = (string)(int)$row['id_area'];
 
         $participants[$rut]['areas'][$idArea] = [
@@ -223,9 +227,12 @@ try {
             'incorrectas' => frmMetricToString($row['incorrectas']),
             'ncontestadas' => frmMetricToString($row['ncontestadas']),
             'total' => frmMetricToString($total),
-            'porcentaje' => number_format($porcentaje, 2, '.', ''),
+            'porcentaje' => number_format($porcentaje, 1, '.', ''),
+            'porcentaje_correctas' => number_format(($correctas / $total) * 100, 1, '.', ''),
+            'porcentaje_incorrectas' => number_format(($incorrectas / $total) * 100, 1, '.', ''),
+            'porcentaje_ncontestadas' => number_format(($ncontestadas / $total) * 100, 1, '.', ''),
             'nota' => number_format($nota, 2, '.', ''),
-            'aprobada' => $porcentaje >= 80.0,
+            'aprobada' => $porcentaje >= $porcentajeMinimo,
         ];
     }
 

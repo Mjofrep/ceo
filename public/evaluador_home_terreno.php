@@ -29,34 +29,48 @@ $solicitudes = [];
 try {
     $pdo = db();
 
-    $sql = "
-SELECT
-    A.id,
-    A.cuadrilla,
-    ph.numero_proceso,
-    B.fecha,
-    A.id_servicio,
-    C.servicio,
-    B.empresa,
-    D.nombre,
-    A.tipo,
-    A.estado
-FROM ceo_evaluaciones_programadas A
-INNER JOIN ceo_habilitacion B 
-    ON A.cuadrilla = B.cuadrilla
-INNER JOIN ceo_servicios_pruebas C 
-    ON C.id = A.id_servicio
-INNER JOIN ceo_empresas D
-    ON D.id = B.empresa
-LEFT JOIN ceo_proceso_habilitacion ph
-    ON ph.id = A.id_proceso_habilitacion
-WHERE A.tipo = 'TERRENO'
-  AND A.estado = 'PENDIENTE';
-    ";
+	$sql = "
+	SELECT
+	    A.id,
+	    A.cuadrilla,
+	    B.fecha,
+	    A.id_servicio,
+	    C.servicio,
+	    B.empresa,
+	    D.nombre,
+	    A.tipo,
+	    A.estado
+	FROM ceo_evaluaciones_programadas A
+	INNER JOIN ceo_habilitacion B 
+	    ON A.cuadrilla = B.cuadrilla
+	INNER JOIN ceo_servicios_pruebas C 
+	    ON C.id = A.id_servicio
+	INNER JOIN ceo_empresas D
+	    ON D.id = B.empresa
+	WHERE A.tipo = 'TERRENO'
+	  AND A.estado = 'PENDIENTE';
+	    ";
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $solicitudes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+	$stmt = $pdo->prepare($sql);
+	$stmt->execute();
+	$solicitudes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $agrupadas = [];
+    foreach ($solicitudes as $row) {
+        $cuadrilla = (int)($row['cuadrilla'] ?? 0);
+        if ($cuadrilla <= 0) {
+            continue;
+        }
+
+        if (!isset($agrupadas[$cuadrilla])) {
+            $agrupadas[$cuadrilla] = $row;
+            $agrupadas[$cuadrilla]['ids_evaluacion'] = [];
+        }
+
+        $agrupadas[$cuadrilla]['ids_evaluacion'][] = (int)$row['id'];
+    }
+
+    $solicitudes = array_values($agrupadas);
 
 } catch (Throwable $e) {
     $errorMsg = "Error cargando solicitudes: " . $e->getMessage();
@@ -121,30 +135,30 @@ body{
 
 <form method="get" action="evaluador_generar_terreno.php">
 
-    <table class="table table-striped table-bordered">
-        <thead class="table-primary">
-            <tr>
-                <th>Sel.</th>
-                <th>ID Eval.</th>
-                <th>N° Proceso</th>
-                <th>N° Cuadrilla</th>
-                <th>Fecha</th>
-                <th>Servicio</th>
-                <th>Nombre</th>
-            </tr>
+	    <table class="table table-striped table-bordered">
+	        <thead class="table-primary">
+	            <tr>
+	                <th>Sel.</th>
+	                <th>N° Cuadrilla</th>
+	                <th>Fecha</th>
+	                <th>Servicio</th>
+	                <th>Nombre</th>
+	            </tr>
         </thead>
         <tbody>
-            <?php foreach ($solicitudes as $s): ?>
-                <tr>
-                    <td class="text-center">
-                        <input type="checkbox" name="id_evaluacion[]" value="<?= (int)$s['id'] ?>">
-                    </td>
-                    <td><?= (int)$s['id'] ?></td>
-                    <td><?= htmlspecialchars($s['numero_proceso'] !== null ? (string)$s['numero_proceso'] : 'Sin proceso') ?></td>
-                    <td><?= htmlspecialchars($s['cuadrilla']) ?></td>
-                    <td><?= date('d/m/Y', strtotime($s['fecha'])) ?></td>
-                    <td><?= htmlspecialchars($s['servicio']) ?></td>
-                    <td><?= htmlspecialchars($s['nombre']) ?></td>
+	            <?php foreach ($solicitudes as $s): ?>
+	                <tr>
+	                    <td class="text-center">
+	                        <input
+	                            type="checkbox"
+	                            class="chk-cuadrilla"
+	                            data-ids="<?= htmlspecialchars(implode(',', array_map('intval', $s['ids_evaluacion'] ?? []))) ?>"
+	                        >
+	                    </td>
+	                    <td><?= htmlspecialchars($s['cuadrilla']) ?></td>
+	                    <td><?= date('d/m/Y', strtotime($s['fecha'])) ?></td>
+	                    <td><?= htmlspecialchars($s['servicio']) ?></td>
+	                    <td><?= htmlspecialchars($s['nombre']) ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
@@ -163,7 +177,33 @@ body{
 
 </form>
 
-        <?php endif; ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('form[action="evaluador_generar_terreno.php"]');
+    if (!form) return;
+
+    form.addEventListener('submit', function () {
+        form.querySelectorAll('input[name="id_evaluacion[]"]').forEach((input) => input.remove());
+
+        form.querySelectorAll('.chk-cuadrilla:checked').forEach((checkbox) => {
+            const ids = String(checkbox.dataset.ids || '')
+                .split(',')
+                .map((id) => parseInt(id, 10))
+                .filter((id) => id > 0);
+
+            ids.forEach((id) => {
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'id_evaluacion[]';
+                hidden.value = String(id);
+                form.appendChild(hidden);
+            });
+        });
+    });
+});
+</script>
+	
+	        <?php endif; ?>
 
     </div>
 

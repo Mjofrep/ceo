@@ -161,20 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $porcentaje = ($puntajeMaximo > 0) ? round(($puntajeObtenido / $puntajeMaximo) * 100, 2) : 0.0;
 
-            $stmtPorc = $pdo->prepare("
-                SELECT porcentaje
-                FROM ceo_porcentaje_agrupacion
-                WHERE id_agrupacion = :id_agrupacion
-                  AND fechadesde <= CURDATE()
-                  AND activo = 'S'
-                ORDER BY fechadesde DESC
-                LIMIT 1
-            ");
-        $stmtPorc->execute([':id_agrupacion' => $data['id_agrupacion']]);
-        $porcentajeMinimo = (float)$stmtPorc->fetchColumn();
-        if ($porcentajeMinimo <= 0) {
-            $porcentajeMinimo = 80.0;
-        }
+        $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, (int)$data['id_agrupacion']);
         if ($porcentajeMinimo > 100) {
             throw new RuntimeException('La agrupación ' . (int)$data['id_agrupacion'] . ' tiene un porcentaje mínimo inválido (' . $porcentajeMinimo . '). Debe ser menor o igual que 100.');
         }

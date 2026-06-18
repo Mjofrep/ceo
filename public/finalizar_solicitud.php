@@ -32,22 +32,27 @@ $stmt = $pdo->prepare("
   SELECT s.*, 
          e.nombre AS empresa_nombre,
          p.desc_proceso AS proceso_nombre,
-         pa.desc_patios AS patio_nombre,
-         u.desc_uo AS uo_nombre,
-         sv.servicio AS servicio_nombre,
-         r.responsable AS resp_uo_nombre,
-         h.desc_tipo AS habceo_nombre
-    FROM ceo_solicitudes s
-    LEFT JOIN ceo_empresas e ON e.id = s.contratista
-    LEFT JOIN ceo_procesos p ON p.id = s.proceso
-    LEFT JOIN ceo_patios pa ON pa.id = s.patio
-    LEFT JOIN ceo_uo u ON u.id = s.uo
-    LEFT JOIN ceo_servicios sv ON sv.id = s.servicio
-    LEFT JOIN ceo_responsables r ON r.id = s.responsable
-    LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
-   WHERE s.nsolicitud = :nsol
-   LIMIT 1
-");
+	         pa.desc_patios AS patio_nombre,
+	         u.desc_uo AS uo_nombre,
+	         sv.servicio AS servicio_nombre,
+	         r.responsable AS resp_uo_nombre,
+	         h.desc_tipo AS habceo_nombre,
+	         ch.desc_charlas AS charla_nombre,
+	         rd.reinduccion AS motivoreinduccion_nombre,
+	         s.tipo_visita
+	    FROM ceo_solicitudes s
+	    LEFT JOIN ceo_empresas e ON e.id = s.contratista
+	    LEFT JOIN ceo_procesos p ON p.id = s.proceso
+	    LEFT JOIN ceo_patios pa ON pa.id = s.patio
+	    LEFT JOIN ceo_uo u ON u.id = s.uo
+	    LEFT JOIN ceo_servicios sv ON sv.id = s.servicio
+	    LEFT JOIN ceo_responsables r ON r.id = s.responsable
+	    LEFT JOIN ceo_habilitaciontipo h ON h.id = s.habilitacionceo
+	    LEFT JOIN ceo_charlas ch ON ch.id = s.charla
+	    LEFT JOIN ceo_reinduccion rd ON rd.id = s.motivoreinduccion
+	   WHERE s.nsolicitud = :nsol
+	   LIMIT 1
+	");
 $stmt->execute([':nsol' => $id]);
 $sol = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -126,12 +131,15 @@ h4, h5, h6 {font-weight:500;}
           ['Proceso', $sol['proceso_nombre']],
           ['Patio', $sol['patio_nombre']],
           ['Unidad Operativa', $sol['uo_nombre']],
-          ['Servicio', $sol['servicio_nombre']],
-          ['Habilitación CEO', $sol['habceo_nombre']],
-          ['Tipo Habilitación', $sol['tipohabilitacion']],
-          ['Responsable UO', $sol['resp_uo_nombre']],
-          ['Observación', $sol['observacion']],
-        ];
+	          ['Servicio', $sol['servicio_nombre']],
+	          ['Habilitación CEO', $sol['habceo_nombre']],
+	          ['Tipo Habilitación', $sol['tipohabilitacion']],
+	          ['Capacitación', $sol['charla_nombre']],
+	          ['Motivo Reinducción', $sol['motivoreinduccion_nombre']],
+	          ['Tipo de visita', $sol['tipo_visita']],
+	          ['Responsable UO', $sol['resp_uo_nombre']],
+	          ['Observación', $sol['observacion']],
+	        ];
         foreach ($campos as [$label, $valor]): ?>
           <div class="col-md-4">
             <label class="form-label"><?= htmlspecialchars($label) ?></label>

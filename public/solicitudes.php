@@ -72,6 +72,41 @@ if (($idRol == 1 || $idRol == 5) && $idEmpresa == $empresaEnel) {
     $params[':iduser']  = $idUsuario;
 }
 
+if (($_GET['action'] ?? '') === 'buscar_rut_contratista') {
+  header('Content-Type: application/json; charset=utf-8');
+
+  $rutBusqueda = trim((string)($_GET['rut'] ?? ''));
+  $rutNormalizado = preg_replace('/[^0-9kK]/', '', $rutBusqueda);
+
+  if ($rutNormalizado === '') {
+    echo json_encode(['ok' => true, 'nsolicitudes' => []], JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
+  try {
+    $sqlRut = "
+      SELECT DISTINCT s.nsolicitud
+      FROM ceo_solicitudes s
+      INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
+      WHERE $where
+        AND REPLACE(REPLACE(LOWER(COALESCE(ps.rut, '')), '.', ''), '-', '') LIKE :rut
+      ORDER BY s.nsolicitud DESC
+      LIMIT 2000
+    ";
+    $stmtRut = $pdo->prepare($sqlRut);
+    $paramsRut = $params;
+    $paramsRut[':rut'] = '%' . strtolower($rutNormalizado) . '%';
+    $stmtRut->execute($paramsRut);
+    $nsolicitudes = array_map('intval', $stmtRut->fetchAll(PDO::FETCH_COLUMN) ?: []);
+
+    echo json_encode(['ok' => true, 'nsolicitudes' => $nsolicitudes], JSON_UNESCAPED_UNICODE);
+  } catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+  }
+  exit;
+}
+
 
 /* ============================================================
    Consulta principal de solicitudes con filtro dinámico
@@ -190,20 +225,30 @@ try {
         <a href="mapa_interactivo.php" target="_blank" class="btn btn-outline-success btn-sm" title="Abrir Mapa Interactivo">
           <i class="bi bi-map"></i>
         </a>
-        <div class="input-group" style="max-width:420px;">
-          <select id="filtroBuscar" class="form-select form-select-sm" style="max-width:150px;">
-            <option value="general">General</option>
-            <option value="nsolicitud">N° Solicitud</option>
-            <option value="solicitante">Solicitante</option>
-            <option value="patio">Patio</option>
-            <option value="fechacreacion">Fecha Creación</option>
-            <option value="fecha">Fecha</option>
-            <option value="estado">Estado</option>
-            <option value="contratista">Contratista</option>
-            <option value="proceso">Proceso</option>
-          </select>
-          <input type="text" id="buscar" class="form-control form-control-sm" placeholder="Buscar solicitud...">
-          <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <div class="d-flex flex-column align-items-stretch" style="max-width:420px; width:100%;">
+          <div class="input-group">
+            <select id="filtroBuscar" class="form-select form-select-sm" style="max-width:150px;">
+              <option value="general">General</option>
+              <option value="nsolicitud">N° Solicitud</option>
+              <option value="solicitante">Solicitante</option>
+              <option value="patio">Patio</option>
+              <option value="fechacreacion">Fecha Creación</option>
+              <option value="fecha">Fecha</option>
+              <option value="estado">Estado</option>
+              <option value="contratista">Contratista</option>
+              <option value="proceso">Proceso</option>
+            </select>
+            <input type="text" id="buscar" class="form-control form-control-sm" placeholder="Buscar solicitud...">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+          </div>
+          <div id="filtroRutContratistaWrap" class="mt-2" style="display:none;">
+            <input
+              type="text"
+              id="buscarRutContratista"
+              class="form-control form-control-sm"
+              placeholder="Filtrar por Rut Contratista dentro de la fecha..."
+            >
+          </div>
         </div>
       </div>
     </div>
@@ -306,7 +351,10 @@ try {
   // === Buscador ===
   const inputBuscar = document.getElementById('buscar');
   const filtroBuscar = document.getElementById('filtroBuscar');
+  const filtroRutContratistaWrap = document.getElementById('filtroRutContratistaWrap');
+  const inputBuscarRutContratista = document.getElementById('buscarRutContratista');
   const storageFiltroKey = 'ceonext_solicitudes_filtro';
+  let rutContratistaController = null;
 
   function actualizarPlaceholder() {
     const placeholders = {
@@ -321,6 +369,19 @@ try {
       proceso: 'Buscar por proceso...'
     };
     inputBuscar.placeholder = placeholders[filtroBuscar.value] || placeholders.general;
+  }
+
+  function usarFiltroRutContratista() {
+    return filtroBuscar.value === 'fecha';
+  }
+
+  function actualizarFiltroRutContratista() {
+    const mostrar = usarFiltroRutContratista();
+    filtroRutContratistaWrap.style.display = mostrar ? '' : 'none';
+
+    if (!mostrar && inputBuscarRutContratista.value !== '') {
+      inputBuscarRutContratista.value = '';
+    }
   }
 
   function obtenerTextoBusqueda(cells, filtro) {
@@ -339,20 +400,57 @@ try {
     return indices.map(idx => cells[idx]?.textContent || '').join(' ').toLowerCase();
   }
 
-  function aplicarFiltroBusqueda(){
+  async function aplicarFiltroBusqueda(){
     const q = inputBuscar.value.toLowerCase();
     const filtro = filtroBuscar.value;
-    document.querySelectorAll('#tablaSolicitudes tbody tr').forEach(tr=>{
+    const qRutContratista = inputBuscarRutContratista.value.toLowerCase().trim();
+
+    if (rutContratistaController) {
+      rutContratistaController.abort();
+      rutContratistaController = null;
+    }
+
+    const filas = document.querySelectorAll('#tablaSolicitudes tbody tr');
+    filas.forEach(tr => {
       const cells = tr.querySelectorAll('td');
       const textoBusqueda = obtenerTextoBusqueda(cells, filtro);
       tr.style.display = textoBusqueda.includes(q) ? '' : 'none';
     });
+
+    if (!usarFiltroRutContratista() || qRutContratista === '') {
+      return;
+    }
+
+    rutContratistaController = new AbortController();
+
+    try {
+      const resp = await fetch(`solicitudes.php?action=buscar_rut_contratista&rut=${encodeURIComponent(qRutContratista)}`, {
+        signal: rutContratistaController.signal,
+        cache: 'no-store'
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        throw new Error(data.error || 'No fue posible buscar por RUT.');
+      }
+
+      const encontrados = new Set((data.nsolicitudes || []).map(String));
+      filas.forEach(tr => {
+        const coincideFiltroPrincipal = tr.style.display !== 'none';
+        tr.style.display = coincideFiltroPrincipal && encontrados.has(tr.dataset.nsolicitud) ? '' : 'none';
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      filas.forEach(tr => {
+        tr.style.display = 'none';
+      });
+    }
   }
 
   function guardarFiltroBusqueda() {
     const payload = {
       filtro: filtroBuscar.value,
-      texto: inputBuscar.value
+      texto: inputBuscar.value,
+      textoRutContratista: inputBuscarRutContratista.value
     };
 
     if (payload.filtro === 'general' && payload.texto.trim() === '') {
@@ -376,23 +474,32 @@ try {
         if (typeof payload.texto === 'string') {
           inputBuscar.value = payload.texto;
         }
+        if (typeof payload.textoRutContratista === 'string') {
+          inputBuscarRutContratista.value = payload.textoRutContratista;
+        }
       }
     } catch (e) {
       sessionStorage.removeItem(storageFiltroKey);
     }
   }
 
-  inputBuscar.addEventListener('keyup', () => {
+  inputBuscar.addEventListener('keyup', async () => {
     guardarFiltroBusqueda();
-    aplicarFiltroBusqueda();
+    await aplicarFiltroBusqueda();
   });
-  filtroBuscar.addEventListener('change', () => {
+  filtroBuscar.addEventListener('change', async () => {
     actualizarPlaceholder();
+    actualizarFiltroRutContratista();
     guardarFiltroBusqueda();
-    aplicarFiltroBusqueda();
+    await aplicarFiltroBusqueda();
+  });
+  inputBuscarRutContratista.addEventListener('keyup', async () => {
+    guardarFiltroBusqueda();
+    await aplicarFiltroBusqueda();
   });
   restaurarFiltroBusqueda();
   actualizarPlaceholder();
+  actualizarFiltroRutContratista();
   aplicarFiltroBusqueda();
 
   // === Acciones con íconos ===

@@ -65,6 +65,11 @@ foreach ($stmtMenu as $menu) {
    DETECCIÓN DE PÁGINA ACTUAL
    ============================================================ */
 $currentPage = safeBasename($_SERVER['SCRIPT_NAME']);
+$rolNormalizado = strtolower(trim((string)preg_replace('/\s+/', ' ', strtr((string)$rol, [
+    'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U',
+    'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+    'Ñ' => 'N', 'ñ' => 'n',
+]))));
 
 $apps = [
     [
@@ -107,7 +112,24 @@ $apps = [
         'accent' => '#f97316',
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23f97316'/%3E%3Cstop offset='100%25' stop-color='%23ffd08a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Cpath d='M76 86h168c18 0 32 14 32 32v66c0 18-14 32-32 32h-79l-49 34v-34H76c-18 0-32-14-32-32v-66c0-18 14-32 32-32z' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M103 126h114M103 159h85' stroke='%23f97316' stroke-width='16' stroke-linecap='round'/%3E%3C/svg%3E",
     ],
+    [
+        'title' => 'Inventario CEO',
+        'description' => 'Inventario interno del CEO para productos, stock actual y movimientos simples de entrada y salida.',
+        'url' => '/ceo.noetica.cl/public/inventario.php',
+        'tag' => 'Base operativa',
+        'accent' => '#0f766e',
+        'roles' => ['administrador', 'registro asistencia'],
+        'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230f766e'/%3E%3Cstop offset='100%25' stop-color='%2389e0cf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='58' y='88' width='204' height='146' rx='26' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M94 132h132M94 166h132M94 200h72' stroke='%230f766e' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M94 88l28-34h76l28 34' fill='none' stroke='rgba(255,255,255,0.9)' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='230' cy='200' r='24' fill='rgba(15,118,110,0.18)'/%3E%3Cpath d='M220 200h20M230 190v20' stroke='%230f766e' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E",
+    ],
 ];
+
+$apps = array_values(array_filter($apps, static function (array $app) use ($rolNormalizado): bool {
+    if (empty($app['roles'])) {
+        return true;
+    }
+
+    return in_array($rolNormalizado, $app['roles'], true);
+}));
 ?>
 <!doctype html>
 <html lang="es">

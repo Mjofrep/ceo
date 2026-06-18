@@ -51,23 +51,31 @@ function scdxBaseSql(): string
             s.nsolicitud,
             s.fecha,
             s.tipohabilitacion,
+            COALESCE(s.observacion, '') AS observacion,
+            COALESCE(s.tipo_visita, '') AS tipo_visita,
             COALESCE(e.nombre, '') AS empresa,
             TRIM(CONCAT(COALESCE(u.nombres, ''), ' ', COALESCE(u.apellidos, ''))) AS solicitante,
             COALESCE(pa.desc_patios, '') AS patio,
             COALESCE(pr.desc_proceso, '') AS proceso,
             COALESCE(ht.desc_tipo, '') AS habilitacionceo,
+            COALESCE(ch.desc_charlas, '') AS capacitacion,
+            COALESCE(rd.reinduccion, '') AS motivo_reinduccion,
             COALESCE(ps.rut, '') AS rut,
             COALESCE(ps.nombre, '') AS nombre,
             COALESCE(ps.apellidop, '') AS apellidop,
             COALESCE(ps.apellidom, '') AS apellidom,
+            COALESCE(cc.cargo, '') AS cargo,
             COALESCE(ps.asistio, 0) AS asistio
         FROM ceo_solicitudes s
         INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
+        LEFT JOIN ceo_cargo_contratistas cc ON cc.id = ps.id_cargo
         LEFT JOIN ceo_empresas e ON e.id = s.contratista
         LEFT JOIN ceo_usuarios u ON u.id = s.solicitante
         LEFT JOIN ceo_patios pa ON pa.id = s.patio
         LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
         LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
+        LEFT JOIN ceo_charlas ch ON ch.id = s.charla
+        LEFT JOIN ceo_reinduccion rd ON rd.id = s.motivoreinduccion
     ";
 }
 
@@ -107,6 +115,22 @@ function scdxFetchRows(PDO $pdo, array $filters): array
     if ($filters['tipohabilitacion'] !== '') {
         $where[] = 's.tipohabilitacion = :tipohabilitacion';
         $params[':tipohabilitacion'] = $filters['tipohabilitacion'];
+    }
+    if ($filters['charla'] > 0) {
+        $where[] = 's.charla = :charla';
+        $params[':charla'] = $filters['charla'];
+    }
+    if ($filters['motivoreinduccion'] > 0) {
+        $where[] = 's.motivoreinduccion = :motivoreinduccion';
+        $params[':motivoreinduccion'] = $filters['motivoreinduccion'];
+    }
+    if ($filters['tipo_visita'] !== '') {
+        $where[] = 'COALESCE(s.tipo_visita, \'\') = :tipo_visita';
+        $params[':tipo_visita'] = $filters['tipo_visita'];
+    }
+    if ($filters['asistio'] !== '') {
+        $where[] = 'COALESCE(ps.asistio, 0) = :asistio';
+        $params[':asistio'] = (int)$filters['asistio'];
     }
 
     $sql = scdxBaseSql() . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC';
@@ -148,6 +172,10 @@ $filters = [
     'proceso' => max(0, (int)($_GET['proceso'] ?? 0)),
     'habilitacionceo' => max(0, (int)($_GET['habilitacionceo'] ?? 0)),
     'tipohabilitacion' => trim((string)($_GET['tipohabilitacion'] ?? '')),
+    'charla' => max(0, (int)($_GET['charla'] ?? 0)),
+    'motivoreinduccion' => max(0, (int)($_GET['motivoreinduccion'] ?? 0)),
+    'tipo_visita' => trim((string)($_GET['tipo_visita'] ?? '')),
+    'asistio' => in_array((string)($_GET['asistio'] ?? ''), ['0', '1'], true) ? (string)$_GET['asistio'] : '',
 ];
 
 $rows = scdxFetchRows($pdo, $filters);
@@ -155,9 +183,9 @@ $rows = scdxFetchRows($pdo, $filters);
 $spreadsheet = new Spreadsheet();
 $sheet = $spreadsheet->getActiveSheet();
 $sheet->setTitle('Detalle Solicitudes');
-$headers = ['Fecha', 'N° Solicitud', 'Empresa', 'Solicitante', 'Patio', 'Proceso', 'Habilitación CEO', 'Tipo Habilitación', 'RUT', 'Nombre', 'Apellidos', 'Asistió'];
+$headers = ['Fecha', 'N° Solicitud', 'Empresa', 'Solicitante', 'Patio', 'Proceso', 'Habilitación CEO', 'Tipo Habilitación', 'Capacitación', 'Motivo Reinducción', 'Tipo de visita', 'Observación', 'RUT', 'Nombre', 'Apellidos', 'Cargo', 'Asistió'];
 $sheet->fromArray($headers, null, 'A1');
-scdxHeaderStyle($sheet, 'A1:L1');
+scdxHeaderStyle($sheet, 'A1:Q1');
 
 $rowNum = 2;
 foreach ($rows as $row) {
@@ -170,21 +198,26 @@ foreach ($rows as $row) {
         $row['proceso'],
         $row['habilitacionceo'],
         $row['tipohabilitacion'],
+        $row['capacitacion'],
+        $row['motivo_reinduccion'],
+        $row['tipo_visita'],
+        $row['observacion'],
         $row['rut'],
         $row['nombre'],
         trim((string)$row['apellidop'] . ' ' . (string)$row['apellidom']),
+        $row['cargo'],
         (int)$row['asistio'] === 1 ? 'Si' : 'No',
     ], null, 'A' . $rowNum);
     $rowNum++;
 }
 
 $lastRow = max(1, $rowNum - 1);
-$sheet->getStyle('A1:L' . $lastRow)->applyFromArray([
+$sheet->getStyle('A1:Q' . $lastRow)->applyFromArray([
     'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'D5DDE5']]],
     'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
 ]);
 
-foreach (range('A', 'L') as $col) {
+foreach (range('A', 'Q') as $col) {
     $sheet->getColumnDimension($col)->setAutoSize(true);
 }
 

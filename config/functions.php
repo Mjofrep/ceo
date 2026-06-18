@@ -142,6 +142,73 @@ if (!function_exists('calcularNotaFinalDesdePorcentaje')) {
     }
 }
 
+if (!function_exists('asegurarColumnaPorcentajeFormacionAgrupacion')) {
+    function asegurarColumnaPorcentajeFormacionAgrupacion(\PDO $pdo): void
+    {
+        static $asegurada = false;
+        if ($asegurada) {
+            return;
+        }
+
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM ceo_formacion_agrupacion LIKE 'porcentaje'");
+            $existe = $stmt !== false && $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$existe) {
+                $pdo->exec(
+                    "ALTER TABLE ceo_formacion_agrupacion "
+                    . "ADD COLUMN porcentaje DECIMAL(5,2) NOT NULL DEFAULT 80.00 AFTER total"
+                );
+            }
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'No fue posible asegurar la columna porcentaje en ceo_formacion_agrupacion: '
+                . $e->getMessage(),
+                0,
+                $e
+            );
+        }
+
+        $asegurada = true;
+    }
+}
+
+if (!function_exists('obtenerPorcentajeMinimoFormacionAgrupacion')) {
+    function obtenerPorcentajeMinimoFormacionAgrupacion(\PDO $pdo, int $idAgrupacion): float
+    {
+        if ($idAgrupacion <= 0) {
+            return 80.0;
+        }
+
+        asegurarColumnaPorcentajeFormacionAgrupacion($pdo);
+
+        $stmt = $pdo->prepare("
+            SELECT porcentaje
+            FROM ceo_formacion_agrupacion
+            WHERE id = :id
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $idAgrupacion]);
+        $valor = $stmt->fetchColumn();
+
+        if ($valor === false || $valor === null || $valor === '') {
+            return 80.0;
+        }
+
+        $porcentaje = (float)$valor;
+        if ($porcentaje <= 0) {
+            return 80.0;
+        }
+
+        if ($porcentaje > 100) {
+            throw new InvalidArgumentException(
+                'El porcentaje mínimo configurado para la agrupación de formación es inválido.'
+            );
+        }
+
+        return round($porcentaje, 2);
+    }
+}
+
 if (!function_exists('formacionDistribuirCuotasPorArea')) {
     function formacionDistribuirCuotasPorArea(
         int $totalPreguntas,
