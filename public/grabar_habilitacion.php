@@ -16,7 +16,7 @@ $pdo = db();
 $fecha     = $_POST['fecha'] ?? '';
 $jornada   = $_POST['jornada'] ?? '';
 $servicio  = (int)($_POST['servicio'] ?? 0);
-$empresa   = $_SESSION['auth']['id_empresa'];
+$empresa   = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 //$empresa   = (int)($_POST['empresa'] ?? 0); 
 $uo = (int)($_POST['uo'] ?? 0);
 if ($uo <= 0) {
@@ -28,6 +28,8 @@ $gestor    = $_SESSION['auth']['id'];  // usuario conectado
 $particip  = json_decode($_POST['participantes'] ?? '[]', true);
 $cuadrillaExistente = (int)($_POST['cuadrilla'] ?? 0);
 $esNuevaPlanificacion = ($cuadrillaExistente <= 0);
+$rolUsuario = strtolower((string) ($_SESSION['auth']['rol'] ?? ''));
+$esContratista = ($rolUsuario === 'contratista');
 
 if (!$fecha || !$jornada || !$servicio || empty($particip)) {
     echo json_encode(['ok' => false, 'msg' => 'Datos incompletos']);
@@ -42,6 +44,21 @@ try {
     ============================================================ */
     if ($cuadrillaExistente > 0) {
         $cuadrilla = $cuadrillaExistente;
+
+        if ($esContratista) {
+            $stEmpresa = $pdo->prepare("
+                SELECT empresa
+                FROM ceo_habilitacion
+                WHERE cuadrilla = :cuadrilla
+                LIMIT 1
+            ");
+            $stEmpresa->execute([':cuadrilla' => $cuadrilla]);
+            $idEmpresaCuadrilla = (int) $stEmpresa->fetchColumn();
+
+            if ($idEmpresaCuadrilla <= 0 || $idEmpresaCuadrilla !== $empresa) {
+                throw new Exception('No puedes modificar cuadrillas de otra empresa');
+            }
+        }
 
         // Borrar participantes previos
         $stDel = $pdo->prepare("DELETE FROM ceo_habilitacion_participantes WHERE id_cuadrilla = ?");

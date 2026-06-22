@@ -16,6 +16,10 @@ if (empty($_SESSION['auth'])) {
     exit;
 }
 
+$rolUsuario = strtolower((string) ($_SESSION['auth']['rol'] ?? ''));
+$idEmpresaUser = (int) ($_SESSION['auth']['id_empresa'] ?? 0);
+$esContratista = ($rolUsuario === 'contratista');
+
 $fecha    = $_GET['fecha']    ?? '';
 $jornada  = $_GET['jornada']  ?? '';
 $servicio = $_GET['servicio'] ?? '';
@@ -62,6 +66,11 @@ try {
     ]);
 
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($rows as &$row) {
+        $row['editable'] = !$esContratista || (int) ($row['empresa'] ?? 0) === $idEmpresaUser;
+    }
+    unset($row);
 
     echo json_encode([
         'ok' => true,

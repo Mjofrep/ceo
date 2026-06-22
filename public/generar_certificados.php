@@ -370,6 +370,67 @@ function certEnsureTables(PDO $pdo): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+function certCandidateKey(array $cand): string
+{
+    return certRutKey((string)($cand['rut'] ?? ''))
+        . '|' . (int)($cand['id_servicio'] ?? 0)
+        . '|' . (int)($cand['id_proceso'] ?? 0);
+}
+
+function certCandidateScore(array $cand): int
+{
+    $score = 0;
+
+    if ((string)($cand['fuente_vigencia'] ?? '') === 'GENERAL') {
+        $score += 100;
+    }
+
+    if ((string)($cand['tipo_vigencia_detalle'] ?? '') === 'TERRENO') {
+        $score += 10;
+    } elseif ((string)($cand['tipo_vigencia_detalle'] ?? '') === 'PRUEBA') {
+        $score += 5;
+    }
+
+    $score += min(9999, (int)($cand['id_vigencia_detalle'] ?? 0));
+
+    return $score;
+}
+
+function certConsolidateCandidates(array $rows): array
+{
+    $best = [];
+
+    foreach ($rows as $row) {
+        $key = certCandidateKey($row);
+        if (!isset($best[$key])) {
+            $best[$key] = $row;
+            continue;
+        }
+
+        if (certCandidateScore($row) > certCandidateScore($best[$key])) {
+            $best[$key] = $row;
+        }
+    }
+
+    $consolidated = array_values($best);
+
+    usort($consolidated, static function (array $a, array $b): int {
+        $cmpFecha = strcmp((string)($b['fechavig_fin_cert'] ?? ''), (string)($a['fechavig_fin_cert'] ?? ''));
+        if ($cmpFecha !== 0) {
+            return $cmpFecha;
+        }
+
+        $cmpRut = strcmp(certRutKey((string)($a['rut'] ?? '')), certRutKey((string)($b['rut'] ?? '')));
+        if ($cmpRut !== 0) {
+            return $cmpRut;
+        }
+
+        return strcmp((string)($a['servicio'] ?? ''), (string)($b['servicio'] ?? ''));
+    });
+
+    return $consolidated;
+}
+
 function certCandidateSql(array $where): string
 {
     return '
@@ -379,6 +440,7 @@ function certCandidateSql(array $where): string
             vd.rut,
             vd.id_servicio,
             vd.id_proceso,
+            COALESCE(vd.tipo, "") AS tipo_vigencia_detalle,
             COALESCE(vg.fechavig_ini, vd.fechavig_ini) AS fechavig_ini_cert,
             COALESCE(vg.fechavig_fin, vd.fechavig_fin) AS fechavig_fin_cert,
             CASE WHEN vg.id IS NULL THEN "DETALLE" ELSE "GENERAL" END AS fuente_vigencia,
@@ -804,7 +866,7 @@ try {
 
     $certVigentes = [];
     foreach ($pdo->query("SELECT rut, id_servicio, id_proceso, id_empresa, cargo, fechavig_fin FROM ceo_certificados WHERE estado = 'VIGENTE'")->fetchAll(PDO::FETCH_ASSOC) as $cert) {
-        $key = certRutKey((string)$cert['rut']) . '|' . (int)$cert['id_servicio'] . '|' . (int)$cert['id_proceso'] . '|' . (int)$cert['id_empresa'] . '|' . strtoupper(trim((string)$cert['cargo'])) . '|' . (string)$cert['fechavig_fin'];
+        $key = certRutKey((string)$cert['rut']) . '|' . (int)$cert['id_servicio'] . '|' . (int)$cert['id_proceso'];
         $certVigentes[$key] = true;
     }
 
@@ -832,10 +894,10 @@ try {
     ';
     $stmtCand = $pdo->prepare($sqlCand);
     $stmtCand->execute($candParams);
-    $candidatos = $stmtCand->fetchAll(PDO::FETCH_ASSOC);
+    $candidatos = certConsolidateCandidates($stmtCand->fetchAll(PDO::FETCH_ASSOC));
 
     foreach ($candidatos as $cand) {
-        $key = certRutKey((string)$cand['rut']) . '|' . (int)$cand['id_servicio'] . '|' . (int)$cand['id_proceso'] . '|' . (int)$cand['id_empresa'] . '|' . strtoupper(trim((string)$cand['cargo'])) . '|' . (string)$cand['fechavig_fin_cert'];
+        $key = certCandidateKey($cand);
         if (!isset($certVigentes[$key])) {
             $candidatosPendientes[] = $cand;
         }
@@ -959,7 +1021,6 @@ try {
               <th>Empresa</th>
               <th>Servicio</th>
               <th>Proceso</th>
-              <th>Fuente vigencia</th>
               <th>Fecha evaluación</th>
               <th>Vigencia desde</th>
               <th>Vigencia hasta</th>
@@ -980,7 +1041,6 @@ try {
                 <td><?= certEsc($cand['empresa']) ?></td>
                 <td><?= certEsc($cand['servicio']) ?></td>
                 <td class="text-center"><?= certEsc($cand['id_proceso']) ?></td>
-                <td class="text-center"><span class="badge text-bg-<?= $cand['fuente_vigencia'] === 'GENERAL' ? 'success' : 'secondary' ?>"><?= certEsc($cand['fuente_vigencia']) ?></span></td>
                 <td class="text-center"><?= certEsc(certFmtFecha($cand['fecha_evaluacion'])) ?></td>
                 <td class="text-center"><?= certEsc(certFmtFecha($cand['fechavig_ini_cert'])) ?></td>
                 <td class="text-center"><?= certEsc(certFmtFecha($cand['fechavig_fin_cert'])) ?></td>

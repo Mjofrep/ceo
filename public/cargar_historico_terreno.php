@@ -31,6 +31,7 @@ $mensajeTipo = 'info';
 $analisis = $_SESSION[TERRENO_SESSION_KEY] ?? null;
 $resultadoImportacion = null;
 $servicioSeleccionado = (int)($_POST['id_servicio'] ?? ($analisis['id_servicio'] ?? 2));
+$actualizarExistentes = !empty($_POST['actualizar_existentes']) || !empty($analisis['actualizar_existentes']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $accion = (string)($_POST['accion'] ?? '');
@@ -55,10 +56,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_FILES['csv_terreno']['tmp_name'],
                 $_FILES['csv_trabajadores']['tmp_name'],
                 $_FILES['csv_historia']['tmp_name'],
-                $servicioSeleccionado
+                $servicioSeleccionado,
+                $actualizarExistentes
             );
             $_SESSION[TERRENO_SESSION_KEY] = $analisis;
-            $mensaje = 'Análisis completado. Revise mapeos y normalización antes de confirmar la carga.';
+            $mensaje = $actualizarExistentes
+                ? 'Análisis completado en modo actualización. Revise mapeos y normalización antes de confirmar la carga.'
+                : 'Análisis completado. Revise mapeos y normalización antes de confirmar la carga.';
             $mensajeTipo = 'success';
         } catch (Throwable $e) {
             if (is_array($analisis) && !empty($analisis['payload_file'])) {
@@ -87,7 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (int)$payload['id_servicio'],
                 (int)$payload['id_grupo'],
                 $payload['process_links'] ?? [],
-                $payload['process_history'] ?? []
+                $payload['process_history'] ?? [],
+                !empty($payload['actualizar_existentes'])
             );
 
             deleteTerrainPayload((string)$analisis['payload_file']);
@@ -95,8 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $analisis = null;
 
             $mensaje = sprintf(
-                'Carga finalizada. Evaluaciones importadas: %d. Duplicadas omitidas: %d. Contratistas creados: %d. Contratistas incompletos: %d. Detalles mapeados: %d.',
+                'Carga finalizada. Evaluaciones importadas: %d. Evaluaciones actualizadas: %d. Duplicadas omitidas: %d. Contratistas creados: %d. Contratistas incompletos: %d. Detalles mapeados: %d.',
                 $resultadoImportacion['importadas'],
+                $resultadoImportacion['actualizadas'],
                 $resultadoImportacion['duplicadas'],
                 $resultadoImportacion['contratistas_creados'],
                 $resultadoImportacion['contratistas_incompletos'],
@@ -118,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTrabajadores, string $csvHistoria, int $idServicio): array
+function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTrabajadores, string $csvHistoria, int $idServicio, bool $actualizarExistentes = false): array
 {
     $grupo = obtenerGrupoTerreno($pdo, $idServicio);
     if ($grupo === null) {
@@ -131,7 +137,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
     $existingEvalKeys = cargarEvaluacionesTerrenoExistentes($pdo, $idServicio);
     $historyInfo = analizarHistoriaTerrenoCsv($pdo, $csvHistoria, $idServicio);
 
-    $mainInfo = loadTerrenoHistoriCsv($csvTerreno, $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links']);
+    $mainInfo = loadTerrenoHistoriCsv($csvTerreno, $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links'], $actualizarExistentes);
     $normalizacion = analizarNormalizacionContratistasTerreno($pdo, $mainInfo['ruts_normalizacion']);
 
     $payloadFile = writeTerrainPayload([
@@ -141,6 +147,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
         'normalizacion_detalles' => $normalizacion['detalles'],
         'process_links' => $mainInfo['process_links'] ?? [],
         'process_history' => $historyInfo['processes'] ?? [],
+        'actualizar_existentes' => $actualizarExistentes,
     ]);
 
     return [
@@ -149,6 +156,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
         'servicio' => obtenerNombreServicio($pdo, $idServicio),
         'id_grupo' => (int)$grupo['id'],
         'grupo' => (string)$grupo['grupo'],
+        'actualizar_existentes' => $actualizarExistentes,
         'porcentaje_minimo' => $threshold,
         'workers' => $workers['summary'],
         'evaluaciones' => $mainInfo['summary'],
@@ -160,7 +168,7 @@ function analizarHistoricoTerrenoCsv(PDO $pdo, string $csvTerreno, string $csvTr
     ];
 }
 
-function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServicio): array
+function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServicio, bool $actualizarExistentes = false): array
 {
     $grupo = obtenerGrupoTerreno($pdo, $idServicio);
     if ($grupo === null) {
@@ -180,7 +188,7 @@ function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServi
         $instrumento = cargarInstrumentoTerreno($pdo, (int)$grupo['id']);
         $existingEvalKeys = cargarEvaluacionesTerrenoExistentes($pdo, $idServicio);
         $historyInfo = analizarHistoriaTerrenoRows($pdo, $sheetHistoria, $idServicio);
-        $mainInfo = loadTerrenoHistoriSheetFromContext($xlsx, 'Evaluaciones de Terreno Histori', $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links']);
+        $mainInfo = loadTerrenoHistoriSheetFromContext($xlsx, 'Evaluaciones de Terreno Histori', $idServicio, $workers, $instrumento, $existingEvalKeys, $historyInfo['process_links'], $actualizarExistentes);
         $normalizacion = analizarNormalizacionContratistasTerreno($pdo, $mainInfo['ruts_normalizacion']);
     } finally {
         $xlsx['zip']->close();
@@ -193,6 +201,7 @@ function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServi
         'normalizacion_detalles' => $normalizacion['detalles'],
         'process_links' => $mainInfo['process_links'] ?? [],
         'process_history' => $historyInfo['processes'] ?? [],
+        'actualizar_existentes' => $actualizarExistentes,
     ]);
 
     return [
@@ -201,6 +210,7 @@ function analizarHistoricoTerrenoExcel(PDO $pdo, string $excelPath, int $idServi
         'servicio' => obtenerNombreServicio($pdo, $idServicio),
         'id_grupo' => (int)$grupo['id'],
         'grupo' => (string)$grupo['grupo'],
+        'actualizar_existentes' => $actualizarExistentes,
         'porcentaje_minimo' => $threshold,
         'workers' => $workers['summary'],
         'evaluaciones' => $mainInfo['summary'],
@@ -263,7 +273,7 @@ function loadTrabajadoresCsv(string $path): array
     }
 }
 
-function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
+function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks, bool $actualizarExistentes = false): array
 {
     $fh = fopen($path, 'r');
     if ($fh === false) {
@@ -454,9 +464,13 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                 'fila' => $excelRow,
                 'codigo' => $codigoEvaluacion,
                 'rut' => $rut,
-                'estado' => $evaluaciones[$key]['duplicada'] ? 'DUPLICADA' : 'IMPORTABLE',
+                'estado' => $evaluaciones[$key]['duplicada']
+                    ? ($actualizarExistentes ? 'ACTUALIZABLE' : 'DUPLICADA')
+                    : 'IMPORTABLE',
                 'motivo' => $evaluaciones[$key]['duplicada']
-                    ? 'La evaluación ya existe en ceo_evaluacion_terreno.'
+                    ? ($actualizarExistentes
+                        ? 'La evaluación ya existe en ceo_evaluacion_terreno y se actualizará usando el archivo origen.'
+                        : 'La evaluación ya existe en ceo_evaluacion_terreno.')
                     : (((int)($evaluaciones[$key]['id_proceso_habilitacion'] ?? 0) > 0)
                         ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($evaluaciones[$key]['proceso_historico'] ?? 0) . '.'
                         : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
@@ -464,8 +478,12 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
         }
 
         $evaluacionesValidas = [];
+        $actualizables = 0;
         foreach ($evaluaciones as $eval) {
-            if (!$eval['duplicada']) {
+            if ($eval['duplicada']) {
+                $actualizables++;
+            }
+            if (!$eval['duplicada'] || $actualizarExistentes) {
                 $evaluacionesValidas[] = $eval;
             }
         }
@@ -476,6 +494,7 @@ function loadTerrenoHistoriCsv(string $path, int $idServicio, array $workers, ar
                 'evaluaciones_unicas' => count($evaluaciones),
                 'evaluaciones_validas' => count($evaluacionesValidas),
                 'duplicadas' => $duplicadas,
+                'actualizables' => $actualizarExistentes ? $actualizables : 0,
                 'errores' => $errores,
                 'detalles_filas' => $detallesFilas,
             ],
@@ -514,19 +533,23 @@ function detectCsvDelimiter(string $path): string
     return $candidates[$best] > 1 ? $best : ';';
 }
 
-function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array $normalizacionDetalles, int $idServicio, int $idGrupo, array $processLinks = [], array $processHistory = []): array
+function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array $normalizacionDetalles, int $idServicio, int $idGrupo, array $processLinks = [], array $processHistory = [], bool $actualizarExistentes = false): array
 {
     $stmtExisteContratista = $pdo->prepare('SELECT 1 FROM ceo_contratistas WHERE rut = :rut LIMIT 1');
     $stmtInsertContratista = $pdo->prepare('INSERT INTO ceo_contratistas (rut, nombre, apellidos, correo, telefono, id_cargo, fecha_ingreso, id_empresa, uo) VALUES (:rut, :nombre, :apellidos, NULL, NULL, :id_cargo, CURDATE(), :id_empresa, :uo)');
     $stmtExisteEval = $pdo->prepare('SELECT id, id_proceso_habilitacion FROM ceo_evaluacion_terreno WHERE codigo_evaluacion = :codigo AND rut = :rut AND id_servicio = :servicio LIMIT 1');
     $stmtEval = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno (codigo_evaluacion, rut, nombre, cargo, contratista, evaluador, usuario, resultado, id_servicio, id_proceso_habilitacion, fecha_evaluacion, fecha_inicio, fecha_fin, fecha_aprobacion, comentarios_finales) VALUES (:codigo, :rut, :nombre, :cargo, :contratista, :evaluador, :usuario, :resultado, :servicio, :id_proceso_habilitacion, :fecha_eval, :fecha_inicio, :fecha_fin, :fecha_aprobacion, :comentarios_finales)');
+    $stmtUpdateEvalProceso = $pdo->prepare('UPDATE ceo_evaluacion_terreno SET id_proceso_habilitacion = :id_proceso WHERE id = :id');
+    $stmtUpdateEval = $pdo->prepare('UPDATE ceo_evaluacion_terreno SET nombre = :nombre, cargo = :cargo, contratista = :contratista, evaluador = :evaluador, usuario = :usuario, resultado = :resultado, id_proceso_habilitacion = :id_proceso_habilitacion, fecha_evaluacion = :fecha_eval, fecha_inicio = :fecha_inicio, fecha_fin = :fecha_fin, fecha_aprobacion = :fecha_aprobacion, comentarios_finales = :comentarios_finales WHERE id = :id');
     $stmtEvalDet = $pdo->prepare('INSERT INTO ceo_evaluacion_terreno_detalle (id_evaluacion_terreno, codigo_area, area, codigo_item, item, respuesta, peso, resultado_item, comentario_item, plan_accion) VALUES (:id_eval, :codigo_area, :area, :codigo_item, :item, :respuesta, :peso, :resultado_item, :comentario_item, :plan_accion)');
+    $stmtDeleteEvalDet = $pdo->prepare('DELETE FROM ceo_evaluacion_terreno_detalle WHERE id_evaluacion_terreno = :id');
     $stmtSecRes = $pdo->prepare('INSERT INTO ceo_seccion_resultado_terreno (id_empresa, fecha_examen, hora_examen, id_servicio, nsolicitud) VALUES (:id_empresa, :fecha_examen, :hora_examen, :id_servicio, :nsolicitud)');
     $stmtResPruebaTerr = $pdo->prepare('INSERT INTO ceo_resultado_prueba_terreno (id_resultado, cumple, no_cumple, no_aplica, observaciones, id_pregunta, id_seccion, rut_contratista, practico, referente, fecha) VALUES (:id_resultado, :cumple, :no_cumple, :no_aplica, :observaciones, :id_pregunta, :id_seccion, :rut_contratista, :practico, :referente, :fecha)');
     $stmtIntento = $pdo->prepare('INSERT INTO ceo_resultado_terreno_intento (rut, id_servicio, id_proceso_habilitacion, id_evaluador, fecha_rendicion, hora_rendicion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal) VALUES (:rut, :id_servicio, :id_proceso_habilitacion, :id_evaluador, :fecha, :hora, :puntaje_total, :correctas, :incorrectas, :ncontestadas, :noaplica, :notafinal)');
-    $stmtUpdateEvalProceso = $pdo->prepare('UPDATE ceo_evaluacion_terreno SET id_proceso_habilitacion = :id_proceso WHERE id = :id');
     $stmtFindIntento = $pdo->prepare('SELECT id, id_proceso_habilitacion FROM ceo_resultado_terreno_intento WHERE rut = :rut AND id_servicio = :id_servicio AND fecha_rendicion = :fecha AND hora_rendicion = :hora ORDER BY id ASC LIMIT 1');
+    $stmtFindIntentosMismaFecha = $pdo->prepare('SELECT id, id_proceso_habilitacion, hora_rendicion, puntaje_total FROM ceo_resultado_terreno_intento WHERE rut = :rut AND id_servicio = :id_servicio AND fecha_rendicion = :fecha ORDER BY id ASC');
     $stmtUpdateIntentoProceso = $pdo->prepare('UPDATE ceo_resultado_terreno_intento SET id_proceso_habilitacion = :id_proceso WHERE id = :id');
+    $stmtUpdateIntento = $pdo->prepare('UPDATE ceo_resultado_terreno_intento SET id_proceso_habilitacion = :id_proceso_habilitacion, id_evaluador = :id_evaluador, puntaje_total = :puntaje_total, correctas = :correctas, incorrectas = :incorrectas, ncontestadas = :ncontestadas, noaplica = :noaplica, notafinal = :notafinal WHERE id = :id');
 
     $threshold = obtenerPorcentajeMinimoTerreno($pdo, $idGrupo);
     $normalizacionMap = [];
@@ -548,6 +571,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
 
     $evaluadorId = (int)($_SESSION['auth']['id'] ?? 0);
     $importadas = 0;
+    $actualizadas = 0;
     $duplicadas = 0;
     $contratistasCreados = 0;
     $contratistasIncompletos = 0;
@@ -608,11 +632,17 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 $idProcesoHabilitacion = (int)$resolvedProcessIds[$processKey];
             }
 
-            $fechaHoraIntento = !empty($eval['fecha_fin'])
-                ? new DateTimeImmutable($eval['fecha_fin'])
-                : (!empty($eval['fecha_inicio'])
-                    ? new DateTimeImmutable($eval['fecha_inicio'])
-                    : new DateTimeImmutable($eval['fecha_evaluacion'] . ' 00:00:00'));
+            $fechaHoraIntento = terrainResolveFechaHoraIntento($eval);
+            $horaExamen = terrainResolveHoraExamen($eval);
+            $resolvedEvaluadorId = resolverIdEvaluadorTerreno($pdo, (string)$eval['usuario'], (string)$eval['evaluador']) ?: ($evaluadorId > 0 ? $evaluadorId : null);
+            $norm = $normalizacionMap[$rut] ?? null;
+            $idEmpresa = is_array($norm) ? ((int)($norm['id_empresa'] ?? 0) ?: null) : null;
+            $resultadoTerreno = terrainBuildOutcomeFromDetalles($eval['detalles'] ?? []);
+            $puntajeTotal = $resultadoTerreno['porcentaje'];
+            $correctas = $resultadoTerreno['correctas'];
+            $incorrectas = $resultadoTerreno['incorrectas'];
+            $noaplica = $resultadoTerreno['noaplica'];
+            $ncontestadas = $resultadoTerreno['ncontestadas'];
 
             $currentStep = 'verificar_evaluacion_existente';
             $stmtExisteEval->execute([
@@ -622,67 +652,101 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
             ]);
             $evalExistente = $stmtExisteEval->fetch(PDO::FETCH_ASSOC) ?: null;
             if ($evalExistente) {
-                if ($idProcesoHabilitacion > 0) {
-                    $currentStep = 'actualizar_proceso_evaluacion_existente';
-                    $stmtUpdateEvalProceso->execute([
-                        ':id_proceso' => $idProcesoHabilitacion,
-                        ':id' => (int)$evalExistente['id'],
-                    ]);
+                if (!$actualizarExistentes) {
+                    if ($idProcesoHabilitacion > 0) {
+                        $currentStep = 'actualizar_proceso_evaluacion_existente';
+                        executeTerrainStatement($stmtUpdateEvalProceso, [
+                            ':id_proceso' => $idProcesoHabilitacion,
+                            ':id' => (int)$evalExistente['id'],
+                        ], 'UPDATE ceo_evaluacion_terreno');
+                    }
 
                     $currentStep = 'buscar_intento_existente';
-                    $stmtFindIntento->execute([
-                        ':rut' => $rut,
-                        ':id_servicio' => $idServicio,
-                        ':fecha' => $fechaHoraIntento->format('Y-m-d'),
-                        ':hora' => $fechaHoraIntento->format('H:i:s'),
-                    ]);
-                    $intentoExistente = $stmtFindIntento->fetch(PDO::FETCH_ASSOC) ?: null;
-                    if ($intentoExistente) {
+                    $intentoExistente = terrainFindIntentoExistente(
+                        $stmtFindIntento,
+                        $stmtFindIntentosMismaFecha,
+                        $rut,
+                        $idServicio,
+                        $fechaHoraIntento->format('Y-m-d'),
+                        $fechaHoraIntento->format('H:i:s'),
+                        $puntajeTotal
+                    );
+                    if ($intentoExistente && $idProcesoHabilitacion > 0) {
                         $currentStep = 'actualizar_proceso_intento_existente';
-                        $stmtUpdateIntentoProceso->execute([
+                        executeTerrainStatement($stmtUpdateIntentoProceso, [
                             ':id_proceso' => $idProcesoHabilitacion,
                             ':id' => (int)$intentoExistente['id'],
-                        ]);
+                        ], 'UPDATE ceo_resultado_terreno_intento');
                     }
+
+                    $duplicadas++;
+                    $detalles[] = [
+                        'rut' => $rut,
+                        'codigo' => $eval['codigo_evaluacion'],
+                        'estado' => 'DUPLICADA',
+                        'motivo' => $idProcesoHabilitacion > 0
+                            ? 'La evaluación ya existe en ceo_evaluacion_terreno. Se completó la asociación al proceso histórico.'
+                            : 'La evaluación ya existe en ceo_evaluacion_terreno.',
+                    ];
+                    continue;
                 }
-
-                $duplicadas++;
-                $detalles[] = [
-                    'rut' => $rut,
-                    'codigo' => $eval['codigo_evaluacion'],
-                    'estado' => 'DUPLICADA',
-                    'motivo' => $idProcesoHabilitacion > 0
-                        ? 'La evaluación ya existe en ceo_evaluacion_terreno. Se completó la asociación al proceso histórico.'
-                        : 'La evaluación ya existe en ceo_evaluacion_terreno.',
-                ];
-                continue;
             }
+            $idEvaluacion = 0;
+            $finalProcesoHabilitacion = $idProcesoHabilitacion > 0
+                ? $idProcesoHabilitacion
+                : (int)($evalExistente['id_proceso_habilitacion'] ?? 0);
 
-            $currentStep = 'insertar_evaluacion_terreno';
-            executeTerrainStatement($stmtEval, [
-                ':codigo' => $eval['codigo_evaluacion'],
-                ':rut' => $rut,
-                ':nombre' => $eval['nombre'],
-                ':cargo' => $eval['cargo'],
-                ':contratista' => $eval['contratista'],
-                ':evaluador' => $eval['evaluador'],
-                ':usuario' => $eval['usuario'],
-                ':resultado' => $eval['resultado'],
-                ':servicio' => $idServicio,
-                ':id_proceso_habilitacion' => $idProcesoHabilitacion > 0 ? $idProcesoHabilitacion : null,
-                ':fecha_eval' => $eval['fecha_evaluacion'],
-                ':fecha_inicio' => $eval['fecha_inicio'],
-                ':fecha_fin' => $eval['fecha_fin'],
-                ':fecha_aprobacion' => $eval['fecha_aprobacion'],
-                ':comentarios_finales' => terrainSafeText($eval['comentarios_finales'] ?? '', 2000),
-            ], 'INSERT ceo_evaluacion_terreno');
-            $idEvaluacion = (int)$pdo->lastInsertId();
+            if ($evalExistente) {
+                $idEvaluacion = (int)$evalExistente['id'];
+                $currentStep = 'actualizar_evaluacion_terreno';
+                executeTerrainStatement($stmtUpdateEval, [
+                    ':id' => $idEvaluacion,
+                    ':nombre' => $eval['nombre'],
+                    ':cargo' => $eval['cargo'],
+                    ':contratista' => $eval['contratista'],
+                    ':evaluador' => $eval['evaluador'],
+                    ':usuario' => $eval['usuario'],
+                    ':resultado' => $puntajeTotal,
+                    ':id_proceso_habilitacion' => $finalProcesoHabilitacion > 0 ? $finalProcesoHabilitacion : null,
+                    ':fecha_eval' => $eval['fecha_evaluacion'],
+                    ':fecha_inicio' => $eval['fecha_inicio'],
+                    ':fecha_fin' => $eval['fecha_fin'],
+                    ':fecha_aprobacion' => $eval['fecha_aprobacion'],
+                    ':comentarios_finales' => terrainSafeText($eval['comentarios_finales'] ?? '', 2000),
+                ], 'UPDATE ceo_evaluacion_terreno');
 
-            $norm = $normalizacionMap[$rut] ?? null;
-            $idEmpresa = is_array($norm) ? ((int)($norm['id_empresa'] ?? 0) ?: null) : null;
-            $horaExamen = '00:00:00';
-            if (!empty($eval['fecha_fin'])) {
-                $horaExamen = (new DateTimeImmutable($eval['fecha_fin']))->format('H:i:s');
+                $currentStep = 'eliminar_detalle_evaluacion_existente';
+                executeTerrainStatement($stmtDeleteEvalDet, [':id' => $idEvaluacion], 'DELETE ceo_evaluacion_terreno_detalle');
+
+                $currentStep = 'eliminar_resultado_prueba_terreno_existente';
+                terrainDeleteHistoricalQuestionResults(
+                    $pdo,
+                    $idServicio,
+                    $rut,
+                    (string)$eval['fecha_evaluacion'],
+                    $horaExamen,
+                    isset($eval['solicitud']) ? (int)$eval['solicitud'] : null
+                );
+            } else {
+                $currentStep = 'insertar_evaluacion_terreno';
+                executeTerrainStatement($stmtEval, [
+                    ':codigo' => $eval['codigo_evaluacion'],
+                    ':rut' => $rut,
+                    ':nombre' => $eval['nombre'],
+                    ':cargo' => $eval['cargo'],
+                    ':contratista' => $eval['contratista'],
+                    ':evaluador' => $eval['evaluador'],
+                    ':usuario' => $eval['usuario'],
+                    ':resultado' => $puntajeTotal,
+                    ':servicio' => $idServicio,
+                    ':id_proceso_habilitacion' => $finalProcesoHabilitacion > 0 ? $finalProcesoHabilitacion : null,
+                    ':fecha_eval' => $eval['fecha_evaluacion'],
+                    ':fecha_inicio' => $eval['fecha_inicio'],
+                    ':fecha_fin' => $eval['fecha_fin'],
+                    ':fecha_aprobacion' => $eval['fecha_aprobacion'],
+                    ':comentarios_finales' => terrainSafeText($eval['comentarios_finales'] ?? '', 2000),
+                ], 'INSERT ceo_evaluacion_terreno');
+                $idEvaluacion = (int)$pdo->lastInsertId();
             }
             $currentStep = 'insertar_seccion_resultado';
             executeTerrainStatement($stmtSecRes, [
@@ -694,10 +758,6 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
             ], 'INSERT ceo_seccion_resultado_terreno');
             $idResultadoSeccion = (int)$pdo->lastInsertId();
 
-            $correctas = 0;
-            $incorrectas = 0;
-            $noaplica = 0;
-            $ncontestadas = 0;
             $detalleResultadoKeys = [];
 
             foreach ($eval['detalles'] as $detalle) {
@@ -716,16 +776,6 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 ], 'INSERT ceo_evaluacion_terreno_detalle');
 
                 [$cumple, $noCumple, $noAplica] = mapTerrenoRespuestaFlags((string)$detalle['respuesta']);
-                if ($cumple) {
-                    $correctas++;
-                } elseif ($noCumple) {
-                    $incorrectas++;
-                } elseif ($noAplica) {
-                    $noaplica++;
-                } else {
-                    $ncontestadas++;
-                }
-
                 if ((int)$detalle['id_seccion'] > 0 && (int)$detalle['id_pregunta'] > 0) {
                     $resultadoKey = implode('|', [
                         $idResultadoSeccion,
@@ -756,30 +806,66 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
                 }
             }
 
-            $notaFinal = calcularNotaFinalDesdePorcentaje((float)$eval['resultado'], $threshold);
-            $currentStep = 'insertar_resultado_terreno_intento';
-            executeTerrainStatement($stmtIntento, [
-                ':rut' => $rut,
-                ':id_servicio' => $idServicio,
-                ':id_proceso_habilitacion' => $idProcesoHabilitacion > 0 ? $idProcesoHabilitacion : null,
-                ':id_evaluador' => resolverIdEvaluadorTerreno($pdo, (string)$eval['usuario'], (string)$eval['evaluador']) ?: ($evaluadorId > 0 ? $evaluadorId : null),
-                ':fecha' => $fechaHoraIntento->format('Y-m-d'),
-                ':hora' => $fechaHoraIntento->format('H:i:s'),
-                ':puntaje_total' => $eval['resultado'],
-                ':correctas' => $correctas,
-                ':incorrectas' => $incorrectas,
-                ':ncontestadas' => $ncontestadas,
-                ':noaplica' => $noaplica,
-                ':notafinal' => $notaFinal,
-            ], 'INSERT ceo_resultado_terreno_intento');
+            $notaFinal = calcularNotaFinalDesdePorcentaje($puntajeTotal, $threshold);
+            $currentStep = 'buscar_intento_resultado_terreno';
+            $intentoExistente = terrainFindIntentoExistente(
+                $stmtFindIntento,
+                $stmtFindIntentosMismaFecha,
+                $rut,
+                $idServicio,
+                $fechaHoraIntento->format('Y-m-d'),
+                $fechaHoraIntento->format('H:i:s'),
+                $puntajeTotal
+            );
 
-            $importadas++;
-            $detalles[] = [
-                'rut' => $rut,
-                'codigo' => $eval['codigo_evaluacion'],
-                'estado' => 'IMPORTADA',
-                'motivo' => 'Cabecera, detalle y resumen de terreno importados correctamente.',
-            ];
+            if ($intentoExistente) {
+                $currentStep = 'actualizar_resultado_terreno_intento';
+                executeTerrainStatement($stmtUpdateIntento, [
+                    ':id' => (int)$intentoExistente['id'],
+                    ':id_proceso_habilitacion' => $finalProcesoHabilitacion > 0 ? $finalProcesoHabilitacion : null,
+                    ':id_evaluador' => $resolvedEvaluadorId,
+                    ':puntaje_total' => $puntajeTotal,
+                    ':correctas' => $correctas,
+                    ':incorrectas' => $incorrectas,
+                    ':ncontestadas' => $ncontestadas,
+                    ':noaplica' => $noaplica,
+                    ':notafinal' => $notaFinal,
+                ], 'UPDATE ceo_resultado_terreno_intento');
+            } else {
+                $currentStep = 'insertar_resultado_terreno_intento';
+                executeTerrainStatement($stmtIntento, [
+                    ':rut' => $rut,
+                    ':id_servicio' => $idServicio,
+                    ':id_proceso_habilitacion' => $finalProcesoHabilitacion > 0 ? $finalProcesoHabilitacion : null,
+                    ':id_evaluador' => $resolvedEvaluadorId,
+                    ':fecha' => $fechaHoraIntento->format('Y-m-d'),
+                    ':hora' => $fechaHoraIntento->format('H:i:s'),
+                    ':puntaje_total' => $puntajeTotal,
+                    ':correctas' => $correctas,
+                    ':incorrectas' => $incorrectas,
+                    ':ncontestadas' => $ncontestadas,
+                    ':noaplica' => $noaplica,
+                    ':notafinal' => $notaFinal,
+                ], 'INSERT ceo_resultado_terreno_intento');
+            }
+
+            if ($evalExistente) {
+                $actualizadas++;
+                $detalles[] = [
+                    'rut' => $rut,
+                    'codigo' => $eval['codigo_evaluacion'],
+                    'estado' => 'ACTUALIZADA',
+                    'motivo' => 'La evaluación existente fue reemplazada usando el archivo origen.',
+                ];
+            } else {
+                $importadas++;
+                $detalles[] = [
+                    'rut' => $rut,
+                    'codigo' => $eval['codigo_evaluacion'],
+                    'estado' => 'IMPORTADA',
+                    'motivo' => 'Cabecera, detalle y resumen de terreno importados correctamente.',
+                ];
+            }
         }
 
         $currentStep = 'commit';
@@ -798,6 +884,7 @@ function importarHistoricoTerrenoCsv(PDO $pdo, array $evaluacionesValidas, array
 
     return [
         'importadas' => $importadas,
+        'actualizadas' => $actualizadas,
         'duplicadas' => $duplicadas,
         'contratistas_creados' => $contratistasCreados,
         'contratistas_incompletos' => $contratistasIncompletos,
@@ -1174,9 +1261,17 @@ function splitFullNameWithWorker(string $fullName, ?array $worker): array
 function mapTerrenoRespuestaFlags(string $respuesta): array
 {
     $norm = normalizeComparableText($respuesta);
-    $cumple = str_starts_with($norm, 'ALCANZO');
-    $noCumple = str_starts_with($norm, 'NOALCANZO');
-    $noAplica = str_starts_with($norm, 'NOSEAPLICA');
+    $compact = str_replace(' ', '', $norm);
+    $cumple = str_starts_with($compact, 'ALCANZO')
+        || str_starts_with($compact, 'ALZANZO');
+    $noAplica = str_starts_with($compact, 'NOSEAPLICA') || str_starts_with($compact, 'NOAPLICA');
+    $noCumple = false;
+
+    if (!$cumple && !$noAplica) {
+        $noCumple = str_starts_with($compact, 'NOALCANZO')
+            || str_starts_with($compact, 'NOALZANZO');
+    }
+
     return [$cumple, $noCumple, $noAplica];
 }
 
@@ -1256,6 +1351,146 @@ function executeTerrainStatement(PDOStatement $stmt, array $params, string $labe
         $stmt->execute($params);
     } catch (Throwable $e) {
         throw new RuntimeException($label . ': ' . $e->getMessage(), 0, $e);
+    }
+}
+
+function terrainFindIntentoExistente(
+    PDOStatement $stmtExacto,
+    PDOStatement $stmtMismaFecha,
+    string $rut,
+    int $idServicio,
+    string $fecha,
+    string $hora,
+    float $puntajeTotal
+): ?array {
+    $stmtExacto->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':fecha' => $fecha,
+        ':hora' => $hora,
+    ]);
+    $exacto = $stmtExacto->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($exacto) {
+        return $exacto;
+    }
+
+    $stmtMismaFecha->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':fecha' => $fecha,
+    ]);
+    $candidatos = $stmtMismaFecha->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    if (count($candidatos) === 1) {
+        return $candidatos[0];
+    }
+
+    $porPuntaje = array_values(array_filter(
+        $candidatos,
+        static fn(array $row): bool => (float)($row['puntaje_total'] ?? 0) === $puntajeTotal
+    ));
+    if (count($porPuntaje) === 1) {
+        return $porPuntaje[0];
+    }
+
+    return null;
+}
+
+function terrainBuildOutcomeFromDetalles(array $detalles): array
+{
+    $correctas = 0;
+    $incorrectas = 0;
+    $noaplica = 0;
+    $ncontestadas = 0;
+
+    foreach ($detalles as $detalle) {
+        [$cumple, $noCumple, $noAplica] = mapTerrenoRespuestaFlags((string)($detalle['respuesta'] ?? ''));
+        if ($cumple) {
+            $correctas++;
+        } elseif ($noCumple) {
+            $incorrectas++;
+        } elseif ($noAplica) {
+            $noaplica++;
+        } else {
+            $ncontestadas++;
+        }
+    }
+
+    $utiles = $correctas + $incorrectas;
+    $porcentaje = $utiles > 0 ? round(($correctas * 100) / $utiles, 2) : 0.0;
+
+    return [
+        'correctas' => $correctas,
+        'incorrectas' => $incorrectas,
+        'noaplica' => $noaplica,
+        'ncontestadas' => $ncontestadas,
+        'porcentaje' => $porcentaje,
+    ];
+}
+
+function terrainResolveFechaHoraIntento(array $eval): DateTimeImmutable
+{
+    if (!empty($eval['fecha_fin'])) {
+        return new DateTimeImmutable((string)$eval['fecha_fin']);
+    }
+    if (!empty($eval['fecha_inicio'])) {
+        return new DateTimeImmutable((string)$eval['fecha_inicio']);
+    }
+    return new DateTimeImmutable((string)$eval['fecha_evaluacion'] . ' 00:00:00');
+}
+
+function terrainResolveHoraExamen(array $eval): string
+{
+    if (!empty($eval['fecha_fin'])) {
+        return (new DateTimeImmutable((string)$eval['fecha_fin']))->format('H:i:s');
+    }
+    return '00:00:00';
+}
+
+function terrainDeleteHistoricalQuestionResults(PDO $pdo, int $idServicio, string $rut, string $fechaExamen, string $horaExamen, ?int $nsolicitud): void
+{
+    $sql = '
+        SELECT DISTINCT sr.id
+        FROM ceo_seccion_resultado_terreno sr
+        INNER JOIN ceo_resultado_prueba_terreno rpt ON rpt.id_resultado = sr.id
+        WHERE sr.id_servicio = :id_servicio
+          AND sr.fecha_examen = :fecha_examen
+          AND sr.hora_examen = :hora_examen
+          AND rpt.rut_contratista = :rut
+    ';
+    $params = [
+        ':id_servicio' => $idServicio,
+        ':fecha_examen' => $fechaExamen,
+        ':hora_examen' => $horaExamen,
+        ':rut' => $rut,
+    ];
+
+    if ($nsolicitud === null) {
+        $sql .= ' AND sr.nsolicitud IS NULL';
+    } else {
+        $sql .= ' AND sr.nsolicitud = :nsolicitud';
+        $params[':nsolicitud'] = $nsolicitud;
+    }
+
+    $stmtIds = $pdo->prepare($sql);
+    $stmtIds->execute($params);
+    $ids = array_map('intval', $stmtIds->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    if ($ids === []) {
+        return;
+    }
+
+    $stmtDeleteResultados = $pdo->prepare('DELETE FROM ceo_resultado_prueba_terreno WHERE id_resultado = :id_resultado AND rut_contratista = :rut');
+    $stmtCountResultados = $pdo->prepare('SELECT COUNT(*) FROM ceo_resultado_prueba_terreno WHERE id_resultado = :id_resultado');
+    $stmtDeleteSeccion = $pdo->prepare('DELETE FROM ceo_seccion_resultado_terreno WHERE id = :id');
+
+    foreach ($ids as $idResultado) {
+        $stmtDeleteResultados->execute([
+            ':id_resultado' => $idResultado,
+            ':rut' => $rut,
+        ]);
+        $stmtCountResultados->execute([':id_resultado' => $idResultado]);
+        if ((int)$stmtCountResultados->fetchColumn() === 0) {
+            $stmtDeleteSeccion->execute([':id' => $idResultado]);
+        }
     }
 }
 
@@ -1939,7 +2174,7 @@ function analizarHistoriaTerrenoCsv(PDO $pdo, string $path, int $idServicio): ar
     ];
 }
 
-function loadTerrenoHistoriSheetFromContext(array $context, string $sheetName, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
+function loadTerrenoHistoriSheetFromContext(array $context, string $sheetName, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks, bool $actualizarExistentes = false): array
 {
     $sheetXml = simpleWorkbookSheetXmlFromContext($context, $sheetName);
     if ($sheetXml === null) {
@@ -2083,24 +2318,33 @@ function loadTerrenoHistoriSheetFromContext(array $context, string $sheetName, i
     $reader->close();
 
     $evaluacionesValidas = [];
+    $actualizables = 0;
     foreach ($evaluaciones as $eval) {
         if ($eval['duplicada']) {
             $duplicadas++;
-        } else {
+            $actualizables++;
+        }
+        if (!$eval['duplicada'] || $actualizarExistentes) {
             $evaluacionesValidas[] = $eval;
         }
         appendLimited($detallesFilas, [
             'fila' => '-',
             'codigo' => $eval['codigo_evaluacion'],
             'rut' => $eval['rut'],
-            'estado' => $eval['duplicada'] ? 'DUPLICADA' : 'VALIDA',
-            'motivo' => $eval['duplicada'] ? 'La evaluación ya existe en ceo_evaluacion_terreno.' : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0 ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.' : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
+            'estado' => $eval['duplicada'] ? ($actualizarExistentes ? 'ACTUALIZABLE' : 'DUPLICADA') : 'VALIDA',
+            'motivo' => $eval['duplicada']
+                ? ($actualizarExistentes
+                    ? 'La evaluación ya existe en ceo_evaluacion_terreno y se actualizará usando el archivo origen.'
+                    : 'La evaluación ya existe en ceo_evaluacion_terreno.')
+                : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0
+                    ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.'
+                    : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
         ], TERRENO_PREVIEW_LIMIT);
     }
 
     return [
         'evaluaciones_validas' => $evaluacionesValidas,
-        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
+        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'actualizables' => $actualizarExistentes ? $actualizables : 0, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
         'mapeo_secciones' => array_values($mapeoSecciones),
         'mapeo_preguntas' => array_values($mapeoPreguntas),
         'ruts_normalizacion' => $rutsNormalizacion,
@@ -2148,7 +2392,7 @@ function simpleXlsxReadCurrentRow(XMLReader $reader, array $sharedStrings): arra
     return array_values($row);
 }
 
-function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks): array
+function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $workers, array $instrumento, array $existingEvalKeys, array $processLinks, bool $actualizarExistentes = false): array
 {
     if (empty($rows)) {
         throw new RuntimeException('La hoja Evaluaciones de Terreno Histori está vacía.');
@@ -2269,24 +2513,33 @@ function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $worker
     }
 
     $evaluacionesValidas = [];
+    $actualizables = 0;
     foreach ($evaluaciones as $eval) {
         if ($eval['duplicada']) {
             $duplicadas++;
-        } else {
+            $actualizables++;
+        }
+        if (!$eval['duplicada'] || $actualizarExistentes) {
             $evaluacionesValidas[] = $eval;
         }
         appendLimited($detallesFilas, [
             'fila' => '-',
             'codigo' => $eval['codigo_evaluacion'],
             'rut' => $eval['rut'],
-            'estado' => $eval['duplicada'] ? 'DUPLICADA' : 'VALIDA',
-            'motivo' => $eval['duplicada'] ? 'La evaluación ya existe en ceo_evaluacion_terreno.' : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0 ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.' : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
+            'estado' => $eval['duplicada'] ? ($actualizarExistentes ? 'ACTUALIZABLE' : 'DUPLICADA') : 'VALIDA',
+            'motivo' => $eval['duplicada']
+                ? ($actualizarExistentes
+                    ? 'La evaluación ya existe en ceo_evaluacion_terreno y se actualizará usando el archivo origen.'
+                    : 'La evaluación ya existe en ceo_evaluacion_terreno.')
+                : ((int)($eval['id_proceso_habilitacion'] ?? 0) > 0
+                    ? 'Evaluación válida para importar y asociar al proceso histórico N ' . (int)($eval['proceso_historico'] ?? 0) . '.'
+                    : 'Evaluación válida para importar. Sin proceso histórico asociado.'),
         ], TERRENO_PREVIEW_LIMIT);
     }
 
     return [
         'evaluaciones_validas' => $evaluacionesValidas,
-        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
+        'summary' => ['filas' => $filas, 'evaluaciones_unicas' => count($evaluaciones), 'evaluaciones_validas' => count($evaluacionesValidas), 'duplicadas' => $duplicadas, 'actualizables' => $actualizarExistentes ? $actualizables : 0, 'errores' => $errores, 'detalles_filas' => $detallesFilas],
         'mapeo_secciones' => array_values($mapeoSecciones),
         'mapeo_preguntas' => array_values($mapeoPreguntas),
         'ruts_normalizacion' => $rutsNormalizacion,
@@ -2361,6 +2614,14 @@ function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $worker
             <?php endforeach; ?>
           </select>
         </div>
+        <div class="col-md-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="1" id="actualizar_existentes" name="actualizar_existentes" <?= $actualizarExistentes ? 'checked' : '' ?>>
+            <label class="form-check-label" for="actualizar_existentes">
+              Actualizar evaluaciones ya cargadas usando el mismo archivo origen
+            </label>
+          </div>
+        </div>
         <div class="col-md-1 d-flex gap-2">
           <button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i>Analizar</button>
         </div>
@@ -2381,10 +2642,11 @@ function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $worker
           <h5 class="mb-1">Resumen del análisis</h5>
           <div class="text-muted small">Generado el <?= esc((string)$analisis['created_at']) ?></div>
           <div class="text-muted small">Servicio: <strong><?= esc((string)$analisis['servicio']) ?></strong> (ID <?= (int)$analisis['id_servicio'] ?>) | Agrupación: <strong><?= esc((string)$analisis['grupo']) ?></strong> (ID <?= (int)$analisis['id_grupo'] ?>)</div>
+          <div class="text-muted small">Modo: <strong><?= !empty($analisis['actualizar_existentes']) ? 'Actualizar existentes' : 'Solo nuevas evaluaciones' ?></strong></div>
         </div>
         <form method="post" class="m-0">
           <input type="hidden" name="accion" value="importar">
-          <button class="btn btn-success" type="submit" <?= empty($analisis['payload_file']) ? 'disabled' : '' ?>><i class="bi bi-database-add me-1"></i>Confirmar carga</button>
+          <button class="btn btn-success" type="submit" <?= empty($analisis['payload_file']) ? 'disabled' : '' ?>><i class="bi bi-database-add me-1"></i><?= !empty($analisis['actualizar_existentes']) ? 'Confirmar carga / actualización' : 'Confirmar carga' ?></button>
         </form>
       </div>
 
@@ -2394,6 +2656,12 @@ function loadTerrenoHistoriSheetRows(array $rows, int $idServicio, array $worker
         <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Evaluaciones válidas</div><div class="fs-4 fw-bold text-success"><?= (int)$analisis['evaluaciones']['evaluaciones_validas'] ?></div></div></div>
         <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Duplicadas</div><div class="fs-4 fw-bold text-secondary"><?= (int)$analisis['evaluaciones']['duplicadas'] ?></div></div></div>
       </div>
+
+      <?php if (!empty($analisis['actualizar_existentes'])): ?>
+        <div class="row g-3 mb-4">
+          <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Actualizables</div><div class="fs-4 fw-bold text-warning"><?= (int)($analisis['evaluaciones']['actualizables'] ?? 0) ?></div></div></div>
+        </div>
+      <?php endif; ?>
 
       <div class="row g-3 mb-4">
         <div class="col-md-6"><div class="border rounded p-3 bg-light"><div class="small text-muted">Procesos históricos detectados</div><div class="fs-4 fw-bold"><?= (int)($analisis['historia']['procesos_detectados'] ?? 0) ?></div></div></div>

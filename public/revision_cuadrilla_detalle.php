@@ -74,6 +74,65 @@ function revResolverPesos(?string $cargo): ?array
     }
     return null;
 }
+
+function revAgruparDetalleHistorialEvaluaciones(array $rows): array
+{
+    $grouped = [];
+
+    foreach ($rows as $row) {
+        $servicio = trim((string)($row['servicio'] ?? ''));
+        $numeroProceso = trim((string)($row['numero_proceso'] ?? ''));
+        $key = $servicio . '|' . $numeroProceso;
+
+        if (!isset($grouped[$key])) {
+            $grouped[$key] = [
+                'servicio' => $servicio,
+                'numero_proceso' => $numeroProceso,
+                'cargo' => trim((string)($row['cargo'] ?? '')),
+                'teorica' => null,
+                'terreno' => null,
+                'fecha_orden' => null,
+            ];
+        }
+
+        $fecha = $row['fecha_hora'] ?? null;
+        if ($fecha instanceof DateTimeImmutable && (
+            !($grouped[$key]['fecha_orden'] instanceof DateTimeImmutable) ||
+            $fecha > $grouped[$key]['fecha_orden']
+        )) {
+            $grouped[$key]['fecha_orden'] = $fecha;
+        }
+
+        if ($grouped[$key]['cargo'] === '' && trim((string)($row['cargo'] ?? '')) !== '') {
+            $grouped[$key]['cargo'] = trim((string)$row['cargo']);
+        }
+
+        $tipo = strtoupper(trim((string)($row['tipo'] ?? '')));
+        if ($tipo === 'TEORICA') {
+            $actual = $grouped[$key]['teorica']['fecha_hora'] ?? null;
+            if (!($actual instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $actual)) {
+                $grouped[$key]['teorica'] = $row;
+            }
+        } elseif ($tipo === 'TERRENO') {
+            $actual = $grouped[$key]['terreno']['fecha_hora'] ?? null;
+            if (!($actual instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $actual)) {
+                $grouped[$key]['terreno'] = $row;
+            }
+        }
+    }
+
+    $result = array_values($grouped);
+    usort($result, static function (array $a, array $b): int {
+        $fechaA = $a['fecha_orden'] instanceof DateTimeImmutable ? $a['fecha_orden']->getTimestamp() : 0;
+        $fechaB = $b['fecha_orden'] instanceof DateTimeImmutable ? $b['fecha_orden']->getTimestamp() : 0;
+        if ($fechaA !== $fechaB) {
+            return $fechaB <=> $fechaA;
+        }
+        return strnatcmp((string)($b['numero_proceso'] ?? ''), (string)($a['numero_proceso'] ?? ''));
+    });
+
+    return $result;
+}
 // ============================================================
 // CONSULTA DATOS DEL TRABAJADOR
 // ============================================================
@@ -82,6 +141,7 @@ $trabajador = null;
 $wfRegistros = [];
 $agrupaciones = [];
 $detalleHistorialEvaluaciones = [];
+$detalleHistorialEvaluacionesAgrupado = [];
 $historialConsolidado = [];
 $analisisAreasTeorica = [];
 $analisisAreasMeta = [
@@ -296,6 +356,8 @@ if ($rut) {
             }
             return strcmp((string)$a['tipo'], (string)$b['tipo']);
         });
+
+        $detalleHistorialEvaluacionesAgrupado = revAgruparDetalleHistorialEvaluaciones($detalleHistorialEvaluaciones);
 }
 
 $intentos = [];
@@ -905,60 +967,60 @@ body {background:#f7f9fc;}
             <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
                 <thead>
                     <tr class="text-center">
-                        <th>Fecha / Hora</th>
-                        <th>Tipo</th>
                         <th>Servicio</th>
                         <th>Número Proceso</th>
                         <th>Cargo</th>
-                        <th>Puntaje</th>
-                        <th>Nota</th>
-                        <th>Resultado</th>
-                        <th>Origen</th>
+                        <th>Fecha / Hora Teórica</th>
+                        <th>Puntaje Teórica</th>
+                        <th>Nota Teórica</th>
+                        <th>Resultado Teórica</th>
+                        <th>Origen Teórica</th>
+                        <th>Fecha / Hora Terreno</th>
+                        <th>Puntaje Terreno</th>
+                        <th>Nota Terreno</th>
+                        <th>Resultado Terreno</th>
+                        <th>Origen Terreno</th>
                     </tr>
                 </thead>
                 <tbody>
-                <?php if (empty($detalleHistorialEvaluaciones)): ?>
+                <?php if (empty($detalleHistorialEvaluacionesAgrupado)): ?>
                     <tr>
-                        <td colspan="9" class="text-center text-muted">
+                        <td colspan="13" class="text-center text-muted">
                             Sin detalle histórico de evaluaciones para este RUT
                         </td>
                     </tr>
                 <?php else: ?>
-                    <?php $fechaGrupoAnterior = ''; ?>
-                    <?php foreach ($detalleHistorialEvaluaciones as $detalleHist): ?>
+                    <?php foreach ($detalleHistorialEvaluacionesAgrupado as $detalleHist): ?>
                         <?php
-                            $fechaGrupo = (string)($detalleHist['fecha_grupo'] ?? '');
-                            if ($fechaGrupo !== $fechaGrupoAnterior):
-                                $fechaGrupoAnterior = $fechaGrupo;
-                        ?>
-                            <tr class="table-primary">
-                                <td colspan="9" class="fw-semibold">
-                                    <?= esc(revFmtFecha($fechaGrupo)) ?>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
-
-                        <?php
-                            $tipoDetalle = strtoupper(trim((string)$detalleHist['tipo']));
-                            $tipoTexto = $tipoDetalle === 'TEORICA' ? 'Teórica' : ($tipoDetalle === 'TERRENO' ? 'Terreno' : $tipoDetalle);
-                            $tipoClass = $tipoDetalle === 'TEORICA' ? 'info' : 'warning';
-                            $resultadoDetalle = strtoupper(trim((string)$detalleHist['resultado']));
-                            $resultadoClass = match ($resultadoDetalle) {
+                            $teorica = $detalleHist['teorica'] ?? null;
+                            $terreno = $detalleHist['terreno'] ?? null;
+                            $resultadoTeorica = strtoupper(trim((string)($teorica['resultado'] ?? '')));
+                            $resultadoTerreno = strtoupper(trim((string)($terreno['resultado'] ?? '')));
+                            $resultadoTeoricaClass = match ($resultadoTeorica) {
+                                'APROBADO' => 'success',
+                                'REPROBADO' => 'danger',
+                                default => 'secondary',
+                            };
+                            $resultadoTerrenoClass = match ($resultadoTerreno) {
                                 'APROBADO' => 'success',
                                 'REPROBADO' => 'danger',
                                 default => 'secondary',
                             };
                         ?>
                         <tr>
-                            <td class="text-center"><?= esc(revFmtFechaHora($detalleHist['fecha_hora'])) ?></td>
-                            <td class="text-center"><span class="badge text-bg-<?= esc($tipoClass) ?>"><?= esc($tipoTexto) ?></span></td>
                             <td><?= esc((string)$detalleHist['servicio']) ?></td>
                             <td class="text-center"><?= esc((string)$detalleHist['numero_proceso']) ?></td>
                             <td><?= esc((string)$detalleHist['cargo']) ?></td>
-                            <td class="text-end"><?= esc(revFmtNota($detalleHist['puntaje'])) ?></td>
-                            <td class="text-end"><?= esc(revFmtNota($detalleHist['nota_final'])) ?></td>
-                            <td class="text-center"><span class="badge text-bg-<?= esc($resultadoClass) ?>"><?= esc($resultadoDetalle ?: '-') ?></span></td>
-                            <td><?= esc((string)$detalleHist['origen']) ?></td>
+                            <td class="text-center"><?= esc(revFmtFechaHora($teorica['fecha_hora'] ?? null)) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($teorica['puntaje'] ?? null)) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($teorica['nota_final'] ?? null)) ?></td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($resultadoTeoricaClass) ?>"><?= esc($resultadoTeorica ?: '-') ?></span></td>
+                            <td><?= esc((string)($teorica['origen'] ?? '')) ?></td>
+                            <td class="text-center"><?= esc(revFmtFechaHora($terreno['fecha_hora'] ?? null)) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($terreno['puntaje'] ?? null)) ?></td>
+                            <td class="text-end"><?= esc(revFmtNota($terreno['nota_final'] ?? null)) ?></td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($resultadoTerrenoClass) ?>"><?= esc($resultadoTerreno ?: '-') ?></span></td>
+                            <td><?= esc((string)($terreno['origen'] ?? '')) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -1237,6 +1299,7 @@ body {background:#f7f9fc;}
 <script>
 (() => {
   const rut = <?= json_encode($rut, JSON_UNESCAPED_UNICODE) ?>;
+  const servicioActual = <?= json_encode((int)($trabajador['id_servicio'] ?? 0), JSON_UNESCAPED_UNICODE) ?>;
   const btnGenerar = document.getElementById('btnGenerarProceso');
   const btnAnterior = document.getElementById('btnProcesoAnterior');
   const msg = document.getElementById('procesoMsg');
@@ -1328,7 +1391,7 @@ body {background:#f7f9fc;}
     try {
       btnGenerar.disabled = true;
       setProcesoMsg('Procesando...', 'secondary');
-      await crearProceso();
+      await crearProceso(servicioActual > 0 ? {id_servicio: servicioActual} : {});
     } catch (err) {
       setProcesoMsg(err.message || 'Error al generar proceso', 'danger');
     } finally {

@@ -19,6 +19,25 @@ use Dompdf\Options;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
+if (!function_exists('agregarCorreosMailerUnicos')) {
+  function agregarCorreosMailerUnicos(PHPMailer $mail, array $correos, string $modo, array &$registrados): void
+  {
+    foreach (normalizarCorreosEmpresa($correos) as $correo) {
+      $key = mb_strtolower(trim($correo), 'UTF-8');
+      if ($key === '' || isset($registrados[$key])) {
+        continue;
+      }
+
+      if ($modo === 'to') {
+        $mail->addAddress($correo);
+      } else {
+        $mail->addCC($correo);
+      }
+      $registrados[$key] = true;
+    }
+  }
+}
+
 if (empty($_SESSION['auth'])) {
   header('Location: /ceo/public/index.php');
   exit;
@@ -55,7 +74,9 @@ if ($idSolicitud > 0) {
 /* ====================== CARGA CABECERA SOLICITUD ====================== */
 $sqlCab = "
   SELECT s.nsolicitud, s.fecha, s.horainicio, s.horatermino,
+         s.contratista,
          e.nombre AS empresa, 
+         e.correo AS empresa_correo,
          u.desc_uo AS unidad_op,
          sv.servicio AS servicio,
          pa.desc_patios AS patio,
@@ -99,6 +120,19 @@ $motivoReinduccion = $S['motivoreinduccion_nombre'] ?? '';
 $tipoVisita = $S['tipo_visita'] ?? '';
 $respHSE   = $S['resp_hse'] ?? '';
 $respLinea = trim(($S['eval_nombre'] ?? '') . ' ' . ($S['eval_ap'] ?? '') . ' ' . ($S['eval_am'] ?? ''));
+$esSolicitudHabilitacion = in_array(
+  mb_strtolower(trim((string)$habMotivo), 'UTF-8'),
+  ['habilitación', 'habilitacion'],
+  true
+);
+$correosEmpresa = [];
+if ($esSolicitudHabilitacion) {
+  $correosEmpresa = obtenerCorreosEmpresa(
+    $pdo,
+    (int)($S['contratista'] ?? 0),
+    (string)($S['empresa_correo'] ?? '')
+  );
+}
 
 /* ====================== CARGA PARTICIPANTES ====================== */
 $sqlPart = "
@@ -318,15 +352,26 @@ try {
   $mail2->Port       = 465;
 
   $mail2->setFrom('ceo@noetica.cl', 'Autorización CEO');
+  $correosRegistrados = [];
   $mail2->addAddress('patricio.acuna@enel.com', 'Patricio Acuña');
+  $correosRegistrados['patricio.acuna@enel.com'] = true;
   $mail2->addAddress('yanett.henriquez@enel.com', 'Yanett Henriquez');
+  $correosRegistrados['yanett.henriquez@enel.com'] = true;
   $mail2->addAddress('leonel.morales2.external@enel.com', 'Leonel Morales');
+  $correosRegistrados['leonel.morales2.external@enel.com'] = true;
   if (!empty($sol['correo']) && filter_var($sol['correo'], FILTER_VALIDATE_EMAIL)) {
     $mail2->addCC($sol['correo'], $sol['nombres']);
+    $correosRegistrados[mb_strtolower(trim((string)$sol['correo']), 'UTF-8')] = true;
   }
   $mail2->addCC('marcelo.jofre.external@enel.com');
+  $correosRegistrados['marcelo.jofre.external@enel.com'] = true;
   $mail2->addCC('angela.herrera.external@enel.com');  
+  $correosRegistrados['angela.herrera.external@enel.com'] = true;
   $mail2->addCC('melanie.lopez.external@enel.com');
+  $correosRegistrados['melanie.lopez.external@enel.com'] = true;
+  if (!empty($correosEmpresa)) {
+    agregarCorreosMailerUnicos($mail2, $correosEmpresa, 'cc', $correosRegistrados);
+  }
 
   $mail2->isHTML(true);
   $mail2->CharSet  = 'UTF-8';

@@ -44,7 +44,7 @@ try {
         throw new Exception('Solicitud inválida');
     }
 
-    if ($id_servicio <= 0 || $id_empresa <= 0) {
+    if ($id_servicio <= 0) {
         throw new Exception('Datos de cabecera incompletos');
     }
 
@@ -171,6 +171,31 @@ try {
         throw new Exception('Las cuadrillas recibidas no coinciden con las evaluaciones seleccionadas.');
     }
 
+    // Resolver empresa real por cuadrilla; en terreno no siempre viene en la sesión del evaluador.
+    $placeholdersCuad = implode(',', array_fill(0, count($cuadrillasSel), '?'));
+    $stmtEmpresaCuad = $db->prepare("
+        SELECT cuadrilla, empresa
+        FROM ceo_habilitacion
+        WHERE cuadrilla IN ($placeholdersCuad)
+    ");
+    $stmtEmpresaCuad->execute($cuadrillasSel);
+    $empresaRows = $stmtEmpresaCuad->fetchAll(PDO::FETCH_ASSOC);
+
+    $mapCuadrillaEmpresa = [];
+    foreach ($empresaRows as $empresaRow) {
+        $cuadrillaEmpresa = (int)($empresaRow['cuadrilla'] ?? 0);
+        $empresaId = (int)($empresaRow['empresa'] ?? 0);
+        if ($cuadrillaEmpresa > 0 && $empresaId > 0) {
+            $mapCuadrillaEmpresa[$cuadrillaEmpresa] = $empresaId;
+        }
+    }
+
+    foreach ($cuadrillasSel as $cuadrilla) {
+        if (empty($mapCuadrillaEmpresa[(int)$cuadrilla])) {
+            throw new Exception("No se pudo determinar la empresa de la cuadrilla $cuadrilla.");
+        }
+    }
+
     /* ============================================================
        4. PREPARAR SENTENCIAS
        ============================================================ */
@@ -247,8 +272,10 @@ try {
     $resultados = []; // cuadrilla => id_resultado
 
     foreach ($cuadrillasSel as $cuadrilla) {
+        $empresaCabecera = (int)($mapCuadrillaEmpresa[(int)$cuadrilla] ?? 0);
+
         $stmtCab->execute([
-            $id_empresa,
+            $empresaCabecera,
             $fecha,
             $hora,
             $id_servicio,

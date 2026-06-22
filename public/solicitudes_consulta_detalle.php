@@ -179,6 +179,7 @@ $tiposVisita = [
     'Colegio',
     'Institutos profesionales',
     'Universidades',
+    'Visita Empresas',
     'Municipios',
     'Carabineros',
     'Bomberos',

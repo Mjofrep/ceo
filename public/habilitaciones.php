@@ -49,14 +49,24 @@ $ccAdministradores = implode(', ', array_filter(array_map('trim', $correosAdmini
 $sql = "
 SELECT
     h.cuadrilla,
-     h.estado,
+    h.estado,
     h.empresa,
     ce.nombre AS empresa_nombre,
     cu.desc_uo AS uo,
     sp.servicio,
     h.fecha,
     CONCAT(u.nombres,' ',u.apellidos) AS gestor,
-    h.nsolicitud
+    h.nsolicitud,
+    CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM ceo_permiso_documento pd
+            WHERE pd.id_habilitacion = h.id
+              AND pd.tipo = 'PERMISO'
+              AND pd.estado = 'VIGENTE'
+        ) THEN 1
+        ELSE 0
+    END AS tiene_permiso
 FROM ceo_habilitacion h
 INNER JOIN ceo_empresas ce ON ce.id = h.empresa
 INNER JOIN ceo_servicios_pruebas sp ON sp.id = h.id_servicio
@@ -93,6 +103,7 @@ body { background:#f7f9fc; }
 .topbar { background:#fff; border-bottom:1px solid #e3e6ea; }
 .table thead th { background:#eaf2fb; }
 .table-hover tbody tr { cursor:pointer; }
+.badge-cuadrilla { min-width:72px; }
 
 /* ✅ Solo para la vista previa en la modal: ocultar títulos de cuadrilla */
 #previewParticipantes .titulo-cuadrilla { display:none; }
@@ -144,8 +155,19 @@ body { background:#f7f9fc; }
 ====================================================== -->
 <div class="card shadow-sm">
   <div class="card-body">
+    <div class="row g-2 mb-3">
+      <div class="col-md-5 col-lg-4">
+        <label for="filtroGeneral" class="form-label">Filtro general</label>
+        <input
+          type="text"
+          id="filtroGeneral"
+          class="form-control form-control-sm"
+          placeholder="Buscar por cuadrilla, empresa, UO, servicio, fecha, gestor o solicitud"
+        >
+      </div>
+    </div>
     <div class="table-responsive">
-      <table class="table table-sm table-hover align-middle">
+      <table class="table table-sm table-hover align-middle" id="tablaHabilitaciones">
         <thead class="text-center">
           <tr>
             <th style="width:40px;"><input type="checkbox" id="chkAll"></th>
@@ -162,7 +184,14 @@ body { background:#f7f9fc; }
             <?php foreach ($rows as $r): ?>
             <?php
               $cerrado = (strtolower($r['estado']) === 'cerrado');
-              $badgeClass = $cerrado ? 'bg-danger' : 'bg-success';
+              $tienePermiso = (int)($r['tiene_permiso'] ?? 0) === 1;
+              if ($cerrado) {
+                  $badgeClass = 'bg-danger';
+              } elseif ($tienePermiso) {
+                  $badgeClass = 'bg-warning text-dark';
+              } else {
+                  $badgeClass = 'bg-success';
+              }
             ?>
             <tr
               data-cuadrilla="<?= (int)$r['cuadrilla'] ?>"
@@ -177,7 +206,7 @@ body { background:#f7f9fc; }
               </td>
             
               <td>
-                <span class="badge <?= $badgeClass ?>">
+                <span class="badge badge-cuadrilla <?= $badgeClass ?>">
                   C<?= (int)$r['cuadrilla'] ?>
                 </span>
               </td>
@@ -310,6 +339,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const empresaEvaluadoraSelect = document.getElementById('empresaEvaluadoraSelect');
   const correoEmpresaEvaluadora = document.getElementById('correoEmpresaEvaluadora');
   const rutEmpresaEvaluadora = document.getElementById('rutEmpresaEvaluadora');
+  const filtroGeneral = document.getElementById('filtroGeneral');
+  const tablaHabilitaciones = document.getElementById('tablaHabilitaciones');
+  const filasTabla = tablaHabilitaciones
+    ? [...tablaHabilitaciones.querySelectorAll('tbody tr')]
+    : [];
 
   function actualizarDatosEmpresaEvaluadora() {
     const selected = empresaEvaluadoraSelect?.selectedOptions?.[0];
@@ -325,9 +359,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   empresaEvaluadoraSelect?.addEventListener('change', actualizarDatosEmpresaEvaluadora);
 
+  filtroGeneral?.addEventListener('input', function () {
+    const termino = this.value.trim().toLowerCase();
+
+    filasTabla.forEach(tr => {
+      const texto = tr.innerText.toLowerCase();
+      tr.style.display = termino === '' || texto.includes(termino) ? '' : 'none';
+    });
+
+    const chkAll = document.getElementById('chkAll');
+    if (chkAll) chkAll.checked = false;
+  });
+
   // CHECK ALL
   document.getElementById('chkAll').addEventListener('change', function () {
-    document.querySelectorAll('.chkFila').forEach(c => c.checked = this.checked);
+    document.querySelectorAll('tbody tr').forEach(tr => {
+      if (tr.style.display === 'none') {
+        return;
+      }
+      const checkbox = tr.querySelector('.chkFila');
+      if (checkbox && !checkbox.disabled) {
+        checkbox.checked = this.checked;
+      }
+    });
   });
 
   // DOBLE CLICK (SE MANTIENE)

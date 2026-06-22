@@ -10,6 +10,10 @@ if (empty($_SESSION['auth'])) {
     exit;
 }
 
+$rolUsuario = strtolower((string) ($_SESSION['auth']['rol'] ?? ''));
+$idEmpresaUser = (int) ($_SESSION['auth']['id_empresa'] ?? 0);
+$esContratista = ($rolUsuario === 'contratista');
+
 $cuad = (int)($_GET['cuadrilla'] ?? 0);
 if ($cuad <= 0) {
     echo json_encode(['ok'=>false,'msg'=>'Cuadrilla inválida']);
@@ -17,6 +21,17 @@ if ($cuad <= 0) {
 }
 
 $pdo = db();
+
+if ($esContratista) {
+    $stEmpresa = $pdo->prepare('SELECT empresa FROM ceo_habilitacion WHERE cuadrilla = :cuadrilla LIMIT 1');
+    $stEmpresa->execute([':cuadrilla' => $cuad]);
+    $idEmpresaCuadrilla = (int) $stEmpresa->fetchColumn();
+
+    if ($idEmpresaCuadrilla <= 0 || $idEmpresaCuadrilla !== $idEmpresaUser) {
+        echo json_encode(['ok' => false, 'msg' => 'No puedes editar cuadrillas de otra empresa']);
+        exit;
+    }
+}
 
 $sql = "SELECT 
     p.rut,

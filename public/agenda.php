@@ -124,15 +124,7 @@ FROM ceo_habilitacion h
 LEFT JOIN ceo_empresas ce ON h.empresa = ce.id
 ";
 
-if ($esContratista) {
-    $sqlCuad .= " WHERE h.empresa = :empresa ";
-}
-
 $stmtCuad = $pdo->prepare($sqlCuad);
-
-if ($esContratista) {
-    $stmtCuad->bindValue(':empresa', $idEmpresaUser, PDO::PARAM_INT);
-}
 
 $stmtCuad->execute();
 $cuadrillas = $stmtCuad->fetchAll(PDO::FETCH_ASSOC);
@@ -896,6 +888,13 @@ fetch("../public/get_participantes_cuadrilla.php?cuadrilla=" + cuadrilla)
 });
 
 document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.btnCuadrillaAjena');
+    if (!btn) return;
+
+    alert('Planificación de otra empresa');
+});
+
+document.addEventListener('click', function (e) {
     const btn = e.target.closest('.celda-planificacion');
     if (!btn) return;
 
@@ -921,43 +920,57 @@ document.addEventListener('click', function (e) {
     fetch(`../public/get_cuadrillas_celda.php?fecha=${encodeURIComponent(fecha)}&jornada=${encodeURIComponent(jornada)}&servicio=${encodeURIComponent(servicio)}`)
         .then(r => r.json())
         .then(data => {
-            tbody.innerHTML = '';
-
             if (!data.ok) {
                 tbody.innerHTML = `<tr><td colspan="5" class="text-danger text-center">${data.msg}</td></tr>`;
                 return;
             }
 
             if (!data.cuadrillas || data.cuadrillas.length === 0) {
+                tbody.innerHTML = '';
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Sin cuadrillas aún.</td></tr>';
-                return;
-            }
+                const modal = new bootstrap.Modal(document.getElementById('modalCuadrillasCelda'));
+                modal.show();
+            } else {
+                const tieneEditable = data.cuadrillas.some(c => !!c.editable);
 
-            data.cuadrillas.forEach(c => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><span class="badge bg-success">C${c.cuadrilla}</span></td>
-                    <td>${c.numeros_proceso || 'Sin proceso'}</td>
-                    <td>${c.nombre_empresa || '—'}</td>
-                    <td>${c.total_participantes || 0}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary me-1 btnEditarCuadrilla"
-                                data-cuadrilla="${c.cuadrilla}">
-                            Ver / Editar
-                        </button>
-                        <!-- Aquí podrías agregar botón eliminar a futuro -->
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
+                if (!tieneEditable) {
+                    alert('Planificación de otra empresa');
+                    return;
+                }
+
+                tbody.innerHTML = '';
+
+                data.cuadrillas.forEach(c => {
+                    const tr = document.createElement('tr');
+                    const accion = c.editable
+                        ? `<button class="btn btn-sm btn-outline-primary me-1 btnEditarCuadrilla"
+                                    data-cuadrilla="${c.cuadrilla}">
+                                Ver / Editar
+                           </button>`
+                        : `<button class="btn btn-sm btn-outline-secondary me-1 btnCuadrillaAjena">
+                                Ver / Editar
+                           </button>`;
+                    tr.innerHTML = `
+                        <td><span class="badge bg-success">C${c.cuadrilla}</span></td>
+                        <td>${c.numeros_proceso || 'Sin proceso'}</td>
+                        <td>${c.nombre_empresa || '—'}</td>
+                        <td>${c.total_participantes || 0}</td>
+                        <td>
+                            ${accion}
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                const modal = new bootstrap.Modal(document.getElementById('modalCuadrillasCelda'));
+                modal.show();
+            }
         })
         .catch(err => {
             console.error(err);
             tbody.innerHTML = '<tr><td colspan="5" class="text-danger text-center">Error al cargar cuadrillas.</td></tr>';
         });
 
-    const modal = new bootstrap.Modal(document.getElementById('modalCuadrillasCelda'));
-    modal.show();
 });
 
 

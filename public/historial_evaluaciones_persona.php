@@ -24,6 +24,7 @@ $esContratista = ($rolUsuario === 'contratista');
 $rut = trim($_GET['rut'] ?? '');
 $rutNormalizado = preg_replace('/\s+/', '', $rut);
 $rows = [];
+$rowsByProcess = [];
 $persona = null;
 $resumenServicios = [];
 
@@ -208,6 +209,112 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
     return array_values($summary);
 }
 
+function buildProcessHistoryRows(array $rows): array
+{
+    $grouped = [];
+
+    foreach ($rows as $index => $row) {
+        $servicio = trim((string)($row['servicio'] ?? ''));
+        $servicioLabel = $servicio !== '' ? $servicio : 'Sin servicio';
+        $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
+        $processId = isset($row['id_proceso_habilitacion']) ? (int)$row['id_proceso_habilitacion'] : 0;
+        $processNumber = trim((string)($row['numero_proceso'] ?? ''));
+
+        if ($processId > 0) {
+            $processKey = 'PID:' . $processId;
+        } elseif ($processNumber !== '') {
+            $processKey = 'PROC:' . $processNumber;
+        } else {
+            $processKey = 'ROW:' . $index;
+        }
+
+        $serviceKey = $serviceId > 0 ? 'SID:' . $serviceId : 'SERV:' . mb_strtolower($servicioLabel, 'UTF-8');
+        $groupKey = $serviceKey . '|' . $processKey;
+
+        if (!isset($grouped[$groupKey])) {
+            $grouped[$groupKey] = [
+                'servicio' => $servicioLabel,
+                'id_servicio' => $serviceId,
+                'numero_proceso' => $processNumber,
+                'empresa' => trim((string)($row['empresa'] ?? '')),
+                'cargo' => trim((string)($row['cargo'] ?? '')),
+                'teorica_total' => 0,
+                'practica_total' => 0,
+                'teorica' => null,
+                'practica' => null,
+                'fecha_orden' => null,
+            ];
+        }
+
+        $fechaHora = trim((string)($row['fecha_hora'] ?? ''));
+        try {
+            $dt = new DateTimeImmutable($fechaHora);
+        } catch (Throwable $e) {
+            $dt = null;
+        }
+
+        if ($grouped[$groupKey]['empresa'] === '' && trim((string)($row['empresa'] ?? '')) !== '') {
+            $grouped[$groupKey]['empresa'] = trim((string)$row['empresa']);
+        }
+        if ($grouped[$groupKey]['cargo'] === '' && trim((string)($row['cargo'] ?? '')) !== '') {
+            $grouped[$groupKey]['cargo'] = trim((string)$row['cargo']);
+        }
+        if ($grouped[$groupKey]['numero_proceso'] === '' && $processNumber !== '') {
+            $grouped[$groupKey]['numero_proceso'] = $processNumber;
+        }
+        if ($dt instanceof DateTimeImmutable && (
+            !($grouped[$groupKey]['fecha_orden'] instanceof DateTimeImmutable) ||
+            $dt > $grouped[$groupKey]['fecha_orden']
+        )) {
+            $grouped[$groupKey]['fecha_orden'] = $dt;
+        }
+
+        $tipo = strtoupper(trim((string)($row['tipo_evaluacion'] ?? '')));
+        if ($tipo === 'TEORICA') {
+            $grouped[$groupKey]['teorica_total']++;
+            $current = $grouped[$groupKey]['teorica']['fecha_dt'] ?? null;
+            if (!($current instanceof DateTimeImmutable) || ($dt instanceof DateTimeImmutable && $dt > $current)) {
+                $grouped[$groupKey]['teorica'] = [
+                    'row' => $row,
+                    'fecha_dt' => $dt,
+                ];
+            }
+        } elseif ($tipo === 'PRACTICA') {
+            $grouped[$groupKey]['practica_total']++;
+            $current = $grouped[$groupKey]['practica']['fecha_dt'] ?? null;
+            if (!($current instanceof DateTimeImmutable) || ($dt instanceof DateTimeImmutable && $dt > $current)) {
+                $grouped[$groupKey]['practica'] = [
+                    'row' => $row,
+                    'fecha_dt' => $dt,
+                ];
+            }
+        }
+    }
+
+    $result = array_values($grouped);
+    usort($result, static function (array $a, array $b): int {
+        $cmp = strcasecmp((string)($a['servicio'] ?? ''), (string)($b['servicio'] ?? ''));
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+
+        $fechaA = $a['fecha_orden'] ?? null;
+        $fechaB = $b['fecha_orden'] ?? null;
+        if ($fechaA instanceof DateTimeImmutable && $fechaB instanceof DateTimeImmutable) {
+            return $fechaB <=> $fechaA;
+        }
+        if ($fechaA instanceof DateTimeImmutable) {
+            return -1;
+        }
+        if ($fechaB instanceof DateTimeImmutable) {
+            return 1;
+        }
+        return 0;
+    });
+
+    return $result;
+}
+
 if ($rutNormalizado !== '') {
 
     $stmtPersona = $pdo->prepare("
@@ -242,6 +349,7 @@ if ($rutNormalizado !== '') {
             'TEORICA' AS tipo_evaluacion,
             sp.servicio AS servicio,
             rpi.id_servicio AS id_servicio,
+            rpi.id_proceso_habilitacion AS id_proceso_habilitacion,
             ph.numero_proceso AS numero_proceso,
             CONCAT(rpi.fecha_rendicion, ' ', rpi.hora_rendicion) AS fecha_hora,
             CASE
@@ -285,6 +393,7 @@ if ($rutNormalizado !== '') {
             'PRACTICA' AS tipo_evaluacion,
             sp2.servicio AS servicio,
             et.id_servicio AS id_servicio,
+            et.id_proceso_habilitacion AS id_proceso_habilitacion,
             ph2.numero_proceso AS numero_proceso,
             et.fecha_evaluacion AS fecha_hora,
             CASE
@@ -318,7 +427,7 @@ if ($rutNormalizado !== '') {
         LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = et.id_proceso_habilitacion
         WHERE et.rut = :rut_terreno
     ) historial
-    ORDER BY fecha_hora DESC
+    ORDER BY servicio ASC, fecha_hora DESC, tipo_evaluacion ASC
  ");
     $stmt->execute([
         ':rut_teorica' => $rutNormalizado,
@@ -360,6 +469,7 @@ if ($rutNormalizado !== '') {
     }
 
     $resumenServicios = buildInferredStatusSummary($rows, $terrainNotesByService, $terrainThresholdsByService);
+    $rowsByProcess = buildProcessHistoryRows($rows);
 }
 ?>
 <!doctype html>
@@ -504,42 +614,59 @@ body { background:#f7f9fc; }
         </div>
       </div>
     <?php endif; ?>
-    <div class="table-responsive">
-      <?php if (empty($rows)): ?>
-        <div class="text-muted">No hay historial de evaluaciones para este RUT.</div>
-      <?php else: ?>
-        <table class="table table-sm table-hover align-middle">
+    <?php if (empty($rowsByProcess)): ?>
+      <div class="text-muted">No hay historial de evaluaciones para este RUT.</div>
+    <?php else: ?>
+      <div class="mb-2">
+        <h6 class="text-primary mb-2"><i class="bi bi-clock-history me-2"></i>Historial detallado por proceso</h6>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-0">
           <thead class="text-center">
             <tr>
-              <th>Tipo</th>
               <th>Servicio</th>
               <th>Proceso</th>
-              <th>Fecha</th>
-              <th>Resultado</th>
-              <th>Nota</th>
               <th>Empresa</th>
               <th>Cargo</th>
-              <th>Evaluador</th>
+              <th>Teóricas</th>
+              <th>Última teórica</th>
+              <th>Resultado teórica</th>
+              <th>Nota teórica</th>
+              <th>Eval. teórica</th>
+              <th>Terrenos</th>
+              <th>Último terreno</th>
+              <th>Resultado terreno</th>
+              <th>Nota terreno</th>
+              <th>Eval. terreno</th>
             </tr>
           </thead>
           <tbody>
-          <?php foreach ($rows as $r): ?>
+          <?php foreach ($rowsByProcess as $item): ?>
+            <?php
+              $teorica = $item['teorica']['row'] ?? null;
+              $practica = $item['practica']['row'] ?? null;
+            ?>
             <tr>
-              <td><?= esc($r['tipo_evaluacion']) ?></td>
-              <td><?= esc($r['servicio']) ?></td>
-              <td class="text-center"><?= esc($r['numero_proceso'] !== null ? (string)$r['numero_proceso'] : '') ?></td>
-              <td><?= esc(formatearFechaHistorial($r['fecha_hora'] ?? null)) ?></td>
-              <td><?= esc($r['resultado_mostrado']) ?></td>
-              <td><?= esc(obtenerNotaDetalleHistorial($r, $terrainThresholdsByService ?? [])) ?></td>
-              <td><?= esc($r['empresa']) ?></td>
-              <td><?= esc($r['cargo']) ?></td>
-              <td><?= esc($r['evaluador']) ?></td>
+              <td><?= esc((string)$item['servicio']) ?></td>
+              <td class="text-center"><?= esc((string)($item['numero_proceso'] ?? '')) ?></td>
+              <td><?= esc((string)($item['empresa'] ?? '')) ?></td>
+              <td><?= esc((string)($item['cargo'] ?? '')) ?></td>
+              <td class="text-center"><?= (int)($item['teorica_total'] ?? 0) ?></td>
+              <td class="text-center"><?= esc(formatearFechaHistorial($teorica['fecha_hora'] ?? null, true)) ?></td>
+              <td class="text-center"><?= esc((string)($teorica['resultado_mostrado'] ?? '')) ?></td>
+              <td class="text-center"><?= esc($teorica ? obtenerNotaDetalleHistorial($teorica, $terrainThresholdsByService ?? []) : '') ?></td>
+              <td><?= esc((string)($teorica['evaluador'] ?? '')) ?></td>
+              <td class="text-center"><?= (int)($item['practica_total'] ?? 0) ?></td>
+              <td class="text-center"><?= esc(formatearFechaHistorial($practica['fecha_hora'] ?? null, true)) ?></td>
+              <td class="text-center"><?= esc((string)($practica['resultado_mostrado'] ?? '')) ?></td>
+              <td class="text-center"><?= esc($practica ? obtenerNotaDetalleHistorial($practica, $terrainThresholdsByService ?? []) : '') ?></td>
+              <td><?= esc((string)($practica['evaluador'] ?? '')) ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>
         </table>
-      <?php endif; ?>
-    </div>
+      </div>
+    <?php endif; ?>
   </div>
 </div>
 <?php endif; ?>

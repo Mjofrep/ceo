@@ -25,6 +25,138 @@ function esc($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+if (!function_exists('asegurarTablaEmpresaCorreos')) {
+    function asegurarTablaEmpresaCorreos(PDO $pdo): void
+    {
+        static $asegurada = false;
+        if ($asegurada) {
+            return;
+        }
+
+        try {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS ceo_empresa_correos (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    id_empresa INT NOT NULL,
+                    correo VARCHAR(190) NOT NULL,
+                    orden INT NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_empresa_correo (id_empresa, correo),
+                    KEY idx_empresa (id_empresa),
+                    KEY idx_empresa_orden (id_empresa, orden)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                'No fue posible asegurar la tabla ceo_empresa_correos: ' . $e->getMessage(),
+                0,
+                $e
+            );
+        }
+
+        $asegurada = true;
+    }
+}
+
+if (!function_exists('normalizarCorreosEmpresa')) {
+    function normalizarCorreosEmpresa(array $correos, ?string $correoFallback = null): array
+    {
+        $salida = [];
+        $vistos = [];
+
+        foreach ($correos as $correo) {
+            $correo = trim((string)$correo);
+            if ($correo === '' || !filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+
+            $key = mb_strtolower($correo, 'UTF-8');
+            if (isset($vistos[$key])) {
+                continue;
+            }
+
+            $vistos[$key] = true;
+            $salida[] = $correo;
+        }
+
+        if (empty($salida)) {
+            $correoFallback = trim((string)$correoFallback);
+            if ($correoFallback !== '' && filter_var($correoFallback, FILTER_VALIDATE_EMAIL)) {
+                $salida[] = $correoFallback;
+            }
+        }
+
+        return $salida;
+    }
+}
+
+if (!function_exists('obtenerCorreosEmpresa')) {
+    function obtenerCorreosEmpresa(PDO $pdo, int $idEmpresa, ?string $correoFallback = null): array
+    {
+        if ($idEmpresa <= 0) {
+            return normalizarCorreosEmpresa([], $correoFallback);
+        }
+
+        asegurarTablaEmpresaCorreos($pdo);
+
+        $stmt = $pdo->prepare("
+            SELECT correo
+            FROM ceo_empresa_correos
+            WHERE id_empresa = :id_empresa
+            ORDER BY orden ASC, id ASC
+        ");
+        $stmt->execute([':id_empresa' => $idEmpresa]);
+
+        return normalizarCorreosEmpresa(
+            $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [],
+            $correoFallback
+        );
+    }
+}
+
+if (!function_exists('guardarCorreosEmpresa')) {
+    function guardarCorreosEmpresa(PDO $pdo, int $idEmpresa, array $correos, ?string $correoFallback = null): void
+    {
+        if ($idEmpresa <= 0) {
+            return;
+        }
+
+        asegurarTablaEmpresaCorreos($pdo);
+        $correos = normalizarCorreosEmpresa($correos, $correoFallback);
+
+        $stmtDelete = $pdo->prepare("DELETE FROM ceo_empresa_correos WHERE id_empresa = :id_empresa");
+        $stmtDelete->execute([':id_empresa' => $idEmpresa]);
+
+        if (!empty($correos)) {
+            $stmtInsert = $pdo->prepare("
+                INSERT INTO ceo_empresa_correos (id_empresa, correo, orden)
+                VALUES (:id_empresa, :correo, :orden)
+            ");
+
+            foreach (array_values($correos) as $index => $correo) {
+                $stmtInsert->execute([
+                    ':id_empresa' => $idEmpresa,
+                    ':correo' => $correo,
+                    ':orden' => $index + 1,
+                ]);
+            }
+        }
+
+        $correoPrincipal = $correos[0] ?? '';
+        $stmtEmpresa = $pdo->prepare("
+            UPDATE ceo_empresas
+            SET correo = :correo
+            WHERE id = :id
+        ");
+        $stmtEmpresa->execute([
+            ':correo' => $correoPrincipal,
+            ':id' => $idEmpresa,
+        ]);
+    }
+}
+
 if (!function_exists('auditLog')) {
     function auditLog(
         string $accion,

@@ -214,16 +214,23 @@ INNER JOIN ceo_uo u            ON cs.uo = u.id
 $programaId = (int)($_GET['programa'] ?? 0);
 
 $nsolicitudCuadrilla = null;
+$servicioCuadrilla = null;
 
 if ($programaId > 0) {
     $stmt = $pdo->prepare("
-        SELECT nsolicitud
-        FROM ceo_habilitacion
-        WHERE id = :id
+        SELECT h.nsolicitud, sp.servicio
+        FROM ceo_habilitacion h
+        LEFT JOIN ceo_servicios_pruebas sp ON sp.id = h.id_servicio
+        WHERE h.id = :id
         LIMIT 1
     ");
     $stmt->execute([':id' => $programaId]);
-    $nsolicitudCuadrilla = $stmt->fetchColumn(); // null o número
+    $programaInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($programaInfo) {
+        $nsolicitudCuadrilla = $programaInfo['nsolicitud'] ?? null;
+        $servicioCuadrilla = $programaInfo['servicio'] ?? null;
+    }
 }
 
 ?>
@@ -354,6 +361,17 @@ td input[type=checkbox]{
                             </option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Servicio</label>
+                    <input
+                        type="text"
+                        class="form-control bg-light"
+                        value="<?= esc((string)($servicioCuadrilla ?? '')) ?>"
+                        placeholder="Se completará al seleccionar el programa"
+                        readonly
+                    >
                 </div>
 
                 <div class="col-12 text-end mt-2">
