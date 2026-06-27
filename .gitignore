@@ -1,3 +1,4 @@
 config/ceonext_ai.php
 .aider*
 vendor
+docs/*.sql
