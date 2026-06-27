@@ -466,6 +466,10 @@ body{background:#f7f9fc;font-size:0.9rem;}
                     </div>
                 <?php endif; ?>
                 <input type="hidden" name="alt_imagen_actual_<?= (int)$a['id'] ?>" value="<?= htmlspecialchars((string)($a['imagen'] ?? '')) ?>">
+                <label class="form-label mt-2">Reemplazar imagen</label>
+                <input type="file" name="alt_imagen_<?= (int)$a['id'] ?>" accept="image/*" class="form-control mb-2">
+                <label class="form-label">O URL de video</label>
+                <input type="url" name="alt_video_<?= (int)$a['id'] ?>" class="form-control mb-2" placeholder="https://...">
                 <textarea name="alt_textoextra_<?= (int)$a['id'] ?>"
           class="form-control form-control-sm mt-2"
           rows="2"

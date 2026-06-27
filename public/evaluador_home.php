@@ -26,6 +26,7 @@ if (empty($_SESSION['evaluado'])) {
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/functions.php';
 
 /* ============================================================
    VARIABLES DE SESIÓN
@@ -63,6 +64,7 @@ if ($rutAlumno !== '') {
             $pruebas[] = [
                 'id_programada' => (int)$p['id'],
                 'id_servicio' => $idServicio,
+                'id_agrupacion' => (int)($p['id_agrupacion'] ?? 0),
                 'servicio' => (string)$stmtServicio->fetchColumn(),
                 'nsolicitud' => $p['nsolicitud'] ?? null,
                 'cuadrilla' => $p['cuadrilla'] ?? null,
@@ -239,7 +241,7 @@ body{
                 <!-- Botón para iniciar prueba teórica -->
 <?php if (!empty($pruebas) && $rutAlumno !== ''): ?>
     <?php foreach ($pruebas as $p): ?>
-        <a href="evaluador_iniciar_prueba.php?id_servicio=<?= urlencode((string)$p['id_servicio']) ?>&rut_alumno=<?= urlencode($rutAlumno) ?>&id_programada=<?= urlencode((string)$p['id_programada']) ?>&nsolicitud=<?= urlencode((string)($p['nsolicitud'] ?? '')) ?>"
+        <a href="evaluador_iniciar_prueba.php?id_servicio=<?= urlencode((string)$p['id_servicio']) ?>&rut_alumno=<?= urlencode($rutAlumno) ?>&id_programada=<?= urlencode((string)$p['id_programada']) ?>&id_agrupacion=<?= urlencode((string)($p['id_agrupacion'] ?? 0)) ?>&nsolicitud=<?= urlencode((string)($p['nsolicitud'] ?? '')) ?>"
            class="btn btn-primary menu-btn">
            📝 Iniciar Prueba Teórica — <?= htmlspecialchars($p['servicio']) ?>
            <?php if (!empty($p['numero_proceso'])): ?>

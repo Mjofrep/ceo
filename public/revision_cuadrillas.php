@@ -18,6 +18,31 @@ require_once '../config/db.php';
 require_once '../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
 
+function revisionHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = :table
+          AND COLUMN_NAME = :column
+        LIMIT 1
+    ");
+    $stmt->execute([
+        ':table' => $table,
+        ':column' => $column,
+    ]);
+
+    $cache[$key] = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+    return $cache[$key];
+}
+
 // Validación de sesión
 if (empty($_SESSION['auth'])) {
     header("Location: /ceo/public/index.php");
@@ -25,6 +50,7 @@ if (empty($_SESSION['auth'])) {
 }
 
 $pdo = db();
+$hasEvaluacionProgramadaAgrupacion = revisionHasColumn($pdo, 'ceo_evaluaciones_programadas', 'id_agrupacion');
 
 /* ============================================================
    ENTRADA DESDE habilitacion.php (DOBLE CLICK)
@@ -81,8 +107,7 @@ $programas = $stmtProg->fetchAll(PDO::FETCH_ASSOC);
    ============================================================ */
 
 $data = [];
-
-$data = [];
+$agrupacionesPorServicio = [];
 
 $where = [];
 $params = [];
@@ -123,9 +148,22 @@ if (empty($where)) {
     $data = [];
 } else {
 
+    $selectAgrupacionProgramada = $hasEvaluacionProgramadaAgrupacion
+        ? "(
+        SELECT ep.id_agrupacion
+        FROM ceo_evaluaciones_programadas ep
+        WHERE ep.rut = p.rut
+          AND ep.id_servicio = cs.id_servicio
+          AND ep.cuadrilla = cs.cuadrilla
+          AND ep.tipo = 'PRUEBA'
+        ORDER BY ep.id DESC
+        LIMIT 1
+    )"
+        : "NULL";
+
     $sql = "
-SELECT
-    p.rut,
+	SELECT
+	    p.rut,
     p.nombre,
     p.apellidos AS apellido,
     u.desc_uo AS uo,
@@ -143,6 +181,7 @@ SELECT
         ORDER BY ep.id DESC
         LIMIT 1
     ) AS numero_proceso,
+	    {$selectAgrupacionProgramada} AS id_agrupacion_programada,
     CASE 
         WHEN EXISTS (
             SELECT 1 
@@ -208,6 +247,34 @@ INNER JOIN ceo_uo u            ON cs.uo = u.id
     $st = $pdo->prepare($sql);
     $st->execute($params);
     $data = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    $serviciosIds = array_values(array_unique(array_map(
+        static fn(array $row): int => (int)($row['id_servicio'] ?? 0),
+        $data
+    )));
+    $serviciosIds = array_values(array_filter($serviciosIds, static fn(int $id): bool => $id > 0));
+
+    if (!empty($serviciosIds)) {
+        $placeholders = implode(',', array_fill(0, count($serviciosIds), '?'));
+        $stmtAgr = $pdo->prepare("
+            SELECT id, id_servicio, titulo
+            FROM ceo_agrupacion
+            WHERE id_servicio IN ($placeholders)
+            ORDER BY id_servicio ASC, id ASC
+        ");
+        $stmtAgr->execute($serviciosIds);
+
+        foreach ($stmtAgr->fetchAll(PDO::FETCH_ASSOC) as $agrupacion) {
+            $servicioId = (int)($agrupacion['id_servicio'] ?? 0);
+            if ($servicioId <= 0) {
+                continue;
+            }
+            if (!isset($agrupacionesPorServicio[$servicioId])) {
+                $agrupacionesPorServicio[$servicioId] = [];
+            }
+            $agrupacionesPorServicio[$servicioId][] = $agrupacion;
+        }
+    }
 }
 
 
@@ -307,13 +374,20 @@ td input[type=checkbox]{
 <div class="container-fluid px-4">
 
     <!-- Card título -->
-    <div class="card rounded-4 shadow-sm mb-4">
-        <div class="card-body py-3">
-            <h4 class="fw-bold text-primary mb-0">
-                <i class="bi bi-search me-2"></i>Revisión de Cuadrillas
-            </h4>
+	    <div class="card rounded-4 shadow-sm mb-4">
+	        <div class="card-body py-3">
+	            <h4 class="fw-bold text-primary mb-0">
+	                <i class="bi bi-search me-2"></i>Revisión de Cuadrillas
+	            </h4>
+	        </div>
+	    </div>
+
+        <?php if (!$hasEvaluacionProgramadaAgrupacion): ?>
+        <div class="alert alert-warning shadow-sm rounded-4 mb-4">
+            La tabla <code>ceo_evaluaciones_programadas</code> no tiene la columna <code>id_agrupacion</code>.
+            La página ya puede abrir normalmente, pero si un servicio tiene más de una prueba no se podrá guardar cuál fue seleccionada hasta agregar esa columna o definir otro mecanismo de persistencia.
         </div>
-    </div>
+        <?php endif; ?>
 
     
     <!-- ============================================================
@@ -422,6 +496,7 @@ td input[type=checkbox]{
                             <th>Prueba</th>
                             <th>Terreno</th>
                             <th>Eva Prueba</th>
+                            <th>Prueba a Aplicar</th>
                             <th>Eva Terreno</th>
                             <th>Acción</th>
                         </tr>
@@ -441,9 +516,11 @@ td input[type=checkbox]{
     <td class="text-center"><?= esc((string)$d['n_cuadrilla']) ?></td>
 
 <?php
-$cols = ['existe','prueba','terreno','eva_prueba','eva_terreno'];
+$cols = ['existe','prueba','terreno','eva_prueba'];
+$agrupacionesServicio = $agrupacionesPorServicio[(int)$d['id_servicio']] ?? [];
+$idAgrupacionSeleccionada = (int)($d['id_agrupacion_programada'] ?? 0);
 
-foreach ($cols as $c): 
+foreach ($cols as $c):
     $isEva = in_array($c, ['eva_prueba','eva_terreno']);
     $disabled = $isEva ? '' : 'disabled';
 ?>
@@ -462,6 +539,40 @@ foreach ($cols as $c):
     >
 </td>
 <?php endforeach; ?>
+
+    <td style="min-width:260px;">
+        <select
+            class="form-select form-select-sm sel-agrupacion-prueba"
+            data-rut="<?= esc($d['rut']) ?>"
+            data-servicio="<?= (int)$d['id_servicio'] ?>"
+            data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+        >
+            <option value="">-- Seleccione prueba --</option>
+            <?php foreach ($agrupacionesServicio as $agr): ?>
+                <?php $labelAgr = (int)$agr['id'] . ' - ' . trim(strip_tags((string)($agr['titulo'] ?? ''))); ?>
+                <option
+                    value="<?= (int)$agr['id'] ?>"
+                    <?= $idAgrupacionSeleccionada === (int)$agr['id'] ? 'selected' : '' ?>
+                >
+                    <?= esc($labelAgr) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </td>
+
+<?php $c = 'eva_terreno'; $isEva = true; $disabled = ''; ?>
+<td class="text-center">
+    <input 
+        type="checkbox"
+        <?= $disabled ?>
+        <?= ($d[$c] == 1 ? 'checked' : '') ?>
+        class="chk-eva"
+        data-tipo="TERRENO"
+        data-rut="<?= esc($d['rut']) ?>"
+        data-servicio="<?= (int)$d['id_servicio'] ?>"
+        data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+    >
+</td>
 
 
     <!-- ✅ COLUMNA ACCIÓN (UNA SOLA VEZ) -->
@@ -560,13 +671,27 @@ document.querySelectorAll(".btn-eliminar").forEach(btn => {
 document.querySelectorAll(".chk-eva").forEach(chk => {
 
     chk.addEventListener("change", function () {
+        const tr = this.closest("tr");
+        const selAgrupacion = tr ? tr.querySelector(".sel-agrupacion-prueba") : null;
+        const esPrueba = this.dataset.tipo === "PRUEBA";
+        const idAgrupacion = selAgrupacion ? Number(selAgrupacion.value || 0) : 0;
+
+        if (esPrueba && this.checked && idAgrupacion <= 0) {
+            alert("Debe seleccionar la prueba a aplicar antes de programarla.");
+            this.checked = false;
+            if (selAgrupacion) {
+                selAgrupacion.focus();
+            }
+            return;
+        }
 
         const payload = {
             rut: this.dataset.rut,
             servicio: this.dataset.servicio,
             cuadrilla: this.dataset.cuadrilla,
             tipo: this.dataset.tipo,
-            checked: this.checked ? 1 : 0
+            checked: this.checked ? 1 : 0,
+            id_agrupacion: esPrueba ? idAgrupacion : 0
         };
 
         fetch("guardar_evaluacion_programada.php", {
@@ -586,6 +711,50 @@ document.querySelectorAll(".chk-eva").forEach(chk => {
             this.checked = !this.checked; // rollback visual
         });
 
+    });
+
+});
+
+document.querySelectorAll(".sel-agrupacion-prueba").forEach(sel => {
+
+    sel.addEventListener("change", function () {
+        const tr = this.closest("tr");
+        const chkPrueba = tr ? tr.querySelector('.chk-eva[data-tipo="PRUEBA"]') : null;
+        const idAgrupacion = Number(this.value || 0);
+
+        if (!chkPrueba || !chkPrueba.checked) {
+            return;
+        }
+
+        if (idAgrupacion <= 0) {
+            alert("Debe seleccionar una prueba válida.");
+            this.focus();
+            return;
+        }
+
+        const payload = {
+            rut: chkPrueba.dataset.rut,
+            servicio: chkPrueba.dataset.servicio,
+            cuadrilla: chkPrueba.dataset.cuadrilla,
+            tipo: chkPrueba.dataset.tipo,
+            checked: 1,
+            id_agrupacion: idAgrupacion
+        };
+
+        fetch("guardar_evaluacion_programada.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.ok) {
+                alert(resp.msg || "Error al actualizar la prueba programada");
+            }
+        })
+        .catch(() => {
+            alert("Error de comunicación con el servidor");
+        });
     });
 
 });

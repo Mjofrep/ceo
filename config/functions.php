@@ -304,6 +304,36 @@ if (!function_exists('asegurarColumnaPorcentajeFormacionAgrupacion')) {
     }
 }
 
+if (!function_exists('asegurarColumnaAgrupacionEvaluacionesProgramadas')) {
+    function asegurarColumnaAgrupacionEvaluacionesProgramadas(\PDO $pdo): void
+    {
+        static $asegurada = false;
+        if ($asegurada) {
+            return;
+        }
+
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM ceo_evaluaciones_programadas LIKE 'id_agrupacion'");
+            $existe = $stmt !== false && $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$existe) {
+                $pdo->exec(
+                    "ALTER TABLE ceo_evaluaciones_programadas "
+                    . "ADD COLUMN id_agrupacion INT NULL AFTER id_servicio"
+                );
+            }
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'No fue posible asegurar la columna id_agrupacion en ceo_evaluaciones_programadas: '
+                . $e->getMessage(),
+                0,
+                $e
+            );
+        }
+
+        $asegurada = true;
+    }
+}
+
 if (!function_exists('obtenerPorcentajeMinimoFormacionAgrupacion')) {
     function obtenerPorcentajeMinimoFormacionAgrupacion(\PDO $pdo, int $idAgrupacion): float
     {

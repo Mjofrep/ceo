@@ -9,6 +9,18 @@ require_once __DIR__ . '/../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../src/Csrf.php';
 
+if (!function_exists('simuladorIniciarHasColumn')) {
+    function simuladorIniciarHasColumn(PDO $pdo, string $table, string $column): bool
+    {
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM {$table} LIKE " . $pdo->quote($column));
+            return (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+}
+
 if (!function_exists('simImagenUrl')) {
     function simImagenUrl(string $ruta): string
     {
@@ -46,17 +58,22 @@ if ($rol !== 1) {
     exit;
 }
 
-function cargarSimulacionHabilitacionProgramada(PDO $pdo, int $idProgramada, string $rut): ?array
+function cargarSimulacionHabilitacionProgramada(PDO $pdo, int $idProgramada, string $rut, bool $hasAgrupacionColumn): ?array
 {
     if ($idProgramada <= 0 || $rut === '') {
         return null;
     }
+
+    $selectAgrupacion = $hasAgrupacionColumn
+        ? 'ep.id_agrupacion,'
+        : 'NULL AS id_agrupacion,';
 
     $stmt = $pdo->prepare("
         SELECT
             ep.id,
             ep.rut,
             ep.id_servicio,
+            {$selectAgrupacion}
             ep.cuadrilla,
             ep.intento,
             ep.tipo,
@@ -87,6 +104,7 @@ function cargarSimulacionHabilitacionProgramada(PDO $pdo, int $idProgramada, str
 }
 
 $pdo = db();
+$hasEvaluacionProgramadaAgrupacion = simuladorIniciarHasColumn($pdo, 'ceo_evaluaciones_programadas', 'id_agrupacion');
 
 $err = '';
 $msg = '';
@@ -130,10 +148,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $respuestasTexto = $_POST['respuestas_texto'] ?? [];
         $preguntas = $_POST['preguntas'] ?? [];
 
-        $procRow = cargarSimulacionHabilitacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
+        $procRow = cargarSimulacionHabilitacionProgramada(
+            $pdo,
+            $data['proceso'],
+            $data['rut_alumno'],
+            $hasEvaluacionProgramadaAgrupacion
+        );
         if ($procRow) {
             if ($data['id_servicio'] <= 0) {
                 $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+            }
+            if ((int)($procRow['id_agrupacion'] ?? 0) > 0) {
+                $data['id_agrupacion'] = (int)$procRow['id_agrupacion'];
             }
             $data['cuadrilla'] = (int)($procRow['cuadrilla'] ?? 0);
             $data['numero_proceso'] = (string)($procRow['numero_proceso'] ?? '');
@@ -285,11 +311,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($data['rut_alumno'] === '' || $data['proceso'] <= 0) {
         $err = 'Parámetros incompletos.';
     } else {
-        $procRow = cargarSimulacionHabilitacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
+        $procRow = cargarSimulacionHabilitacionProgramada(
+            $pdo,
+            $data['proceso'],
+            $data['rut_alumno'],
+            $hasEvaluacionProgramadaAgrupacion
+        );
         if (!$procRow) {
             $err = 'No se encontró programación pendiente.';
         } else {
             $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+            if ((int)($procRow['id_agrupacion'] ?? 0) > 0) {
+                $data['id_agrupacion'] = (int)$procRow['id_agrupacion'];
+            }
             $data['cuadrilla'] = (int)($procRow['cuadrilla'] ?? 0);
             $data['numero_proceso'] = (string)($procRow['numero_proceso'] ?? '');
             $data['servicio'] = (string)($procRow['servicio'] ?? '');

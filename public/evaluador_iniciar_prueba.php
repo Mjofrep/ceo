@@ -28,8 +28,23 @@ function cargarEvaluacionProgramada(PDO $pdo, int $idProgramada, string $rut): ?
         return null;
     }
 
+    static $hasAgrupacionColumn = null;
+    if ($hasAgrupacionColumn === null) {
+        $stmtColumn = $pdo->prepare("
+            SELECT 1
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'ceo_evaluaciones_programadas'
+              AND COLUMN_NAME = 'id_agrupacion'
+            LIMIT 1
+        ");
+        $stmtColumn->execute();
+        $hasAgrupacionColumn = (bool)$stmtColumn->fetch(PDO::FETCH_ASSOC);
+    }
+
+    $selectAgrupacion = $hasAgrupacionColumn ? 'id_agrupacion' : 'NULL AS id_agrupacion';
     $stmt = $pdo->prepare("
-        SELECT id, rut, id_servicio, cuadrilla, intento, tipo, id_proceso_habilitacion
+        SELECT id, rut, id_servicio, {$selectAgrupacion}, cuadrilla, intento, tipo, id_proceso_habilitacion
         FROM ceo_evaluaciones_programadas
         WHERE id = :id
           AND rut = :rut
@@ -65,6 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $procRow = cargarEvaluacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
         if ($data['id_servicio'] <= 0 && $procRow) {
             $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+        }
+        if ($data['id_agrupacion'] <= 0 && $procRow && (int)($procRow['id_agrupacion'] ?? 0) > 0) {
+            $data['id_agrupacion'] = (int)$procRow['id_agrupacion'];
         }
 
         if (!$preguntas) {
@@ -385,6 +403,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $procRow = cargarEvaluacionProgramada($pdo, $data['proceso'], $data['rut_alumno']);
     if ($data['id_servicio'] <= 0 && $procRow) {
         $data['id_servicio'] = (int)($procRow['id_servicio'] ?? 0);
+    }
+    if ($data['id_agrupacion'] <= 0 && $procRow && (int)($procRow['id_agrupacion'] ?? 0) > 0) {
+        $data['id_agrupacion'] = (int)$procRow['id_agrupacion'];
     }
 
     if ($data['id_servicio'] <= 0) {

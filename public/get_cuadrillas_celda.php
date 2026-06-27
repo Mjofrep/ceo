@@ -44,11 +44,20 @@ try {
                ON h.empresa = ce.id
         LEFT JOIN ceo_habilitacion_participantes p
                ON p.id_cuadrilla = h.cuadrilla
-        LEFT JOIN ceo_evaluaciones_programadas ep
+        LEFT JOIN (
+            SELECT ep1.rut, ep1.cuadrilla, ep1.id_servicio, ep1.id_proceso_habilitacion
+            FROM ceo_evaluaciones_programadas ep1
+            INNER JOIN (
+                SELECT rut, cuadrilla, id_servicio, MAX(id) AS max_id
+                FROM ceo_evaluaciones_programadas
+                WHERE estado <> 'ANULADA'
+                  AND tipo = 'PRUEBA'
+                GROUP BY rut, cuadrilla, id_servicio
+            ) ep2 ON ep1.id = ep2.max_id
+        ) ep
                ON ep.cuadrilla = h.cuadrilla
               AND ep.id_servicio = h.id_servicio
               AND ep.rut = p.rut
-              AND ep.estado <> 'ANULADA'
         LEFT JOIN ceo_proceso_habilitacion ph
                ON ph.id = ep.id_proceso_habilitacion
         WHERE h.fecha = :fecha

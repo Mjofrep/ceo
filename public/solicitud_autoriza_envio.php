@@ -405,8 +405,8 @@ try {
         LIMIT 1
     ");
     $stHab->execute([':n' => $idSolicitud]);
-    $idHabilitacion = (int)$stHab->fetchColumn();
-    $idHabilitacion = $idHabilitacionRaw ? (int)$idHabilitacionRaw : null;
+    $tmpHab = $stHab->fetchColumn();
+    $idHabilitacion = $tmpHab !== false ? (int)$tmpHab : null;
 
     // Nueva versión
 // ====================== CALCULAR NUEVA VERSION ======================
@@ -420,7 +420,15 @@ $stVer = $pdo->prepare("
 $stVer->execute([':n' => $idSolicitud]);
 $version = (int)$stVer->fetchColumn();
 
-$stDoc = $pdo->prepare("
+$stExisteDoc = $pdo->prepare("
+    SELECT id
+    FROM ceo_permiso_documento
+    WHERE nsolicitud = :n
+      AND tipo = 'PERMISO'
+    LIMIT 1
+");
+
+$stDocInsert = $pdo->prepare("
     INSERT INTO ceo_permiso_documento
     (
       nsolicitud,
@@ -447,35 +455,34 @@ $stDoc = $pdo->prepare("
     )
 ");
 
-// ======================================================
-// RESOLVER ID_HABILITACION (CLAVE DEL BUG)
-// ======================================================
-// ======================================================
-// RESOLVER ID_HABILITACION (ÚNICA FUENTE DE VERDAD)
-// ======================================================
-$idHabilitacion = null;
-
-$stHab = $pdo->prepare("
-    SELECT id
-    FROM ceo_habilitacion
-    WHERE nsolicitud = :n
-    LIMIT 1
+$stDocUpdate = $pdo->prepare("
+    UPDATE ceo_permiso_documento
+       SET id_habilitacion = :hab,
+           nombre_archivo = :nom,
+           ruta_archivo = :ruta,
+           version = :ver,
+           creado_por = :user,
+           fecha_creacion = NOW(),
+           estado = 'VIGENTE'
+     WHERE id = :id
 ");
-$stHab->execute([':n' => $idSolicitud]);
 
-$tmp = $stHab->fetchColumn();
-if ($tmp !== false) {
-    $idHabilitacion = (int)$tmp;
-}
+$stExisteDoc->execute([':n' => $idSolicitud]);
+$idDocumento = $stExisteDoc->fetchColumn();
 
-$stDoc->execute([
-    ':n'    => $idSolicitud,
-    ':hab'  => $idHabilitacion ?: null, // 👈 puede ser NULL
+$docParams = [
+    ':hab'  => $idHabilitacion ?: null,
     ':nom'  => $nombreArchivo,
     ':ruta' => $rutaFinal,
     ':ver'  => $version,
-    ':user' => (int)$_SESSION['auth']['id']
-]);
+    ':user' => (int)$_SESSION['auth']['id'],
+];
+
+if ($idDocumento !== false) {
+    $stDocUpdate->execute($docParams + [':id' => (int)$idDocumento]);
+} else {
+    $stDocInsert->execute($docParams + [':n' => $idSolicitud]);
+}
 
   $mail2->Body = "
     <p>Estimados,</p>

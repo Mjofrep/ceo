@@ -6,6 +6,18 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/functions.php';
 
+if (!function_exists('simuladorHasColumn')) {
+    function simuladorHasColumn(PDO $pdo, string $table, string $column): bool
+    {
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM {$table} LIKE " . $pdo->quote($column));
+            return (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+}
+
 if (empty($_SESSION['auth'])) {
     header('Location: /ceo.noetica.cl/config/index.php');
     exit;
@@ -19,6 +31,7 @@ if ($rol !== 1) {
 
 $pdo = db();
 $cuadrilla = (int)($_GET['cuadrilla'] ?? 0);
+$hasEvaluacionProgramadaAgrupacion = simuladorHasColumn($pdo, 'ceo_evaluaciones_programadas', 'id_agrupacion');
 
 $cuadrillas = $pdo->query("
     SELECT
@@ -39,6 +52,9 @@ $cuadrillas = $pdo->query("
 
 $participantes = [];
 if ($cuadrilla > 0) {
+    $selectAgrupacion = $hasEvaluacionProgramadaAgrupacion
+        ? 'ep.id_agrupacion'
+        : 'NULL AS id_agrupacion';
     $stmt = $pdo->prepare("
         SELECT
             ep.id AS id_programada,
@@ -46,6 +62,7 @@ if ($cuadrilla > 0) {
             hp.nombre,
             hp.apellidos,
             ep.id_servicio,
+            {$selectAgrupacion},
             sp.servicio,
             ph.numero_proceso
         FROM ceo_evaluaciones_programadas ep
@@ -152,7 +169,7 @@ body { background:#f7f9fc; }
                   <td><?= esc((string)($p['numero_proceso'] ?? '')) ?></td>
                   <td>
                     <a class="btn btn-sm btn-outline-primary"
-                       href="habilitaciones_simulador_iniciar.php?id_programada=<?= (int)$p['id_programada'] ?>&rut=<?= urlencode((string)$p['rut']) ?>">
+                       href="habilitaciones_simulador_iniciar.php?id_programada=<?= (int)$p['id_programada'] ?>&rut=<?= urlencode((string)$p['rut']) ?>&id_agrupacion=<?= (int)($p['id_agrupacion'] ?? 0) ?>">
                       Simular prueba
                     </a>
                   </td>

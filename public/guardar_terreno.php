@@ -27,6 +27,7 @@ try {
     $nsolicitudes   = $data['nsolicitud'] ?? [];
     $id_servicio    = (int)($data['id_servicio'] ?? 0);
     $id_empresa     = (int)($data['id_empresa'] ?? 0);
+    $rutsRinden     = $data['ruts_rinden'] ?? [];
     $respuestas     = $data['respuestas'] ?? [];
 
     if (!is_array($idEvaluaciones) || empty($idEvaluaciones)) {
@@ -48,6 +49,19 @@ try {
         throw new Exception('Datos de cabecera incompletos');
     }
 
+    if (!is_array($rutsRinden) || empty($rutsRinden)) {
+        throw new Exception('Debe seleccionar al menos un participante para rendir la evaluación.');
+    }
+
+    $rutsRinden = array_values(array_unique(array_filter(array_map(
+        static fn($rut) => trim((string)$rut),
+        $rutsRinden
+    ), static fn($rut) => $rut !== '')));
+
+    if (empty($rutsRinden)) {
+        throw new Exception('Debe seleccionar al menos un participante para rendir la evaluación.');
+    }
+
     if (empty($respuestas) || !is_array($respuestas)) {
         throw new Exception('No se recibieron respuestas');
     }
@@ -61,7 +75,17 @@ try {
        - Debe venir SOLO una marca por pregunta: si / no / na
        - Si marca NO o NA => observación obligatoria
        ============================================================ */
+    foreach ($rutsRinden as $rutRinde) {
+        if (!isset($respuestas[$rutRinde]) || !is_array($respuestas[$rutRinde]) || empty($respuestas[$rutRinde])) {
+            throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
+        }
+    }
+
     foreach ($respuestas as $rut => $preguntas) {
+        if (!in_array((string)$rut, $rutsRinden, true)) {
+            throw new Exception("El RUT $rut fue enviado con respuestas pero no está marcado para rendir.");
+        }
+
         if (!is_array($preguntas) || empty($preguntas)) {
             throw new Exception("No hay preguntas válidas para el RUT $rut.");
         }
@@ -160,6 +184,12 @@ try {
     }
 
     $cuadrillasSel = array_values(array_unique($cuadrillasSel));
+
+    foreach ($rutsRinden as $rutRinde) {
+        if (!isset($mapRutCuadrilla[$rutRinde])) {
+            throw new Exception("El RUT $rutRinde no forma parte de las evaluaciones seleccionadas.");
+        }
+    }
 
     // Validar coherencia entre cuadrillas enviadas y cuadrillas de evaluaciones seleccionadas
     $nsolicitudesNorm = array_values(array_unique(array_map('intval', $nsolicitudes)));

@@ -35,7 +35,7 @@ if (!empty($fecha)) {
 
   $sql = "
 SELECT
-      s.id                              AS solicitud,
+      s.nsolicitud                      AS solicitud,
       s.fecha                           AS fecha,
       s.horainicio                      AS hora,
       p.rut,
@@ -47,7 +47,7 @@ SELECT
       pa.desc_patios                          AS patio
       ,s.observacion                          AS observacion
     FROM ceo_participantes_solicitud p
-    INNER JOIN ceo_solicitudes s ON s.id = p.id_solicitud
+    INNER JOIN ceo_solicitudes s ON s.nsolicitud = p.id_solicitud
     INNER JOIN ceo_usuarios us ON us.id= s.solicitante
     INNER JOIN ceo_procesos pr ON pr.id = s.proceso
     INNER JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo

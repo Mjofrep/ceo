@@ -37,6 +37,7 @@ SELECT
         WHERE ep.rut = p.rut
           AND ep.cuadrilla = p.id_cuadrilla
           AND ep.id_servicio = cs.id_servicio
+          AND ep.tipo = 'PRUEBA'
           AND ep.estado <> 'ANULADA'
     ) AS numeros_proceso,
     1 AS reevaluacion,
@@ -931,13 +932,6 @@ document.addEventListener('click', function (e) {
                 const modal = new bootstrap.Modal(document.getElementById('modalCuadrillasCelda'));
                 modal.show();
             } else {
-                const tieneEditable = data.cuadrillas.some(c => !!c.editable);
-
-                if (!tieneEditable) {
-                    alert('Planificación de otra empresa');
-                    return;
-                }
-
                 tbody.innerHTML = '';
 
                 data.cuadrillas.forEach(c => {

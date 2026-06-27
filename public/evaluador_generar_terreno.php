@@ -235,6 +235,14 @@ body { background:#f7f9fc; }
     top: 0;
     z-index: 1100;
 }
+
+.participante-inactivo {
+    opacity: .55;
+}
+
+.participante-inactivo .participante-preguntas {
+    pointer-events: none;
+}
 </style>
 </head>
 
@@ -288,6 +296,11 @@ body { background:#f7f9fc; }
 
     <h5 class="mt-3">Datos del Participante</h5>
 
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input chk-rinde" type="checkbox" id="rinde_<?= $i ?>" data-rut="<?= htmlspecialchars((string)$p['rut']) ?>" checked>
+        <label class="form-check-label fw-semibold" for="rinde_<?= $i ?>">Rinde evaluación</label>
+    </div>
+
 <p>
     <strong>RUT:</strong> <?= $p['rut'] ?><br>
     <strong>Nombre:</strong> <?= $p['nombre']." ".$p['apellidop']." ".$p['apellidom'] ?><br>
@@ -299,6 +312,8 @@ body { background:#f7f9fc; }
 
 
     <hr>
+
+    <div class="participante-preguntas">
 
     <?php $colorIndex=0; ?>
     <?php foreach ($estructura as $grupo): ?>
@@ -366,6 +381,8 @@ body { background:#f7f9fc; }
 
     <?php endforeach; ?>
 
+    </div>
+
 </div>
 
 <?php endforeach; ?>
@@ -417,6 +434,15 @@ document.querySelectorAll('.chk').forEach(chk => {
 
 // Guardado
 document.getElementById('btnGuardar').addEventListener('click', () => {
+    const participantesActivos = Array.from(document.querySelectorAll('.chk-rinde:checked'));
+    const rutsRinden = participantesActivos
+        .map((chk) => String(chk.dataset.rut || '').trim())
+        .filter((rut) => rut !== '');
+
+    if (rutsRinden.length === 0) {
+        alert('⚠️ Debes seleccionar al menos un participante para rendir la evaluación.');
+        return;
+    }
 
     // ===============================
     // VALIDACIÓN OBS OBLIGATORIA SI = NO
@@ -425,6 +451,10 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     let primerError = null;
 
     document.querySelectorAll('.chk[data-type="no"]').forEach(chkNo => {
+        const panel = chkNo.closest('.tab-pane');
+        const chkRinde = panel ? panel.querySelector('.chk-rinde') : null;
+
+        if (chkRinde && !chkRinde.checked) return;
 
         if (!chkNo.checked) return;
 
@@ -474,6 +504,10 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
             let idpreg = m[2];
             let campo  = m[3];
 
+            if (!rutsRinden.includes(rut)) {
+                continue;
+            }
+
             if (!respuestas[rut]) respuestas[rut] = {};
             if (!respuestas[rut][idpreg]) respuestas[rut][idpreg] = {};
 
@@ -490,6 +524,7 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     nsolicitud: <?= json_encode($jsCuadrillas) ?>,
     id_servicio: <?= $idServicio ?>,
     id_empresa: <?= (int)$_SESSION['auth']['id_empresa'] ?>,
+    ruts_rinden: rutsRinden,
     respuestas: respuestas
 })
     })
@@ -506,6 +541,25 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
  });
 
 
+});
+
+document.querySelectorAll('.chk-rinde').forEach((chk) => {
+    const panel = chk.closest('.tab-pane');
+    const preguntas = panel ? panel.querySelector('.participante-preguntas') : null;
+
+    const syncParticipante = () => {
+        if (!panel || !preguntas) return;
+
+        panel.classList.toggle('participante-inactivo', !chk.checked);
+
+        preguntas.querySelectorAll('input, textarea, select, button').forEach((field) => {
+            if (field === chk) return;
+            field.disabled = !chk.checked;
+        });
+    };
+
+    chk.addEventListener('change', syncParticipante);
+    syncParticipante();
 });
 
 </script>

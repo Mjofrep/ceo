@@ -222,6 +222,9 @@ try {
       </div>
 
       <div class="d-flex align-items-center gap-2">
+        <a href="calendario_actividades.php" class="btn btn-outline-primary btn-sm" title="Abrir Calendario de Actividades">
+          <i class="bi bi-calendar3"></i>
+        </a>
         <a href="mapa_interactivo.php" target="_blank" class="btn btn-outline-success btn-sm" title="Abrir Mapa Interactivo">
           <i class="bi bi-map"></i>
         </a>

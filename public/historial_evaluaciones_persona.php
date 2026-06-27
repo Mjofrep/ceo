@@ -20,6 +20,7 @@ $pdo = db();
 $rolUsuario    = strtolower($_SESSION['auth']['rol'] ?? '');
 $idEmpresaUser = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 $esContratista = ($rolUsuario === 'contratista');
+$esAdmin = ((int)($_SESSION['auth']['id_rol'] ?? 0) === 1);
 
 $rut = trim($_GET['rut'] ?? '');
 $rutNormalizado = preg_replace('/\s+/', '', $rut);
@@ -133,6 +134,8 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
                 'ultima_teorica_resultado' => null,
                 'ultima_teorica_nota' => null,
                 'ultima_teorica_proceso' => null,
+                'ultima_teorica_origen' => null,
+                'ultima_teorica_id_proceso_habilitacion' => null,
                 'ultima_practica_fecha' => null,
                 'ultima_practica_resultado' => null,
                 'ultima_practica_nota' => null,
@@ -165,6 +168,8 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
                 $summary[$servicio]['ultima_teorica_resultado'] = $resultado;
                 $summary[$servicio]['ultima_teorica_nota'] = $nota;
                 $summary[$servicio]['ultima_teorica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
+                $summary[$servicio]['ultima_teorica_origen'] = strtoupper(trim((string)($row['origen'] ?? '')));
+                $summary[$servicio]['ultima_teorica_id_proceso_habilitacion'] = isset($row['id_proceso_habilitacion']) ? (int)$row['id_proceso_habilitacion'] : null;
             }
         } elseif ($tipo === 'PRACTICA') {
             if ($summary[$servicio]['ultima_practica_fecha'] === null || $dt > $summary[$servicio]['ultima_practica_fecha']) {
@@ -376,7 +381,8 @@ if ($rutNormalizado !== '') {
                 ELSE TRIM(CONCAT(COALESCE(usr.nombres, ''), ' ', COALESCE(usr.apellidos, '')))
             END AS evaluador,
             uo.desc_uo AS uo,
-            '' AS region
+            '' AS region,
+            'HABILITACION' AS origen
         FROM ceo_resultado_prueba_intento rpi
         INNER JOIN ceo_servicios_pruebas sp ON sp.id = rpi.id_servicio
         LEFT JOIN ceo_contratistas ct ON ct.rut = rpi.rut
@@ -417,7 +423,8 @@ if ($rutNormalizado !== '') {
             COALESCE(et.cargo, cargo2.cargo) AS cargo,
             COALESCE(et.evaluador, '') AS evaluador,
             uo2.desc_uo AS uo,
-            '' AS region
+            '' AS region,
+            'HABILITACION' AS origen
         FROM ceo_evaluacion_terreno et
         INNER JOIN ceo_servicios_pruebas sp2 ON sp2.id = et.id_servicio
         LEFT JOIN ceo_contratistas ct2 ON ct2.rut = et.rut
@@ -574,6 +581,7 @@ body { background:#f7f9fc; }
                 <th>Nota teórica</th>
                 <th>Última teórica</th>
                 <th>Resultado teórica</th>
+                <?php if ($esAdmin): ?><th>Acción</th><?php endif; ?>
                 <th>Nota terreno</th>
                 <th>Último terreno</th>
                 <th>Resultado terreno</th>
@@ -600,6 +608,22 @@ body { background:#f7f9fc; }
                 <td><?= esc(formatearNotaHistorial($resumen['ultima_teorica_nota'] ?? null)) ?></td>
                 <td><?= esc(formatearFechaHistorial($resumen['ultima_teorica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_teorica_resultado'] ?? '')) ?></td>
+                <?php if ($esAdmin): ?>
+                <td class="text-center">
+                  <?php if (($resumen['ultima_teorica_origen'] ?? '') === 'HABILITACION' && !empty($resumen['ultima_teorica_fecha']) && (int)($resumen['id_servicio'] ?? 0) > 0 && (int)($resumen['ultima_teorica_id_proceso_habilitacion'] ?? 0) > 0): ?>
+                    <button
+                      type="button"
+                      class="btn btn-outline-danger btn-sm btn-reiniciar-prueba-hab"
+                      data-rut="<?= esc($rutNormalizado) ?>"
+                      data-id-servicio="<?= (int)$resumen['id_servicio'] ?>"
+                      data-id-proceso-habilitacion="<?= (int)$resumen['ultima_teorica_id_proceso_habilitacion'] ?>"
+                      data-servicio="<?= esc((string)$resumen['servicio']) ?>"
+                    >Reiniciar</button>
+                  <?php else: ?>
+                    <span class="text-muted">-</span>
+                  <?php endif; ?>
+                </td>
+                <?php endif; ?>
                 <td><?= esc(formatearNotaHistorial($resumen['ultima_practica_nota'] ?? null)) ?></td>
                 <td><?= esc(formatearFechaHistorial($resumen['ultima_practica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_practica_resultado'] ?? '')) ?></td>
@@ -699,6 +723,50 @@ body { background:#f7f9fc; }
     feedback.textContent = message;
     feedback.style.display = 'block';
   }
+
+  document.querySelectorAll('.btn-reiniciar-prueba-hab').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const rut = btn.dataset.rut || '';
+      const idServicio = Number(btn.dataset.idServicio || '0');
+      const idProcesoHabilitacion = Number(btn.dataset.idProcesoHabilitacion || '0');
+      const servicio = btn.dataset.servicio || '';
+
+      const ok = window.confirm(
+        'Se eliminará el resultado de la última prueba teórica de habilitación para el servicio ' + servicio + '.\n\n' +
+        'El alumno quedará pendiente para rendir nuevamente.\n\n¿Continuar?'
+      );
+      if (!ok) {
+        return;
+      }
+
+      btn.disabled = true;
+
+      try {
+        const resp = await fetch('ajax_habilitacion_reiniciar_prueba.php', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            rut: rut,
+            id_servicio: idServicio,
+            id_proceso_habilitacion: idProcesoHabilitacion
+          })
+        });
+
+        const data = await resp.json();
+        if (!data || !data.ok) {
+          window.alert((data && data.msg) ? data.msg : 'No se pudo reiniciar la prueba.');
+          btn.disabled = false;
+          return;
+        }
+
+        window.alert(data.msg || 'Prueba reiniciada correctamente.');
+        window.location.reload();
+      } catch (err) {
+        window.alert('No se pudo reiniciar la prueba.');
+        btn.disabled = false;
+      }
+    });
+  });
 
   function escapeHtml(value) {
     return String(value)

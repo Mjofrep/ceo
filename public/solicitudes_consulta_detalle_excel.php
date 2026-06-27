@@ -65,7 +65,7 @@ function scdxBaseSql(): string
             COALESCE(ps.apellidop, '') AS apellidop,
             COALESCE(ps.apellidom, '') AS apellidom,
             COALESCE(cc.cargo, '') AS cargo,
-            COALESCE(ps.asistio, 0) AS asistio
+            COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') AS asistio
         FROM ceo_solicitudes s
         INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
         LEFT JOIN ceo_cargo_contratistas cc ON cc.id = ps.id_cargo
@@ -129,8 +129,8 @@ function scdxFetchRows(PDO $pdo, array $filters): array
         $params[':tipo_visita'] = $filters['tipo_visita'];
     }
     if ($filters['asistio'] !== '') {
-        $where[] = 'COALESCE(ps.asistio, 0) = :asistio';
-        $params[':asistio'] = (int)$filters['asistio'];
+        $where[] = "COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') = :asistio";
+        $params[':asistio'] = $filters['asistio'];
     }
 
     $sql = scdxBaseSql() . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC';

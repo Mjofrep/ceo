@@ -18,6 +18,14 @@ function scdEsc(mixed $value): string
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function scdJsonResponse(array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 function scdBuildScope(): array
 {
     $idRol = (int)($_SESSION['auth']['id_rol'] ?? 0);
@@ -64,7 +72,7 @@ function scdBaseSql(): string
             COALESCE(ps.apellidom, '') AS apellidom,
             COALESCE(cc.cargo, '') AS cargo,
             TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))) AS nombre_completo,
-            COALESCE(ps.asistio, 0) AS asistio
+            COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') AS asistio
         FROM ceo_solicitudes s
         INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
         LEFT JOIN ceo_cargo_contratistas cc ON cc.id = ps.id_cargo
@@ -128,14 +136,357 @@ function scdFetchRows(PDO $pdo, array $filters): array
         $params[':tipo_visita'] = $filters['tipo_visita'];
     }
     if ($filters['asistio'] !== '') {
-        $where[] = 'COALESCE(ps.asistio, 0) = :asistio';
-        $params[':asistio'] = (int)$filters['asistio'];
+        $where[] = "COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') = :asistio";
+        $params[':asistio'] = $filters['asistio'];
     }
 
     $sql = scdBaseSql() . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function scdFetchScalar(PDO $pdo, string $sql, array $params): int
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return (int)($stmt->fetchColumn() ?: 0);
+}
+
+function scdFetchFormacionTotal(PDO $pdo, int $idServicio, array $filters): int
+{
+    $sql = "
+        SELECT COUNT(*)
+        FROM ceo_formacion_participantes p
+        INNER JOIN ceo_formacion f ON f.cuadrilla = p.id_cuadrilla
+        LEFT JOIN (
+            SELECT fp1.*
+            FROM ceo_formacion_programadas fp1
+            INNER JOIN (
+                SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+                FROM ceo_formacion_programadas
+                GROUP BY rut, id_servicio, cuadrilla
+            ) fp2 ON fp1.id = fp2.max_id
+        ) fp ON fp.rut = p.rut AND fp.id_servicio = f.id_servicio AND fp.cuadrilla = p.id_cuadrilla
+        WHERE f.id_servicio = :id_servicio
+          AND f.fecha BETWEEN :fecha_desde AND :fecha_hasta
+          AND UPPER(TRIM(COALESCE(fp.estado, ''))) <> 'ANULADA'
+          AND UPPER(TRIM(COALESCE(fp.resultado, ''))) IN ('APROBADO', 'REPROBADO')
+    ";
+
+    return scdFetchScalar($pdo, $sql, [
+        ':id_servicio' => $idServicio,
+        ':fecha_desde' => $filters['fecha_desde'],
+        ':fecha_hasta' => $filters['fecha_hasta'],
+    ]);
+}
+
+function scdSummaryDefinitions(): array
+{
+    return [
+        [
+            'key' => 'habilitaciones',
+            'titulo' => 'Habilitaciones',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.habilitacionceo IS NOT NULL
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
+                AND (
+                    UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%SUPERVISOR%'
+                    OR UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%OPERADOR%'
+                )
+            ",
+        ],
+        [
+            'key' => 'apoyo_habilitaciones',
+            'titulo' => 'Apoyo Habilitaciones',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND (
+                    UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%ACOMPA%'
+                    OR UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%CHOFER%'
+                )
+            ",
+        ],
+        [
+            'key' => 'habilitaciones_ecommercial',
+            'titulo' => 'Habilitaciones E-Commercial',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.habilitacionceo IS NOT NULL
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) LIKE '%ENEL X%'
+            ",
+        ],
+        [
+            'key' => 'charla_induccion_irl',
+            'titulo' => 'Charla de Inducción (IRL)',
+            'origen' => 'FORMACION',
+            'origen_label' => 'Formación',
+            'reference_label' => 'Cuadrilla',
+            'context_label' => 'Servicio / UO',
+            'service_id' => 23,
+        ],
+        [
+            'key' => 'rdo',
+            'titulo' => 'RDO',
+            'origen' => 'FORMACION',
+            'origen_label' => 'Formación',
+            'reference_label' => 'Cuadrilla',
+            'context_label' => 'Servicio / UO',
+            'service_id' => 15,
+        ],
+        [
+            'key' => 'formacion_inspectores',
+            'titulo' => 'Formación Inspectores',
+            'origen' => 'FORMACION',
+            'origen_label' => 'Formación',
+            'reference_label' => 'Cuadrilla',
+            'context_label' => 'Servicio / UO',
+            'service_id' => 19,
+        ],
+        [
+            'key' => 'reunion_gerencial',
+            'titulo' => 'Reunión gerencial',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'REUNIONES'
+            ",
+        ],
+        [
+            'key' => 'visitas_institucionales',
+            'titulo' => 'Visitas Institucionales',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) LIKE '%VISITA%'
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
+                    'MUNICIPIOS',
+                    'BOMBEROS',
+                    'PDI',
+                    'CARABINEROS',
+                    'ADUANAS',
+                    'ADUANA',
+                    'VISITA EMPRESAS'
+                )
+            ",
+        ],
+        [
+            'key' => 'visitas_educacionales',
+            'titulo' => 'Visitas Educacionales',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) LIKE '%VISITA%'
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
+                    'COLEGIO',
+                    'COLEGIOS',
+                    'INSTITUTOS PROFESIONALES',
+                    'INSTITUTOS PREFESIONALES',
+                    'UNIVERSIDADES'
+                )
+            ",
+        ],
+        [
+            'key' => 'turn_the_tide',
+            'titulo' => 'Turn the Tide',
+            'origen' => 'FORMACION',
+            'origen_label' => 'Formación',
+            'reference_label' => 'Cuadrilla',
+            'context_label' => 'Servicio / UO',
+            'service_id' => 22,
+        ],
+    ];
+}
+
+function scdFindSummaryDefinition(string $key): ?array
+{
+    foreach (scdSummaryDefinitions() as $definition) {
+        if ((string)$definition['key'] === $key) {
+            return $definition;
+        }
+    }
+
+    return null;
+}
+
+function scdSolicitudesSummaryFromSql(): string
+{
+    return "
+        FROM ceo_solicitudes s
+        INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
+        LEFT JOIN ceo_cargo_contratistas cc
+            ON cc.id = CASE
+                WHEN TRIM(COALESCE(ps.id_cargo, '')) REGEXP '^[0-9]+$'
+                    THEN CAST(ps.id_cargo AS UNSIGNED)
+                ELSE NULL
+            END
+        LEFT JOIN ceo_empresas e ON e.id = s.contratista
+        LEFT JOIN ceo_patios pa ON pa.id = s.patio
+        LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
+        LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
+    ";
+}
+
+function scdBuildSummaryBaseParams(array $filters): array
+{
+    [, $scopeParams] = scdBuildScope();
+
+    return $scopeParams + [
+        ':fecha_desde' => $filters['fecha_desde'],
+        ':fecha_hasta' => $filters['fecha_hasta'],
+    ];
+}
+
+function scdFetchSolicitudesSummaryTotal(PDO $pdo, array $filters, string $condition): int
+{
+    [$scopeWhere] = scdBuildScope();
+    $sql = "SELECT COUNT(*) " . scdSolicitudesSummaryFromSql() . " WHERE {$scopeWhere} AND {$condition}";
+    return scdFetchScalar($pdo, $sql, scdBuildSummaryBaseParams($filters));
+}
+
+function scdFetchSolicitudesSummaryDetail(PDO $pdo, array $filters, string $condition): array
+{
+    [$scopeWhere] = scdBuildScope();
+    $sql = "
+        SELECT
+            s.fecha AS fecha,
+            s.nsolicitud AS referencia,
+            COALESCE(e.nombre, '') AS empresa,
+            COALESCE(
+                CONCAT_WS(
+                    ' / ',
+                    NULLIF(TRIM(COALESCE(pa.desc_patios, '')), ''),
+                    NULLIF(TRIM(COALESCE(pr.desc_proceso, '')), '')
+                ),
+                ''
+            ) AS contexto,
+            COALESCE(ps.rut, '') AS rut,
+            TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))) AS persona,
+            COALESCE(cc.cargo, '') AS cargo
+        " . scdSolicitudesSummaryFromSql() . "
+        WHERE {$scopeWhere}
+          AND {$condition}
+        ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(scdBuildSummaryBaseParams($filters));
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function scdFetchFormacionDetalle(PDO $pdo, int $idServicio, array $filters): array
+{
+    $sql = "
+        SELECT
+            f.fecha AS fecha,
+            f.cuadrilla AS referencia,
+            COALESCE(e.nombre, '') AS empresa,
+            COALESCE(
+                CONCAT_WS(
+                    ' / ',
+                    NULLIF(TRIM(COALESCE(fs.servicio, '')), ''),
+                    NULLIF(TRIM(COALESCE(uo.desc_uo, '')), '')
+                ),
+                ''
+            ) AS contexto,
+            COALESCE(p.rut, '') AS rut,
+            TRIM(CONCAT(COALESCE(p.nombre, ''), ' ', COALESCE(p.apellidos, ''))) AS persona,
+            COALESCE(p.cargo, '') AS cargo
+        FROM ceo_formacion_participantes p
+        INNER JOIN ceo_formacion f ON f.cuadrilla = p.id_cuadrilla
+        LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
+        LEFT JOIN ceo_empresas e ON e.id = f.empresa
+        LEFT JOIN ceo_uo uo ON uo.id = f.uo
+        LEFT JOIN (
+            SELECT fp1.*
+            FROM ceo_formacion_programadas fp1
+            INNER JOIN (
+                SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+                FROM ceo_formacion_programadas
+                GROUP BY rut, id_servicio, cuadrilla
+            ) fp2 ON fp1.id = fp2.max_id
+        ) fp ON fp.rut = p.rut AND fp.id_servicio = f.id_servicio AND fp.cuadrilla = p.id_cuadrilla
+        WHERE f.id_servicio = :id_servicio
+          AND f.fecha BETWEEN :fecha_desde AND :fecha_hasta
+          AND UPPER(TRIM(COALESCE(fp.estado, ''))) <> 'ANULADA'
+          AND UPPER(TRIM(COALESCE(fp.resultado, ''))) IN ('APROBADO', 'REPROBADO')
+        ORDER BY f.fecha ASC, f.cuadrilla ASC, p.apellidos ASC, p.nombre ASC
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':id_servicio' => $idServicio,
+        ':fecha_desde' => $filters['fecha_desde'],
+        ':fecha_hasta' => $filters['fecha_hasta'],
+    ]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function scdFetchSolicitudesResumen(PDO $pdo, array $filters): array
+{
+    $rows = [];
+
+    foreach (scdSummaryDefinitions() as $definition) {
+        $total = 0;
+
+        if ((string)$definition['origen'] === 'FORMACION') {
+            $total = scdFetchFormacionTotal($pdo, (int)($definition['service_id'] ?? 0), $filters);
+        } else {
+            $total = scdFetchSolicitudesSummaryTotal($pdo, $filters, (string)($definition['condition'] ?? '1=0'));
+        }
+
+        $rows[] = [
+            'key' => (string)$definition['key'],
+            'titulo' => (string)$definition['titulo'],
+            'total' => $total,
+            'origen' => (string)$definition['origen'],
+            'origen_label' => (string)$definition['origen_label'],
+            'reference_label' => (string)$definition['reference_label'],
+            'context_label' => (string)$definition['context_label'],
+        ];
+    }
+
+    return $rows;
 }
 
 $hoy = date('Y-m-d');
@@ -167,6 +518,39 @@ $filters = [
     'asistio' => in_array((string)($_GET['asistio'] ?? ''), ['0', '1'], true) ? (string)$_GET['asistio'] : '',
 ];
 
+$summaryDetailKey = trim((string)($_GET['summary_detail'] ?? ''));
+if ($summaryDetailKey !== '') {
+    try {
+        $summaryDefinition = scdFindSummaryDefinition($summaryDetailKey);
+        if ($summaryDefinition === null) {
+            scdJsonResponse([
+                'ok' => false,
+                'error' => 'El tema solicitado no existe.',
+            ], 404);
+        }
+
+        $detailRows = (string)$summaryDefinition['origen'] === 'FORMACION'
+            ? scdFetchFormacionDetalle($pdo, (int)($summaryDefinition['service_id'] ?? 0), $filters)
+            : scdFetchSolicitudesSummaryDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'));
+
+        scdJsonResponse([
+            'ok' => true,
+            'key' => (string)$summaryDefinition['key'],
+            'titulo' => (string)$summaryDefinition['titulo'],
+            'origen' => (string)$summaryDefinition['origen'],
+            'origen_label' => (string)$summaryDefinition['origen_label'],
+            'reference_label' => (string)$summaryDefinition['reference_label'],
+            'context_label' => (string)$summaryDefinition['context_label'],
+            'rows' => $detailRows,
+        ]);
+    } catch (Throwable $e) {
+        scdJsonResponse([
+            'ok' => false,
+            'error' => defined('APP_DEBUG') && APP_DEBUG ? $e->getMessage() : 'No fue posible cargar el detalle del tema.',
+        ], 500);
+    }
+}
+
 $empresas = $pdo->query('SELECT id, nombre FROM ceo_empresas ORDER BY nombre')->fetchAll(PDO::FETCH_ASSOC);
 $solicitantes = $pdo->query("SELECT id, TRIM(CONCAT(COALESCE(nombres, ''), ' ', COALESCE(apellidos, ''))) AS nombre FROM ceo_usuarios ORDER BY nombres, apellidos")->fetchAll(PDO::FETCH_ASSOC);
 $patios = $pdo->query('SELECT id, desc_patios FROM ceo_patios ORDER BY desc_patios')->fetchAll(PDO::FETCH_ASSOC);
@@ -181,6 +565,7 @@ $tiposVisita = [
     'Universidades',
     'Visita Empresas',
     'Municipios',
+    'Fundación',
     'Carabineros',
     'Bomberos',
     'PDI',
@@ -189,6 +574,8 @@ $tiposVisita = [
 
 $rows = [];
 $error = '';
+$summaryRows = [];
+$summaryError = '';
 
 try {
     $rows = scdFetchRows($pdo, $filters);
@@ -196,7 +583,15 @@ try {
     $error = defined('APP_DEBUG') && APP_DEBUG ? $e->getMessage() : 'No fue posible cargar el informe.';
 }
 
+try {
+    $summaryRows = scdFetchSolicitudesResumen($pdo, $filters);
+} catch (Throwable $e) {
+    $summaryError = defined('APP_DEBUG') && APP_DEBUG ? $e->getMessage() : 'No fue posible cargar el resumen temático.';
+}
+
 $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filters);
+$summaryGrandTotal = array_sum(array_map(static fn(array $row): int => (int)($row['total'] ?? 0), $summaryRows));
+$summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 ?>
 <!doctype html>
 <html lang="es">
@@ -212,6 +607,36 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
     .brand-title { color:#0065a4; font-weight:600; }
     .card { border:none; box-shadow:0 2px 8px rgba(0,0,0,.06); }
     .table thead th { background:#eaf2fb; position:sticky; top:0; z-index:2; white-space:nowrap; }
+    .summary-trigger { min-width:42px; }
+    .summary-modal .modal-content { border:none; border-radius:1.25rem; box-shadow:0 18px 50px rgba(11, 45, 78, .18); overflow:hidden; }
+    .summary-modal .modal-header { background:linear-gradient(135deg, #0b5a8f 0%, #17324d 100%); color:#fff; border-bottom:none; }
+    .summary-modal .modal-header .btn-close { filter:invert(1); }
+    .summary-toolbar .btn { min-width:42px; }
+    .summary-period { color:#d8ebff; }
+    .summary-table thead th { background:#f2f7fc; color:#17324d; }
+    .summary-table tbody tr:nth-child(odd) { background:#fbfdff; }
+    .summary-total { font-variant-numeric:tabular-nums; font-weight:700; color:#0b5a8f; }
+    .summary-total-btn { font-variant-numeric:tabular-nums; font-weight:700; color:#0b5a8f; text-decoration:none; }
+    .summary-total-btn:hover, .summary-total-btn:focus { color:#084b74; text-decoration:underline; }
+    .summary-detail-modal .modal-content { border:none; border-radius:1.1rem; box-shadow:0 18px 50px rgba(11, 45, 78, .18); }
+    .summary-detail-modal .modal-header { background:#f2f7fc; }
+    .summary-detail-table thead th { background:#eef4fa; white-space:nowrap; }
+    .summary-toast {
+      position:fixed;
+      right:1rem;
+      bottom:1rem;
+      z-index:1080;
+      background:#17324d;
+      color:#fff;
+      border-radius:999px;
+      padding:.6rem .9rem;
+      box-shadow:0 10px 30px rgba(23, 50, 77, .25);
+      opacity:0;
+      pointer-events:none;
+      transform:translateY(8px);
+      transition:opacity .2s ease, transform .2s ease;
+    }
+    .summary-toast.is-visible { opacity:1; transform:translateY(0); }
   </style>
 </head>
 <body>
@@ -344,6 +769,9 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
         <div class="col-12 d-flex gap-2">
           <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search"></i> Consultar</button>
           <a href="<?= scdEsc($excelUrl) ?>" class="btn btn-success btn-sm"><i class="bi bi-file-earmark-excel"></i> Exportar</a>
+          <button type="button" class="btn btn-outline-primary btn-sm summary-trigger" data-bs-toggle="modal" data-bs-target="#resumenTemasModal" title="Resumen por tema" aria-label="Resumen por tema">
+            <i class="bi bi-table"></i>
+          </button>
           <a href="general.php" class="btn btn-outline-secondary btn-sm">Volver</a>
         </div>
       </form>
@@ -352,6 +780,10 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
 
   <?php if ($error !== ''): ?>
     <div class="alert alert-danger"><?= scdEsc($error) ?></div>
+  <?php endif; ?>
+
+  <?php if ($summaryError !== ''): ?>
+    <div class="alert alert-warning"><?= scdEsc($summaryError) ?></div>
   <?php endif; ?>
 
   <div class="card rounded-4">
@@ -413,5 +845,409 @@ $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filter
     </div>
   </div>
 </main>
+<div class="modal fade summary-modal" id="resumenTemasModal" tabindex="-1" aria-labelledby="resumenTemasModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header px-4 py-3">
+        <div>
+          <h2 class="h5 mb-1" id="resumenTemasModalLabel">Resumen por tema</h2>
+          <div class="small summary-period">Periodo <?= scdEsc($filters['fecha_desde']) ?> al <?= scdEsc($filters['fecha_hasta']) ?></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+          <p class="mb-0 text-muted">Totales calculados por tema para el período seleccionado.</p>
+          <div class="d-flex gap-2 summary-toolbar">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="summaryCopyBtn" title="Copiar tabla como imagen o descargar PNG" aria-label="Copiar tabla como imagen o descargar PNG">
+              <i class="bi bi-clipboard-image"></i>
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm" id="summaryExportBtn" title="Exportar tabla" aria-label="Exportar tabla">
+              <i class="bi bi-download"></i>
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive" id="summaryCaptureArea">
+          <table class="table table-sm table-bordered align-middle mb-0 summary-table" id="summaryTopicsTable">
+            <thead>
+              <tr>
+                <th>Tema</th>
+                <th class="text-end">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+            <?php if ($summaryRows): ?>
+              <?php foreach ($summaryRows as $summaryRow): ?>
+                <tr>
+                  <td><?= scdEsc($summaryRow['titulo']) ?></td>
+                  <td class="text-end summary-total">
+                    <?php if ((int)$summaryRow['total'] > 0): ?>
+                      <button
+                        type="button"
+                        class="btn btn-link btn-sm p-0 align-baseline summary-total-btn summary-detail-btn"
+                        data-summary-key="<?= scdEsc($summaryRow['key']) ?>"
+                        data-summary-title="<?= scdEsc($summaryRow['titulo']) ?>"
+                        data-summary-origin="<?= scdEsc($summaryRow['origen_label']) ?>"
+                        title="Ver detalle de personas"
+                      ><?= (int)$summaryRow['total'] ?></button>
+                    <?php else: ?>
+                      <span class="text-muted">0</span>
+                    <?php endif; ?>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            <?php else: ?>
+              <tr>
+                <td colspan="2" class="text-center text-muted py-4">No hay métricas disponibles para el período seleccionado.</td>
+              </tr>
+            <?php endif; ?>
+            </tbody>
+            <tfoot>
+              <tr>
+                <th>TOTAL</th>
+                <th class="text-end summary-total"><?= (int)$summaryGrandTotal ?></th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal fade summary-detail-modal" id="summaryDetailModal" tabindex="-1" aria-labelledby="summaryDetailModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header px-4 py-3">
+        <div>
+          <h2 class="h5 mb-1" id="summaryDetailModalLabel">Detalle de personas</h2>
+          <div class="small text-muted" id="summaryDetailModalMeta"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body p-4" id="summaryDetailModalBody">
+        <div class="text-center text-muted py-4">Selecciona un total para ver su detalle.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="summary-toast" id="summaryToast">Tabla copiada.</div>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const summaryRows = <?= $summaryJson ?: '[]' ?>;
+  const summaryCopyBtn = document.getElementById('summaryCopyBtn');
+  const summaryExportBtn = document.getElementById('summaryExportBtn');
+  const summaryToast = document.getElementById('summaryToast');
+  const summaryCaptureArea = document.getElementById('summaryCaptureArea');
+  const summaryTopicsTable = document.getElementById('summaryTopicsTable');
+  const summaryModalElement = document.getElementById('resumenTemasModal');
+  const summaryDetailModalElement = document.getElementById('summaryDetailModal');
+  const summaryDetailModalLabel = document.getElementById('summaryDetailModalLabel');
+  const summaryDetailModalMeta = document.getElementById('summaryDetailModalMeta');
+  const summaryDetailModalBody = document.getElementById('summaryDetailModalBody');
+  const summaryModalInstance = summaryModalElement ? bootstrap.Modal.getOrCreateInstance(summaryModalElement) : null;
+  const summaryDetailModalInstance = summaryDetailModalElement ? bootstrap.Modal.getOrCreateInstance(summaryDetailModalElement) : null;
+  const summaryPeriod = {
+    desde: <?= json_encode($filters['fecha_desde'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
+    hasta: <?= json_encode($filters['fecha_hasta'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
+  };
+  const summaryGrandTotal = <?= (int)$summaryGrandTotal ?>;
+  let reopenSummaryOnDetailClose = false;
+
+  function showSummaryToast(message) {
+    if (!summaryToast) return;
+    summaryToast.textContent = message;
+    summaryToast.classList.add('is-visible');
+    window.setTimeout(() => {
+      summaryToast.classList.remove('is-visible');
+    }, 1800);
+  }
+
+  function buildSummaryMatrix() {
+    return [
+      ['Tema', 'Total'],
+      ...summaryRows.map((row) => [String(row.titulo ?? ''), String(row.total ?? 0)]),
+      ['TOTAL', String(summaryGrandTotal)],
+    ];
+  }
+
+  function escapeCsvValue(value) {
+    const text = String(value ?? '');
+    if (/[;"\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function fallbackCopyText(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch (error) {
+      copied = false;
+    }
+
+    textarea.remove();
+    return copied;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function setSummaryDetailLoading(title, originLabel) {
+    if (summaryDetailModalLabel) {
+      summaryDetailModalLabel.textContent = `Detalle de personas - ${title}`;
+    }
+    if (summaryDetailModalMeta) {
+      summaryDetailModalMeta.textContent = `Origen ${originLabel} • Cargando detalle...`;
+    }
+    if (summaryDetailModalBody) {
+      summaryDetailModalBody.innerHTML = `
+        <div class="d-flex flex-column align-items-center justify-content-center py-4 text-muted gap-2">
+          <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+          <div>Cargando personas...</div>
+        </div>
+      `;
+    }
+  }
+
+  function renderSummaryDetail(payload) {
+    if (summaryDetailModalLabel) {
+      summaryDetailModalLabel.textContent = `Detalle de personas - ${payload.titulo ?? ''}`;
+    }
+    if (summaryDetailModalMeta) {
+      const totalRows = Array.isArray(payload.rows) ? payload.rows.length : 0;
+      summaryDetailModalMeta.textContent = `Origen ${payload.origen_label ?? ''} • ${totalRows} registro(s)`;
+    }
+    if (!summaryDetailModalBody) {
+      return;
+    }
+
+    if (!Array.isArray(payload.rows) || payload.rows.length === 0) {
+      summaryDetailModalBody.innerHTML = '<div class="text-center text-muted py-4">No se encontraron personas para este tema en el período consultado.</div>';
+      return;
+    }
+
+    const referenceLabel = escapeHtml(payload.reference_label ?? 'Referencia');
+    const contextLabel = escapeHtml(payload.context_label ?? 'Contexto');
+    const rowsHtml = payload.rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.fecha ?? '')}</td>
+        <td class="text-center">${escapeHtml(row.referencia ?? '')}</td>
+        <td>${escapeHtml(row.empresa ?? '')}</td>
+        <td>${escapeHtml(row.contexto ?? '')}</td>
+        <td>${escapeHtml(row.rut ?? '')}</td>
+        <td>${escapeHtml(row.persona ?? '')}</td>
+        <td>${escapeHtml(row.cargo ?? '')}</td>
+      </tr>
+    `).join('');
+
+    summaryDetailModalBody.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-0 summary-detail-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>${referenceLabel}</th>
+              <th>Empresa</th>
+              <th>${contextLabel}</th>
+              <th>RUT</th>
+              <th>Persona</th>
+              <th>Cargo</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function fetchSummaryDetail(summaryKey) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('summary_detail', summaryKey);
+
+    const response = await fetch(url.toString(), {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin',
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      payload = null;
+    }
+
+    if (!response.ok || !payload || payload.ok !== true) {
+      throw new Error(payload && payload.error ? payload.error : 'No fue posible cargar el detalle del tema.');
+    }
+
+    return payload;
+  }
+
+  async function copySummaryAsImage() {
+    if (!summaryCaptureArea || typeof html2canvas === 'undefined') {
+      throw new Error('capture-unavailable');
+    }
+
+    const canvas = await html2canvas(summaryCaptureArea, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+    });
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) {
+      throw new Error('blob-unavailable');
+    }
+
+    if (!navigator.clipboard || typeof window.ClipboardItem === 'undefined') {
+      throw new Error('clipboard-image-unsupported');
+    }
+
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob })
+    ]);
+  }
+
+  async function renderSummaryCanvas() {
+    if (!summaryCaptureArea || typeof html2canvas === 'undefined') {
+      throw new Error('capture-unavailable');
+    }
+
+    return html2canvas(summaryCaptureArea, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+    });
+  }
+
+  async function downloadSummaryPng() {
+    const canvas = await renderSummaryCanvas();
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `resumen_temas_${summaryPeriod.desde}_${summaryPeriod.hasta}.png`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  if (summaryCopyBtn) {
+    summaryCopyBtn.addEventListener('click', async () => {
+      try {
+        await copySummaryAsImage();
+        showSummaryToast('Tabla copiada como imagen.');
+      } catch (error) {
+        try {
+          await downloadSummaryPng();
+          showSummaryToast('Tu navegador bloqueó el portapapeles. Se descargó un PNG.');
+        } catch (downloadError) {
+          const text = buildSummaryMatrix().map((row) => row.join('\t')).join('\n');
+          try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              await navigator.clipboard.writeText(text);
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            if (fallbackCopyText(text)) {
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            showSummaryToast('No fue posible copiar la tabla');
+          } catch (fallbackError) {
+            if (fallbackCopyText(text)) {
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            showSummaryToast('No fue posible copiar la tabla');
+          }
+        }
+      }
+    });
+  }
+
+  if (summaryExportBtn) {
+    summaryExportBtn.addEventListener('click', () => {
+      const csv = '\uFEFF' + buildSummaryMatrix()
+        .map((row) => row.map(escapeCsvValue).join(';'))
+        .join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `resumen_temas_${summaryPeriod.desde}_${summaryPeriod.hasta}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showSummaryToast('Tabla exportada.');
+    });
+  }
+
+  if (summaryTopicsTable) {
+    summaryTopicsTable.addEventListener('click', async (event) => {
+      const trigger = event.target.closest('.summary-detail-btn');
+      if (!trigger) {
+        return;
+      }
+
+      const { summaryKey = '', summaryTitle = '', summaryOrigin = '' } = trigger.dataset;
+      if (!summaryKey) {
+        return;
+      }
+
+      const originalHtml = trigger.innerHTML;
+      trigger.disabled = true;
+      trigger.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+      setSummaryDetailLoading(summaryTitle, summaryOrigin);
+
+      try {
+        const payload = await fetchSummaryDetail(summaryKey);
+        renderSummaryDetail(payload);
+        reopenSummaryOnDetailClose = true;
+        if (summaryModalElement && summaryModalElement.classList.contains('show') && summaryModalInstance && summaryDetailModalInstance) {
+          summaryModalElement.addEventListener('hidden.bs.modal', () => {
+            summaryDetailModalInstance.show();
+          }, { once: true });
+          summaryModalInstance.hide();
+        } else {
+          summaryDetailModalInstance?.show();
+        }
+      } catch (error) {
+        showSummaryToast(error instanceof Error ? error.message : 'No fue posible cargar el detalle del tema.');
+      } finally {
+        trigger.disabled = false;
+        trigger.innerHTML = originalHtml;
+      }
+    });
+  }
+
+  if (summaryDetailModalElement) {
+    summaryDetailModalElement.addEventListener('hidden.bs.modal', () => {
+      if (!reopenSummaryOnDetailClose) {
+        return;
+      }
+
+      reopenSummaryOnDetailClose = false;
+      summaryModalInstance?.show();
+    });
+  }
+</script>
 </body>
 </html>

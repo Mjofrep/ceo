@@ -58,6 +58,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'guardar_solicitud') {
 	      'Universidades',
 	      'Visita Empresas',
 	      'Municipios',
+	      'Fundación',
 	      'Carabineros',
 	      'Bomberos',
 	      'PDI',
@@ -594,6 +595,7 @@ body{background:#f7f9fc}
 	                <option value="Universidades">Universidades</option>
 	                <option value="Visita Empresas">Visita Empresas</option>
 	                <option value="Municipios">Municipios</option>
+	                <option value="Fundación">Fundación</option>
 	                <option value="Carabineros">Carabineros</option>
 	                <option value="Bomberos">Bomberos</option>
 	                <option value="PDI">PDI</option>

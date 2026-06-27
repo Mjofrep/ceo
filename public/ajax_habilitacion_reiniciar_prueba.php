@@ -24,10 +24,10 @@ if ($rol !== 1) {
 $data = json_decode((string)file_get_contents('php://input'), true);
 
 $rut = trim((string)($data['rut'] ?? ''));
-$cuadrilla = (int)($data['cuadrilla'] ?? 0);
 $idServicio = (int)($data['id_servicio'] ?? 0);
+$idProcesoHabilitacion = (int)($data['id_proceso_habilitacion'] ?? 0);
 
-if ($rut === '' || $cuadrilla <= 0 || $idServicio <= 0) {
+if ($rut === '' || $idServicio <= 0 || $idProcesoHabilitacion <= 0) {
     http_response_code(400);
     echo json_encode(['ok' => false, 'msg' => 'Datos inválidos']);
     exit;
@@ -38,19 +38,19 @@ try {
     $pdo->beginTransaction();
 
     $stmtProg = $pdo->prepare("
-        SELECT id, intento, estado, resultado
-        FROM ceo_formacion_programadas
+        SELECT id, cuadrilla, intento
+        FROM ceo_evaluaciones_programadas
         WHERE rut = :rut
           AND id_servicio = :servicio
-          AND cuadrilla = :cuadrilla
+          AND id_proceso_habilitacion = :id_proceso_habilitacion
           AND tipo = 'PRUEBA'
-        ORDER BY id DESC
+        ORDER BY intento DESC, id DESC
         LIMIT 1
     ");
     $stmtProg->execute([
         ':rut' => $rut,
         ':servicio' => $idServicio,
-        ':cuadrilla' => $cuadrilla,
+        ':id_proceso_habilitacion' => $idProcesoHabilitacion,
     ]);
     $programacion = $stmtProg->fetch(PDO::FETCH_ASSOC);
 
@@ -58,13 +58,14 @@ try {
         throw new RuntimeException('No se encontró una programación de prueba para este alumno.');
     }
 
+    $cuadrilla = (int)($programacion['cuadrilla'] ?? 0);
     $intento = (int)($programacion['intento'] ?? 0);
-    if ($intento <= 0) {
+    if ($cuadrilla <= 0 || $intento <= 0) {
         throw new RuntimeException('No se pudo determinar el intento a reiniciar.');
     }
 
     $stmtDelResp = $pdo->prepare("
-        DELETE FROM ceo_resultado_formacion_pruebat
+        DELETE FROM ceo_resultado_pruebat
         WHERE rut = :rut
           AND proceso = :cuadrilla
           AND intento = :intento
@@ -77,43 +78,79 @@ try {
 
     $stmtSelIntento = $pdo->prepare("
         SELECT id
-        FROM ceo_resultado_formacion_intento
+        FROM ceo_resultado_prueba_intento
         WHERE rut = :rut
           AND id_servicio = :servicio
+          AND id_proceso_habilitacion = :id_proceso_habilitacion
         ORDER BY fecha_rendicion DESC, hora_rendicion DESC, id DESC
         LIMIT 1
     ");
     $stmtSelIntento->execute([
         ':rut' => $rut,
         ':servicio' => $idServicio,
+        ':id_proceso_habilitacion' => $idProcesoHabilitacion,
     ]);
     $idIntento = $stmtSelIntento->fetchColumn();
 
     if ($idIntento !== false) {
-        $stmtDelIntento = $pdo->prepare('DELETE FROM ceo_resultado_formacion_intento WHERE id = :id LIMIT 1');
+        $stmtDelIntento = $pdo->prepare('DELETE FROM ceo_resultado_prueba_intento WHERE id = :id LIMIT 1');
         $stmtDelIntento->execute([':id' => (int)$idIntento]);
     }
 
     $stmtUpdProg = $pdo->prepare("
-        UPDATE ceo_formacion_programadas
+        UPDATE ceo_evaluaciones_programadas
         SET estado = 'PENDIENTE',
             resultado = 'PENDIENTE',
-            fecha_resultado = NULL,
-            fecha_inicio = NULL,
-            fecha_termino = NULL,
-            cierre_modo = NULL
+            fecha_resultado = NULL
         WHERE id = :id
         LIMIT 1
     ");
-    $stmtUpdProg->execute([
-        ':id' => (int)$programacion['id'],
+    $stmtUpdProg->execute([':id' => (int)$programacion['id']]);
+
+    $stmtDelVigDet = $pdo->prepare("
+        DELETE FROM ceo_vigencia_detalle
+        WHERE rut = :rut
+          AND id_servicio = :servicio
+          AND id_proceso = :cuadrilla
+          AND id_proceso_habilitacion = :id_proceso_habilitacion
+          AND tipo = 'PRUEBA'
+    ");
+    $stmtDelVigDet->execute([
+        ':rut' => $rut,
+        ':servicio' => $idServicio,
+        ':cuadrilla' => $cuadrilla,
+        ':id_proceso_habilitacion' => $idProcesoHabilitacion,
+    ]);
+
+    $stmtDelVigGen = $pdo->prepare("
+        DELETE FROM ceo_vigencia_general
+        WHERE rut = :rut
+          AND id_proceso = :cuadrilla
+    ");
+    $stmtDelVigGen->execute([
+        ':rut' => $rut,
+        ':cuadrilla' => $cuadrilla,
+    ]);
+
+    $stmtDelFinal = $pdo->prepare("
+        DELETE FROM ceo_resultado_final_servicio
+        WHERE rut = :rut
+          AND id_servicio = :servicio
+          AND id_proceso = :cuadrilla
+          AND (id_proceso_habilitacion = :id_proceso_habilitacion OR id_proceso_habilitacion IS NULL)
+    ");
+    $stmtDelFinal->execute([
+        ':rut' => $rut,
+        ':servicio' => $idServicio,
+        ':cuadrilla' => $cuadrilla,
+        ':id_proceso_habilitacion' => $idProcesoHabilitacion,
     ]);
 
     $pdo->commit();
 
     echo json_encode([
         'ok' => true,
-        'msg' => 'La prueba fue eliminada y el alumno quedó pendiente para rendir nuevamente.',
+        'msg' => 'La prueba teórica de habilitación fue reiniciada y el alumno quedó pendiente para rendir nuevamente.',
     ]);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {

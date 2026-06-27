@@ -142,6 +142,9 @@ body { background:#f7f9fc; }
     </h5>
 
     <div class="d-flex gap-2">
+      <a href="calendario_actividades.php" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-calendar3"></i> Calendario
+      </a>
 
       <button class="btn btn-success btn-sm" id="btnOrden">
         <i class="bi bi-envelope"></i> Generar Orden

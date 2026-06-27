@@ -11,6 +11,21 @@ require_once __DIR__.'/../config/functions.php';
 
 $err = '';
 
+if (isset($_GET['logout']) && $_GET['logout'] === '1') {
+    unset($_SESSION['auth'], $_SESSION['evaluado']);
+    session_regenerate_id(true);
+    header('Location: /ceo.noetica.cl/public/login_acceso_evaluador.php');
+    exit;
+}
+
+if (empty($_SESSION['auth']) || !in_array((int)($_SESSION['auth']['id_rol'] ?? 0), [4, 5], true)) {
+    header('Location: /ceo.noetica.cl/public/login_acceso_evaluador.php');
+    exit;
+}
+
+$evaluadorNombre = trim((string)($_SESSION['auth']['nombre'] ?? ''));
+$evaluadorCodigo = trim((string)($_SESSION['auth']['codigo'] ?? ''));
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!Csrf::validate($_POST['csrf'] ?? null)) {
@@ -23,10 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
 
         $rutAlumno = trim($_POST['usuario'] ?? '');
-        $clave     = trim($_POST['password'] ?? '');
 
-        if ($rutAlumno === '' || $clave === '') {
-            $err = 'Debe ingresar Rut y clave.';
+        if ($rutAlumno === '') {
+            $err = 'Debe ingresar Rut.';
             if (function_exists('auditLog')) {
                 auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
                     'motivo' => 'campos_vacios'
@@ -39,43 +53,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
 
                 $pdo = db();
-
-                /**
-                 * 1) VALIDAMOS LOGIN DEL EVALUADOR (tu lógica original)
-                 */
-                $sql = "
-                    SELECT 
-                        u.id,
-                        u.nombres,
-                        u.apellidos,
-                        u.correo,
-                        u.id_rol,
-                        r.rol,
-                        u.id_empresa,
-                        e.nombre AS empresa
-                    FROM ceo_usuarios u
-                    LEFT JOIN ceo_rol r ON r.id = u.id_rol
-                    LEFT JOIN ceo_empresas e ON e.id = u.id_empresa
-                    WHERE u.clavepruebas = :clave
-                    AND u.id_rol in (4,5)
-                    AND u.estado = 'A'
-                    LIMIT 1
-                ";
-
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute(['clave' => $clave]);
-                $usr = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if (!$usr) {
-                    $err = "Usuario o clave incorrecta.";
-                    if (function_exists('auditLog')) {
-                        auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
-                            'motivo' => 'credenciales'
-                        ], [
-                            'codigo' => $rutAlumno
-                        ]);
-                    }
-                } else {
 
                     /**
                      * 2) VALIDAMOS RUT DEL ALUMNO EN ceo_participantes_solicitud
@@ -115,7 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 LEFT  JOIN ceo_cargo_contratistas b ON b.id = a.id_cargo
                                 LEFT  JOIN ceo_uo c ON c.id  = a.uo
                                 LEFT  JOIN ceo_empresas d ON d.id = a.id_empresa
-                                where a.rut = :rut";
+                                WHERE REPLACE(REPLACE(REPLACE(UPPER(a.rut), '.', ''), '-', ''), ' ', '') =
+                                      REPLACE(REPLACE(REPLACE(UPPER(:rut), '.', ''), '-', ''), ' ', '')";
                         $stmt = $pdo->prepare($sql);
                         $stmt->execute(['rut' => $rutAlumno]);
                         $cargo = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -127,27 +105,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //$stmt->execute(['id' => $id_solicitud]);
                         //$sol = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                            if (!$cargo) {
-                                $err = "El alumno no está registrado como contratista.";
-                                if (function_exists('auditLog')) {
-                                    auditLog('LOGIN_FAIL', 'auth_evaluador', null, [
-                                        'motivo' => 'sin_contratista'
-                                    ], [
-                                        'codigo' => $rutAlumno
-                                    ]);
-                                }
-                            }
-                              else {
+                            // Si no existe en contratistas, igualmente permitimos el ingreso
+                            // y dejamos esos datos en blanco.
+                            $cargo = $cargo ?: [];
+
                             // ✔ Campos correctos en tu BD
-                            $id_servicio = $alumno['id_servicio'];      // este es el ID del servicio
-                            $id_empresa  = $cargo['id_empresa'];   // es tu campo de empresa
-                            $id_uo       = $cargo['uo'];
+                            $id_servicio = (int)($pruebas[0]['id_servicio'] ?? 0);
+                            $id_empresa  = (int)($cargo['id_empresa'] ?? 0);
+                            $id_uo       = (int)($cargo['uo'] ?? 0);
 
                             // ✔ EMPRESA
-                            $sql = "SELECT nombre, rut FROM ceo_empresas WHERE id = :id";
-                            $stmt = $pdo->prepare($sql);
-                            $stmt->execute(['id' => $id_empresa]);
-                            $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
+                            $empresa = [
+                                'nombre' => (string)($cargo['nom_empresa'] ?? ''),
+                                'rut' => ''
+                            ];
+                            if ($id_empresa > 0) {
+                                $sql = "SELECT nombre, rut FROM ceo_empresas WHERE id = :id";
+                                $stmt = $pdo->prepare($sql);
+                                $stmt->execute(['id' => $id_empresa]);
+                                $empresa = $stmt->fetch(PDO::FETCH_ASSOC) ?: $empresa;
+                            }
 
                             // ✔ SERVICIO (nombre)
                             $sql = "SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id";
@@ -161,32 +138,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         'id_empresa' => $id_empresa ?? null,
                                         'id_uo' => $id_uo ?? null
                                     ], [
-                                        'id' => $usr['id'] ?? null,
-                                        'codigo' => $usr['correo'] ?? '',
-                                        'nombre' => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
-                                        'rol' => $usr['rol'] ?? ''
+                                        'id' => $_SESSION['auth']['id'] ?? null,
+                                        'codigo' => $_SESSION['auth']['codigo'] ?? '',
+                                        'nombre' => $_SESSION['auth']['nombre'] ?? '',
+                                        'rol' => $_SESSION['auth']['rol'] ?? ''
                                     ]);
                                 }
 
                             // ✔ UO
-                            $sql = "SELECT desc_uo, subgerencia FROM ceo_uo WHERE id = :id";
-                            $stmt = $pdo->prepare($sql);
-                            $stmt->execute(['id' => $id_uo]);
-                            $uo = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                            /**
-                             * 3) Sesión del evaluador
-                             */
-                            $_SESSION['auth'] = [
-                                'nombre'      => trim(($usr['nombres'] ?? '').' '.($usr['apellidos'] ?? '')),
-                                'correo'      => $usr['correo'] ?? '',
-                                'rol'         => $usr['rol'] ?? 'Evaluador',
-                                'id_rol'      => (int)($usr['id_rol'] ?? 4),
-                                'id_empresa'  => (int)($usr['id_empresa'] ?? 0),
-                                'empresa'     => $usr['empresa'] ?? '',
-                                'id'          => $usr['id'] ?? 0,
-                                'codigo'      => $rutAlumno
+                            $uo = [
+                                'desc_uo' => (string)($cargo['desc_uo'] ?? ''),
+                                'subgerencia' => ''
                             ];
+                            if ($id_uo > 0) {
+                                $sql = "SELECT desc_uo, subgerencia FROM ceo_uo WHERE id = :id";
+                                $stmt = $pdo->prepare($sql);
+                                $stmt->execute(['id' => $id_uo]);
+                                $uo = $stmt->fetch(PDO::FETCH_ASSOC) ?: $uo;
+                            }
 
                             /**
                              * 4) Sesión del ALUMNO con valores REALES
@@ -221,6 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $_SESSION['evaluado']['pruebas'][] = [
                                     'id_programada' => (int)$p['id'],                 // id de ceo_evaluaciones_programadas
                                     'id_servicio'   => $idServicio,
+                                    'id_agrupacion' => (int)($p['id_agrupacion'] ?? 0),
                                     'servicio'      => $nombreServicio,
                                     'nsolicitud'    => $p['nsolicitud'] ?? null,      // si existe columna
                                     'cuadrilla'     => $p['cuadrilla'] ?? null,
@@ -256,9 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ob_end_clean(); // 🧹 Limpia cualquier salida previa
                             header('Location: /ceo.noetica.cl/public/evaluador_home.php');
                             exit;
-                        }
                     }
-                }
 
             } catch (Throwable $e) {
                 $err = "Error interno: " . $e->getMessage();
@@ -324,6 +292,9 @@ body{
     <img src="<?= APP_LOGO ?>" class="logo">
     <h1 class="h4"><?= APP_NAME ?></h1>
     <small class="text-secondary"><?= APP_SUBTITLE ?></small>
+    <div class="mt-2">
+      <a href="login_evaluador.php?logout=1" class="btn btn-outline-secondary btn-sm">Salir</a>
+    </div>
 </header>
 
 <main>
@@ -331,13 +302,18 @@ body{
 <div class="login-card p-4 p-md-5 m-3 w-100">
 
   <div class="mb-4 text-center">
-    <h1 class="h4 mb-1">Ingreso Evaluador</h1>
-    <p class="text-secondary">Acceso exclusivo</p>
+    <h1 class="h4 mb-1">Ingreso RUT Evaluado</h1>
+    <p class="text-secondary">Sesión de evaluador activa. Ingrese solo el RUT de la persona a evaluar.</p>
   </div>
 
   <?php if ($err): ?>
     <div class="alert alert-danger"><?= htmlspecialchars($err) ?></div>
   <?php endif; ?>
+
+  <div class="alert alert-light border mb-3">
+    <div><strong>Evaluador:</strong> <?= htmlspecialchars($evaluadorNombre !== '' ? $evaluadorNombre : 'Sin nombre') ?></div>
+    <div><strong>Código:</strong> <?= htmlspecialchars($evaluadorCodigo !== '' ? $evaluadorCodigo : 'Sin código') ?></div>
+  </div>
 
   <form method="post" novalidate>
 
@@ -346,11 +322,6 @@ body{
     <div class="form-floating mb-3">
       <input type="text" class="form-control" id="usuario" name="usuario" placeholder="11.111.111-1" required>
       <label for="usuario">Rut persona a Evaluar</label>
-    </div>
-
-    <div class="form-floating mb-3">
-      <input type="password" class="form-control" id="password" name="password" placeholder="••••••••" required>
-      <label for="password">Clave</label>
     </div>
 
     <button class="btn btn-primary w-100 btn-lg" type="submit">Ingresar</button>

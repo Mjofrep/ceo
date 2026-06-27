@@ -24,9 +24,9 @@ $listaEvaluadores = [];
 try {
     $pdo = db();
 
-    $sql = "SELECT id, rut, CONCAT(nombre, ' ', paterno, ' ', materno) AS nombre
+    $sql = "SELECT id, rut, correo, CONCAT(nombre, ' ', paterno, ' ', materno) AS nombre
             FROM ceo_evaluadores
-            WHERE clave IS NOT NULL AND clave <> ''
+            WHERE correo IS NOT NULL AND correo <> ''
             ORDER BY nombre, paterno, materno";
 
     $stmt = $pdo->query($sql);
@@ -62,20 +62,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo = db();
 
                 /* ============================================================
-                   1) VALIDAR LOGIN CONTRA ceo_evaluadores
+                   1) VALIDAR LOGIN CONTRA ceo_usuarios POR CORREO
                    ============================================================ */
                 $sql = "
                     SELECT 
-                        id,
-                        rut,
-                        nombre,
-                        paterno,
-                        materno,
-                        correo,
-                        clave
-                    FROM ceo_evaluadores
-                    WHERE id = :id
-                    AND clave = :clave
+                        ev.id AS id_evaluador,
+                        ev.rut,
+                        ev.nombre,
+                        ev.paterno,
+                        ev.materno,
+                        ev.correo,
+                        u.id AS id_usuario,
+                        u.codigo,
+                        u.id_rol,
+                        u.id_empresa,
+                        u.clave_hash,
+                        e.nombre AS empresa,
+                        r.rol
+                    FROM ceo_evaluadores ev
+                    INNER JOIN ceo_usuarios u ON TRIM(u.correo) COLLATE utf8mb4_unicode_ci = TRIM(ev.correo) COLLATE utf8mb4_unicode_ci
+                    LEFT JOIN ceo_empresas e ON e.id = u.id_empresa
+                    LEFT JOIN ceo_rol r ON r.id = u.id_rol
+                    WHERE ev.id = :id
+                      AND u.estado = 'A'
+                      AND u.id_rol IN (4,5)
                     LIMIT 1
                 ";
 
@@ -83,33 +93,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 debug_point('Ejecutando consulta de login');
 
                 $stmt->execute([
-                    'id'    => $evaluadorSeleccionado,
-                    'clave' => $clave
+                    'id'    => $evaluadorSeleccionado
                 ]);
 
                 $usr = $stmt->fetch(PDO::FETCH_ASSOC);
 
 
-            if (!$usr) {
+            if (!$usr || !password_verify($clave, (string)($usr['clave_hash'] ?? ''))) {
                 debug_point('Login fallido: usuario no encontrado');
                 $err = "Evaluador o clave incorrecta.";
             } else {
-                debug_point('Login exitoso para evaluador ID ' . $usr['id']);
+                debug_point('Login exitoso para evaluador ID ' . $usr['id_evaluador']);
                     $nombreCompleto = trim(($usr['nombre'] ?? '') . ' ' . ($usr['paterno'] ?? '') . ' ' . ($usr['materno'] ?? ''));
                     $_SESSION['nombre_referente'] = $nombreCompleto;
                     /* ============================================================
                        LOGIN EXITOSO → Guardar sesión del evaluador
                        ============================================================ */
                     $_SESSION['auth'] = [
-                        'id'          => $usr['id'],
+                        'id'          => $usr['id_usuario'],
                         'rut'         => $usr['rut'] ?? '',
                         'nombre'      => $nombreCompleto,
                         'correo'      => $usr['correo'] ?? '',
-                        'rol'         => 'Evaluador Terreno',
-                        'id_rol'      => 4,
-                        'id_empresa'  => 0,
-                        'empresa'     => '',
-                        'codigo'      => $usr['rut'] ?? ''
+                        'rol'         => $usr['rol'] ?? 'Evaluador Terreno',
+                        'id_rol'      => (int)($usr['id_rol'] ?? 4),
+                        'id_empresa'  => (int)($usr['id_empresa'] ?? 0),
+                        'empresa'     => $usr['empresa'] ?? '',
+                        'codigo'      => $usr['codigo'] ?? ''
                     ];
 
                     // Redirección al HOME DEL EVALUADOR
