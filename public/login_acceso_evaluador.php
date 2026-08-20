@@ -67,6 +67,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'empresa' => (string)($usr['empresa'] ?? ''),
                     ];
 
+                    if ($destino === 'teorica' && function_exists('auditPrueba')) {
+                        auditPrueba('ACCESO_PLATAFORMA_EVALUADOR', [
+                            'detalle' => [
+                                'destino' => $destino,
+                                'id_empresa' => (int)($usr['id_empresa'] ?? 0),
+                                'empresa' => (string)($usr['empresa'] ?? ''),
+                            ],
+                        ]);
+                    }
+
+                    if ($destino === 'formacion' && function_exists('auditPrueba')) {
+                        auditPrueba('ACCESO_PLATAFORMA_FORMACION_EVALUADOR', [
+                            'detalle' => [
+                                'destino' => $destino,
+                                'id_empresa' => (int)($usr['id_empresa'] ?? 0),
+                                'empresa' => (string)($usr['empresa'] ?? ''),
+                            ],
+                        ]);
+                    }
+
                     session_write_close();
                     header('Location: ' . $destinos[$destino]);
                     exit;

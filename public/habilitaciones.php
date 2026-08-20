@@ -7,7 +7,7 @@ require_once '../config/app.php';
 require_once '../config/functions.php';
 
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -51,6 +51,7 @@ SELECT
     h.cuadrilla,
     h.estado,
     h.empresa,
+    h.uo AS uo_id,
     ce.nombre AS empresa_nombre,
     cu.desc_uo AS uo,
     sp.servicio,
@@ -124,7 +125,7 @@ body { background:#f7f9fc; }
         <small class="text-muted"><?= APP_SUBTITLE ?></small>
       </div>
     </div>
-    <a href="/ceo.noetica.cl/public/general.php" class="btn btn-outline-primary btn-sm">
+    <a href="<?= APP_BASE ?>/public/general.php" class="btn btn-outline-primary btn-sm">
       ← Volver
     </a>
   </div>
@@ -168,6 +169,11 @@ body { background:#f7f9fc; }
           placeholder="Buscar por cuadrilla, empresa, UO, servicio, fecha, gestor o solicitud"
         >
       </div>
+      <div class="col-md-auto d-flex align-items-end">
+        <button type="button" class="btn btn-success btn-sm" id="btnExportarExcel">
+          <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+        </button>
+      </div>
     </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover align-middle" id="tablaHabilitaciones">
@@ -187,8 +193,11 @@ body { background:#f7f9fc; }
             <?php foreach ($rows as $r): ?>
             <?php
               $cerrado = (strtolower($r['estado']) === 'cerrado');
+              $anulada = (strtolower((string)$r['estado']) === 'anulada');
               $tienePermiso = (int)($r['tiene_permiso'] ?? 0) === 1;
-              if ($cerrado) {
+              if ($anulada) {
+                  $badgeClass = 'bg-secondary';
+              } elseif ($cerrado) {
                   $badgeClass = 'bg-danger';
               } elseif ($tienePermiso) {
                   $badgeClass = 'bg-warning text-dark';
@@ -199,18 +208,19 @@ body { background:#f7f9fc; }
             <tr
               data-cuadrilla="<?= (int)$r['cuadrilla'] ?>"
               data-empresa="<?= (int)$r['empresa'] ?>"
-              data-uo="<?= esc($r['uo']) ?>"
+              data-uo="<?= (int)$r['uo_id'] ?>"
               data-fecha="<?= esc($r['fecha']) ?>"
+              data-estado="<?= $anulada ? 'anulada' : ($cerrado ? 'cerrado' : 'vigente') ?>"
             >
               <td class="text-center align-middle">
                 <input type="checkbox"
                        class="chkFila"
-                       <?= $cerrado ? 'disabled' : '' ?>>
+                       <?= $anulada ? 'disabled' : '' ?>>
               </td>
             
               <td>
                 <span class="badge badge-cuadrilla <?= $badgeClass ?>">
-                  C<?= (int)$r['cuadrilla'] ?>
+                  C<?= (int)$r['cuadrilla'] ?><?= $anulada ? ' Anulada' : '' ?>
                 </span>
               </td>
             
@@ -344,9 +354,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const rutEmpresaEvaluadora = document.getElementById('rutEmpresaEvaluadora');
   const filtroGeneral = document.getElementById('filtroGeneral');
   const tablaHabilitaciones = document.getElementById('tablaHabilitaciones');
+  const btnOrden = document.getElementById('btnOrden');
   const filasTabla = tablaHabilitaciones
     ? [...tablaHabilitaciones.querySelectorAll('tbody tr')]
     : [];
+
+  function actualizarEstadoAcciones() {
+    const filasSeleccionadas = [...document.querySelectorAll('.chkFila:checked')]
+      .map(chk => chk.closest('tr'))
+      .filter(Boolean);
+
+    const hayCerradas = filasSeleccionadas.some(tr => tr.dataset.estado === 'cerrado');
+    if (btnOrden) {
+      btnOrden.disabled = filasSeleccionadas.length === 0 || hayCerradas;
+    }
+  }
 
   function actualizarDatosEmpresaEvaluadora() {
     const selected = empresaEvaluadoraSelect?.selectedOptions?.[0];
@@ -372,6 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const chkAll = document.getElementById('chkAll');
     if (chkAll) chkAll.checked = false;
+    actualizarEstadoAcciones();
   });
 
   // CHECK ALL
@@ -385,6 +408,12 @@ document.addEventListener('DOMContentLoaded', () => {
         checkbox.checked = this.checked;
       }
     });
+
+    actualizarEstadoAcciones();
+  });
+
+  document.querySelectorAll('.chkFila').forEach(chk => {
+    chk.addEventListener('change', actualizarEstadoAcciones);
   });
 
   // DOBLE CLICK (SE MANTIENE)
@@ -414,6 +443,11 @@ function formatFecha(fechaISO) {
 
     if (filas.length === 0) {
       alert('Debe seleccionar al menos una cuadrilla.');
+      return;
+    }
+
+    if (filas.some(tr => tr.dataset.estado === 'cerrado')) {
+      alert('Generar Orden solo está disponible para cuadrillas vigentes.');
       return;
     }
 
@@ -511,6 +545,34 @@ function formatFecha(fechaISO) {
 
   });
 
+  actualizarEstadoAcciones();
+
+  document.getElementById('btnExportarExcel')?.addEventListener('click', () => {
+    const cuadrillas = [...document.querySelectorAll('.chkFila:checked')]
+      .map(chk => chk.closest('tr')?.dataset.cuadrilla)
+      .filter(Boolean);
+
+    if (cuadrillas.length === 0) {
+      alert('Debe seleccionar al menos una cuadrilla.');
+      return;
+    }
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'habilitaciones_excel.php';
+    form.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'cuadrillas';
+    input.value = cuadrillas.join(',');
+
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  });
+
 });
 </script>
 <script>
@@ -522,7 +584,7 @@ document.getElementById('formOrden').addEventListener('submit', function (e) {
 
   console.log('➡️ Enviando correo…');
 
-  fetch('/ceo.noetica.cl/public/enviar_orden_mail.php', {
+  fetch('<?= APP_BASE ?>/public/enviar_orden_mail.php', {
     method: 'POST',
     body: formData
   })

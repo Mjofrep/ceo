@@ -111,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        ============================================================ */
                     $_SESSION['auth'] = [
                         'id'          => $usr['id_usuario'],
+                        'id_evaluador'=> (int)($usr['id_evaluador'] ?? 0),
                         'rut'         => $usr['rut'] ?? '',
                         'nombre'      => $nombreCompleto,
                         'correo'      => $usr['correo'] ?? '',

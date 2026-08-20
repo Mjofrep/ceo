@@ -3,6 +3,7 @@ declare(strict_types=1);
 session_start();
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -21,11 +22,22 @@ try {
     }
 
     $rut = preg_replace('/\s+/', '', trim((string)($data['rut'] ?? '')));
+    $idServicio = (int)($data['id_servicio'] ?? 0);
+    $cuadrilla = (int)($data['cuadrilla'] ?? 0);
     if ($rut === '') {
         throw new Exception('El RUT es obligatorio');
     }
 
     $pdo = db();
+    if ($idServicio <= 0 || $cuadrilla <= 0) {
+        throw new Exception('Faltan datos de la planificación actual.');
+    }
+
+    $idCargo = obtenerCargoTrabajador($pdo, $rut, $idServicio, $cuadrilla);
+    if ($idCargo === null || $idCargo <= 0) {
+        throw new Exception('No se pudo resolver el cargo del trabajador para esta planificación.');
+    }
+
     $stmt = $pdo->prepare('
         SELECT
             ph.id,
@@ -43,10 +55,16 @@ try {
         INNER JOIN ceo_servicios_pruebas sp ON sp.id = ph.id_servicio
         LEFT JOIN ceo_cargos_habilitacion ch ON ch.id = ph.id_cargo
         WHERE ph.rut = :rut
+          AND ph.id_servicio = :id_servicio
+          AND ph.id_cargo = :id_cargo
           AND ph.estado = "ABIERTO"
         ORDER BY ph.numero_proceso DESC, ph.id DESC
     ');
-    $stmt->execute([':rut' => $rut]);
+    $stmt->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':id_cargo' => $idCargo,
+    ]);
 
     echo json_encode([
         'ok' => true,

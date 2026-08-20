@@ -119,6 +119,8 @@ function historicoActualizarProceso(array &$meta, bool $evaluarVencimientoActual
 
 function historicoCargarEventos(PDO $pdo, int $idServicio, string $rut): array
 {
+    $lleeConfig = function_exists('ceoGetLleeConfig') ? ceoGetLleeConfig() : null;
+    $esServicioLlee = $lleeConfig && $idServicio > 0 && $idServicio === (int)($lleeConfig['service_id'] ?? 0);
     $whereTeorica = [];
     $whereTerreno = [];
     $params = [];
@@ -214,6 +216,137 @@ function historicoCargarEventos(PDO $pdo, int $idServicio, string $rut): array
     $stmt->execute($params);
 
     $eventos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($esServicioLlee) {
+        $sqlAgrupacionesLlee = "
+            SELECT
+                rpt.rut,
+                ps.id_servicio,
+                ps.id_agrupacion,
+                a.titulo AS agrupacion_titulo,
+                rpt.intento,
+                MAX(CONCAT(COALESCE(rpt.fecha_rendicion, '0000-00-00'), ' ', COALESCE(rpt.hora_rendicion, '00:00:00'))) AS fecha_hora,
+                SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+                COUNT(*) AS total,
+                (
+                    SELECT rpi2.id
+                    FROM ceo_resultado_prueba_intento rpi2
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = ps.id_servicio
+                      AND rpi2.fecha_rendicion = rpt.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS intento_id,
+                (
+                    SELECT rpi2.id_proceso_habilitacion
+                    FROM ceo_resultado_prueba_intento rpi2
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = ps.id_servicio
+                      AND rpi2.fecha_rendicion = rpt.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS id_proceso_habilitacion,
+                (
+                    SELECT ph2.numero_proceso
+                    FROM ceo_resultado_prueba_intento rpi2
+                    LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = rpi2.id_proceso_habilitacion
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = ps.id_servicio
+                      AND rpi2.fecha_rendicion = rpt.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS proceso_real,
+                (
+                    SELECT ph2.estado
+                    FROM ceo_resultado_prueba_intento rpi2
+                    LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = rpi2.id_proceso_habilitacion
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = ps.id_servicio
+                      AND rpi2.fecha_rendicion = rpt.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS estado_proceso_real,
+                (
+                    SELECT ph2.origen
+                    FROM ceo_resultado_prueba_intento rpi2
+                    LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = rpi2.id_proceso_habilitacion
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = ps.id_servicio
+                      AND rpi2.fecha_rendicion = rpt.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS origen_proceso,
+                MAX(COALESCE(cc.cargo, '')) AS cargo_contratista,
+                MAX(TRIM(CONCAT(COALESCE(ct.nombre, ''), ' ', COALESCE(ct.apellidos, '')))) AS nombre
+            FROM ceo_resultado_pruebat rpt
+            INNER JOIN ceo_preguntas_servicios ps
+                ON ps.id = rpt.id_pregunta
+               AND ps.id_servicio = :id_servicio_llee
+               AND ps.id_agrupacion IN (:hotline_group_id, :theory_group_id)
+            INNER JOIN ceo_agrupacion a ON a.id = ps.id_agrupacion
+            LEFT JOIN ceo_contratistas ct ON ct.rut = rpt.rut
+            LEFT JOIN ceo_cargo_contratistas cc ON cc.id = ct.id_cargo
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '') = :rut_llee
+            GROUP BY rpt.rut, ps.id_servicio, ps.id_agrupacion, a.titulo, rpt.intento
+            HAVING total > 0
+            ORDER BY fecha_hora ASC, rpt.intento ASC, ps.id_agrupacion ASC
+        ";
+
+        $stmtAgrupacionesLlee = $pdo->prepare($sqlAgrupacionesLlee);
+        $stmtAgrupacionesLlee->execute([
+            ':id_servicio_llee' => $idServicio,
+            ':hotline_group_id' => (int)($lleeConfig['hotline_group_id'] ?? 0),
+            ':theory_group_id' => (int)($lleeConfig['theory_group_id'] ?? 0),
+            ':rut_llee' => strtoupper(str_replace(['.', '-', ' '], '', $rut)),
+        ]);
+
+        $eventosBase = [];
+        foreach ($eventos as $evento) {
+            if ((string)($evento['tipo'] ?? '') === 'TEORICA') {
+                continue;
+            }
+            $eventosBase[] = $evento;
+        }
+
+        foreach ($stmtAgrupacionesLlee->fetchAll(PDO::FETCH_ASSOC) as $rowLlee) {
+            $total = (int)($rowLlee['total'] ?? 0);
+            if ($total <= 0) {
+                continue;
+            }
+
+            $porcentaje = round((((int)($rowLlee['correctas'] ?? 0)) / $total) * 100, 2);
+            $idAgrupacion = (int)($rowLlee['id_agrupacion'] ?? 0);
+            $porcentajeMinimo = $idAgrupacion === (int)($lleeConfig['hotline_group_id'] ?? 0)
+                ? (float)($lleeConfig['hotline_min_pct'] ?? 100.0)
+                : (float)($lleeConfig['theory_min_pct'] ?? 80.0);
+
+            $eventosBase[] = [
+                'tipo' => 'TEORICA',
+                'id_registro' => (int)($rowLlee['intento_id'] ?? 0),
+                'rut' => (string)($rowLlee['rut'] ?? ''),
+                'id_servicio' => (int)($rowLlee['id_servicio'] ?? $idServicio),
+                'servicio' => 'LLEE',
+                'fecha_hora' => (string)($rowLlee['fecha_hora'] ?? ''),
+                'puntaje' => $porcentaje,
+                'nota_final' => round(calcularNotaFinalDesdePorcentaje($porcentaje, $porcentajeMinimo), 2),
+                'resultado' => $porcentaje >= $porcentajeMinimo ? 'APROBADO' : 'REPROBADO',
+                'nombre' => (string)($rowLlee['nombre'] ?? ''),
+                'cargo_contratista' => (string)($rowLlee['cargo_contratista'] ?? ''),
+                'cargo_terreno' => '',
+                'id_proceso_habilitacion' => (int)($rowLlee['id_proceso_habilitacion'] ?? 0),
+                'proceso_real' => $rowLlee['proceso_real'] !== null ? (string)$rowLlee['proceso_real'] : null,
+                'estado_proceso_real' => (string)($rowLlee['estado_proceso_real'] ?? ''),
+                'origen_proceso' => (string)($rowLlee['origen_proceso'] ?? ''),
+                'origen' => 'CEONext',
+                'id_agrupacion' => $idAgrupacion,
+                'agrupacion_titulo' => (string)($rowLlee['agrupacion_titulo'] ?? ''),
+                'detalle_prueba' => $idAgrupacion === (int)($lleeConfig['hotline_group_id'] ?? 0) ? 'Hotline' : 'LLEE',
+            ];
+        }
+
+        $eventos = $eventosBase;
+    }
+
     $terrenosPorRutServicio = [];
     foreach ($eventos as $evento) {
         if ((string)$evento['tipo'] !== 'TERRENO') {
@@ -260,6 +393,10 @@ function historicoCargarEventos(PDO $pdo, int $idServicio, string $rut): array
         } else {
             $evento['cargo_evaluacion'] = trim((string)($evento['cargo_contratista'] ?? ''));
             $evento['cargo_origen'] = 'Contratista actual';
+        }
+
+        if (!isset($evento['detalle_prueba'])) {
+            $evento['detalle_prueba'] = '';
         }
     }
     unset($evento);
@@ -363,6 +500,7 @@ function historicoSimularProcesos(PDO $pdo, int $idServicio = 0, string $rut = '
             'cargo_evaluacion' => $cargoEvaluacion,
             'cargo_proceso' => $cargoProcesoKey,
             'cargo_origen' => (string)($evento['cargo_origen'] ?? ''),
+            'detalle_prueba' => (string)($evento['detalle_prueba'] ?? ''),
             'proceso' => (int)$meta['numero'],
             'id_proceso_habilitacion' => isset($evento['id_proceso_habilitacion']) ? (int)$evento['id_proceso_habilitacion'] : 0,
             'proceso_real' => !empty($evento['proceso_real']) ? (int)$evento['proceso_real'] : null,

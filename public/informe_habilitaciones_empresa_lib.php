@@ -81,6 +81,28 @@ if (!function_exists('iheParseNullableScore')) {
     }
 }
 
+if (!function_exists('iheSplitFullName')) {
+    function iheSplitFullName(?string $fullName): array
+    {
+        $parts = preg_split('/\s+/', trim((string)$fullName)) ?: [];
+        $parts = array_values(array_filter($parts, static fn(string $part): bool => $part !== ''));
+        $count = count($parts);
+        if ($count === 0) {
+            return ['', ''];
+        }
+        if ($count === 1) {
+            return [$parts[0], ''];
+        }
+        if ($count === 2) {
+            return [$parts[0], $parts[1]];
+        }
+
+        $nameParts = array_slice($parts, 0, $count - 2);
+        $lastNameParts = array_slice($parts, -2);
+        return [implode(' ', $nameParts), implode(' ', $lastNameParts)];
+    }
+}
+
 if (!function_exists('iheResolvePesosPorCargoServicio')) {
     function iheResolvePesosPorCargoServicio(?string $cargo, ?int $idCargo = null): ?array
     {
@@ -132,6 +154,7 @@ if (!function_exists('iheMapTerrenoRespuestaFlags')) {
 
         if (
             str_contains($norm, 'NO APLICA') ||
+            str_contains($norm, 'NO SE APLICA') ||
             $norm === 'NA' ||
             $norm === 'N A'
         ) {
@@ -140,6 +163,7 @@ if (!function_exists('iheMapTerrenoRespuestaFlags')) {
 
         if (
             str_contains($norm, 'ALCANZO') ||
+            str_contains($norm, 'ALCANZ O') ||
             $norm === 'SI' ||
             str_contains($norm, 'CUMPLE') ||
             str_contains($norm, 'APROB')
@@ -150,6 +174,7 @@ if (!function_exists('iheMapTerrenoRespuestaFlags')) {
         if (
             $norm === 'NO' ||
             str_contains($norm, 'NO ALCANZO') ||
+            str_contains($norm, 'NO ALCANZ O') ||
             str_contains($norm, 'REPROB')
         ) {
             return [false, true, false];
@@ -433,6 +458,72 @@ if (!function_exists('iheFetchCompanyContractors')) {
             }
 
             $byRut[$rutKey] = $row;
+        }
+
+        $stmtEmpresa = $pdo->prepare('SELECT nombre FROM ceo_empresas WHERE id = :id LIMIT 1');
+        $stmtEmpresa->execute([':id' => $empresaId]);
+        $empresaNombre = trim((string)$stmtEmpresa->fetchColumn());
+
+        if ($empresaNombre !== '') {
+            $stmtFallback = $pdo->query(" 
+                SELECT rut, nombre, cargo, contratista
+                FROM ceo_evaluacion_terreno
+                WHERE NULLIF(TRIM(COALESCE(contratista, '')), '') IS NOT NULL
+                ORDER BY fecha_evaluacion DESC, id DESC
+            ");
+
+            $stmtContractorByRut = $pdo->prepare("
+                SELECT
+                    c.rut,
+                    c.nombre,
+                    c.apellidos,
+                    c.id_cargo,
+                    cc.cargo,
+                    uo.desc_uo AS uo
+                FROM ceo_contratistas c
+                LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
+                LEFT JOIN ceo_uo uo ON uo.id = c.uo
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(c.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(:rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY c.id DESC
+                LIMIT 1
+            ");
+
+            foreach ($stmtFallback->fetchAll(PDO::FETCH_ASSOC) as $fallbackRow) {
+                $rutKey = iheNormalizeRut((string)($fallbackRow['rut'] ?? ''));
+                if ($rutKey === '' || isset($byRut[$rutKey])) {
+                    continue;
+                }
+
+                $terrainContratista = trim((string)($fallbackRow['contratista'] ?? ''));
+                if ($terrainContratista === '' || !iheCompanyNamesMatch($terrainContratista, $empresaNombre)) {
+                    continue;
+                }
+
+                $stmtContractorByRut->execute([':rut' => (string)$fallbackRow['rut']]);
+                $contractorRow = $stmtContractorByRut->fetch(PDO::FETCH_ASSOC) ?: null;
+                if ($contractorRow !== null) {
+                    $nombre = trim((string)($contractorRow['nombre'] ?? ''));
+                    $apellidos = trim((string)($contractorRow['apellidos'] ?? ''));
+                } else {
+                    [$nombre, $apellidos] = iheSplitFullName((string)($fallbackRow['nombre'] ?? ''));
+                }
+
+                $cargo = trim((string)($contractorRow['cargo'] ?? ''));
+                if ($cargo === '') {
+                    $cargo = trim((string)($fallbackRow['cargo'] ?? ''));
+                }
+
+                $byRut[$rutKey] = [
+                    'rut' => (string)($fallbackRow['rut'] ?? ''),
+                    'nombre' => $nombre,
+                    'apellidos' => $apellidos,
+                    'id_cargo' => isset($contractorRow['id_cargo']) ? (int)$contractorRow['id_cargo'] : null,
+                    'cargo' => $cargo,
+                    'id_empresa' => $empresaId,
+                    'empresa' => $terrainContratista,
+                    'uo' => trim((string)($contractorRow['uo'] ?? '')),
+                ];
+            }
         }
 
         return $byRut;
@@ -744,6 +835,7 @@ if (!function_exists('iheLoadLatestTerrainRows')) {
                 et.fecha_evaluacion,
                 et.resultado,
                 et.cargo,
+                et.contratista,
                 et.id_proceso_habilitacion,
                 ph.numero_proceso,
                 (
@@ -785,7 +877,24 @@ if (!function_exists('iheLoadLatestTerrainRows')) {
         $grouped = [];
         foreach ($rows as $row) {
             $rutKey = iheNormalizeRut((string)$row['rut']);
-            if ($rutKey === '' || isset($grouped[$rutKey])) {
+            if ($rutKey === '') {
+                continue;
+            }
+
+            $cargo = trim((string)($row['cargo'] ?? ''));
+            $contratista = trim((string)($row['contratista'] ?? ''));
+            $empresaHistorica = trim((string)($row['empresa_historica'] ?? ''));
+
+            if (isset($grouped[$rutKey])) {
+                if ($grouped[$rutKey]['cargo'] === '' && $cargo !== '') {
+                    $grouped[$rutKey]['cargo'] = $cargo;
+                }
+                if ($grouped[$rutKey]['contratista'] === '' && $contratista !== '') {
+                    $grouped[$rutKey]['contratista'] = $contratista;
+                }
+                if ($grouped[$rutKey]['empresa_historica'] === '' && $empresaHistorica !== '') {
+                    $grouped[$rutKey]['empresa_historica'] = $empresaHistorica;
+                }
                 continue;
             }
 
@@ -797,10 +906,11 @@ if (!function_exists('iheLoadLatestTerrainRows')) {
                 'puntaje' => $puntaje,
                 'nota' => $intentos[$rutKey] ?? null,
                 'aprobacion' => $puntaje !== null ? ($puntaje >= 80.0 ? 'SI' : 'NO') : 'Pendiente',
-                'cargo' => trim((string)($row['cargo'] ?? '')),
+                'cargo' => $cargo,
+                'contratista' => $contratista,
                 'id_proceso_habilitacion' => (int)($row['id_proceso_habilitacion'] ?? 0),
                 'numero_proceso' => isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null,
-                'empresa_historica' => trim((string)($row['empresa_historica'] ?? '')),
+                'empresa_historica' => $empresaHistorica,
             ];
         }
 
@@ -828,99 +938,116 @@ if (!function_exists('iheLoadTerrainThreshold')) {
 if (!function_exists('iheLoadLatestTerrainBreakdownByRut')) {
     function iheLoadLatestTerrainBreakdownByRut(PDO $pdo, int $idServicio, float $threshold): array
     {
-        $stmtEval = $pdo->prepare("
-            SELECT id, rut
-            FROM ceo_evaluacion_terreno
-            WHERE id_servicio = :id_servicio
-            ORDER BY fecha_evaluacion DESC, id DESC
+        $stmt = $pdo->prepare("
+            SELECT
+                srt.fecha_examen,
+                srt.hora_examen,
+                rpt.rut_contratista AS rut,
+                s.id AS id_area,
+                COALESCE(NULLIF(TRIM(s.nombre), ''), NULLIF(TRIM(s.seccion), ''), 'Sin area de competencia') AS area,
+                COALESCE(p.ponderacion, 0) AS ponderacion,
+                rpt.id_pregunta,
+                p.pregunta AS item,
+                rpt.cumple,
+                rpt.no_cumple,
+                rpt.no_aplica,
+                s.orden AS orden_area
+            FROM ceo_seccion_resultado_terreno srt
+            INNER JOIN ceo_resultado_prueba_terreno rpt
+                ON rpt.id_resultado = srt.id
+            INNER JOIN ceo_seccion_terreno s
+                ON s.id = rpt.id_seccion
+               AND s.orden > 1
+            INNER JOIN ceo_preguntas_seccion_terreno p
+                ON p.id = rpt.id_pregunta
+            WHERE srt.id_servicio = :id_servicio
+            ORDER BY srt.fecha_examen DESC, TIME(srt.hora_examen) DESC, s.orden ASC, rpt.id_pregunta ASC
         ");
-        $stmtEval->execute([':id_servicio' => $idServicio]);
+        $stmt->execute([':id_servicio' => $idServicio]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        $latestEval = [];
-        foreach ($stmtEval->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $rutKey = iheNormalizeRut((string)$row['rut']);
-            if ($rutKey === '' || isset($latestEval[$rutKey])) {
-                continue;
-            }
-            $latestEval[$rutKey] = (int)$row['id'];
-        }
-
-        if (empty($latestEval)) {
+        if (empty($rows)) {
             return [];
         }
 
-        $placeholders = implode(',', array_fill(0, count($latestEval), '?'));
-        $stmtDetalle = $pdo->prepare("
-            SELECT
-                etd.id_evaluacion_terreno,
-                et.rut,
-                etd.area,
-                etd.item,
-                etd.respuesta,
-                etd.resultado_item
-            FROM ceo_evaluacion_terreno_detalle etd
-            INNER JOIN ceo_evaluacion_terreno et ON et.id = etd.id_evaluacion_terreno
-            WHERE etd.id_evaluacion_terreno IN ($placeholders)
-            ORDER BY etd.id_evaluacion_terreno ASC, etd.id ASC
-        ");
-        $stmtDetalle->execute(array_values($latestEval));
-        $details = $stmtDetalle->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $latestSessionByRut = [];
+        $orderedAreasByRut = [];
+        $areaStatsByRut = [];
+        $itemValuesByRut = [];
 
-        $areas = [];
-        $items = [];
-        foreach ($details as $row) {
-            $rutKey = iheNormalizeRut((string)$row['rut']);
+        foreach ($rows as $row) {
+            $rutKey = iheNormalizeRut((string)($row['rut'] ?? ''));
             if ($rutKey === '') {
                 continue;
             }
 
-            [$cumple, $noCumple, $noAplica] = iheMapTerrenoRespuestaFlags((string)($row['respuesta'] ?? $row['resultado_item'] ?? ''));
+            $sessionKey = trim((string)($row['fecha_examen'] ?? '')) . ' ' . trim((string)($row['hora_examen'] ?? ''));
+            if (!isset($latestSessionByRut[$rutKey])) {
+                $latestSessionByRut[$rutKey] = $sessionKey;
+            }
+            if ($latestSessionByRut[$rutKey] !== $sessionKey) {
+                continue;
+            }
 
-            $areaKey = iheNormalizeText((string)$row['area']);
-            if ($areaKey !== '') {
-                if (!isset($areas[$rutKey][$areaKey])) {
-                    $areas[$rutKey][$areaKey] = ['ok' => 0, 'no' => 0, 'na' => 0, 'blank' => 0];
-                }
+            $areaKey = iheNormalizeText((string)($row['area'] ?? ''));
+            if ($areaKey === '') {
+                continue;
+            }
+
+            if (!isset($orderedAreasByRut[$rutKey][$areaKey])) {
+                $orderedAreasByRut[$rutKey][$areaKey] = true;
+            }
+
+            if (!isset($areaStatsByRut[$rutKey][$areaKey])) {
+                $areaStatsByRut[$rutKey][$areaKey] = [
+                    'ponderacion_lograda' => 0.0,
+                    'ponderacion_evaluable' => 0.0,
+                ];
+            }
+
+            $ponderacion = isset($row['ponderacion']) ? (float)$row['ponderacion'] : 0.0;
+            $cumple = trim((string)($row['cumple'] ?? '')) === '1';
+            $noCumple = trim((string)($row['no_cumple'] ?? '')) === '1';
+            $noAplica = trim((string)($row['no_aplica'] ?? '')) === '1';
+
+            if (!$noAplica) {
+                $areaStatsByRut[$rutKey][$areaKey]['ponderacion_evaluable'] += $ponderacion;
                 if ($cumple) {
-                    $areas[$rutKey][$areaKey]['ok']++;
-                } elseif ($noCumple) {
-                    $areas[$rutKey][$areaKey]['no']++;
-                } elseif ($noAplica) {
-                    $areas[$rutKey][$areaKey]['na']++;
-                } else {
-                    $areas[$rutKey][$areaKey]['blank']++;
+                    $areaStatsByRut[$rutKey][$areaKey]['ponderacion_lograda'] += $ponderacion;
                 }
             }
 
-            $itemKey = iheNormalizeText((string)$row['item']);
+            $itemKey = iheNormalizeText((string)($row['item'] ?? ''));
             if ($itemKey !== '') {
                 if ($cumple) {
-                    $items[$rutKey][$itemKey] = 7.0;
+                    $itemValuesByRut[$rutKey][$itemKey] = 7.0;
                 } elseif ($noCumple) {
-                    $items[$rutKey][$itemKey] = 1.0;
+                    $itemValuesByRut[$rutKey][$itemKey] = 1.0;
                 } elseif ($noAplica) {
-                    $items[$rutKey][$itemKey] = 0.0;
-                } elseif (!isset($items[$rutKey][$itemKey])) {
-                    $items[$rutKey][$itemKey] = 0.0;
+                    $itemValuesByRut[$rutKey][$itemKey] = 0.0;
+                } elseif (!isset($itemValuesByRut[$rutKey][$itemKey])) {
+                    $itemValuesByRut[$rutKey][$itemKey] = 0.0;
                 }
             }
         }
 
         $result = [];
-        foreach ($latestEval as $rutKey => $_evalId) {
+        foreach ($latestSessionByRut as $rutKey => $_sessionKey) {
             $result[$rutKey] = [
                 'areas' => [],
-                'items' => $items[$rutKey] ?? [],
+                'items' => $itemValuesByRut[$rutKey] ?? [],
+                'ordered_areas' => array_keys($orderedAreasByRut[$rutKey] ?? []),
             ];
 
-            foreach (($areas[$rutKey] ?? []) as $areaKey => $stats) {
-                $totalEvaluable = (int)$stats['ok'] + (int)$stats['no'] + (int)$stats['blank'];
-                if ($totalEvaluable <= 0) {
+            foreach (($areaStatsByRut[$rutKey] ?? []) as $areaKey => $stats) {
+                $ponderacionEvaluable = round((float)($stats['ponderacion_evaluable'] ?? 0.0), 2);
+                $ponderacionLograda = round((float)($stats['ponderacion_lograda'] ?? 0.0), 2);
+                if ($ponderacionEvaluable <= 0.0) {
                     $result[$rutKey]['areas'][$areaKey] = 0.0;
                     continue;
                 }
 
-                $porcentaje = round(((int)$stats['ok'] / $totalEvaluable) * 100, 2);
+                $porcentaje = round(($ponderacionLograda / $ponderacionEvaluable) * 100, 2);
                 $result[$rutKey]['areas'][$areaKey] = round(calcularNotaFinalDesdePorcentaje($porcentaje, $threshold), 2);
             }
         }
@@ -956,9 +1083,12 @@ if (!function_exists('iheBuildBaseServiceDataset')) {
                 continue;
             }
 
-            $cargo = trim((string)($contractor['cargo'] ?? ''));
-            if ($cargo === '' && $terr !== null) {
+            $cargo = '';
+            if ($terr !== null) {
                 $cargo = trim((string)($terr['cargo'] ?? ''));
+            }
+            if ($cargo === '') {
+                $cargo = trim((string)($contractor['cargo'] ?? ''));
             }
 
             $pesos = iheResolvePesosPorCargoServicio($cargo, isset($contractor['id_cargo']) ? (int)$contractor['id_cargo'] : null);
@@ -997,7 +1127,10 @@ if (!function_exists('iheBuildBaseServiceDataset')) {
                 $estado = 'Pendiente';
             }
 
-            $empresaHistorica = trim((string)($terr['empresa_historica'] ?? ''));
+            $empresaHistorica = trim((string)($terr['contratista'] ?? ''));
+            if ($empresaHistorica === '') {
+                $empresaHistorica = trim((string)($terr['empresa_historica'] ?? ''));
+            }
             if ($empresaHistorica === '' && $teo !== null) {
                 $empresaHistorica = trim((string)($teo['empresa_historica'] ?? ''));
             }
@@ -1116,7 +1249,7 @@ if (!function_exists('iheBuildStandardSheetRow')) {
                     break;
                 case 'Contratista':
                 case 'Mandante':
-                    $row[$key] = $empresaNombre;
+                    $row[$key] = $baseRow['empresa'];
                     break;
                 case 'SAGE':
                     $row[$key] = 'SI';
@@ -1204,8 +1337,8 @@ if (!function_exists('iheBuildDualSheetRows')) {
             $row['Fecha de Evaluación'] = iheFmtDate($fechaEvaluacion);
             $row['Fecha Prueba BT'] = iheFmtDate($bt['teorica']['fecha'] ?? null);
             $row['Fecha Prueba MT'] = iheFmtDate($mt['teorica']['fecha'] ?? null);
-            $row['Contratista'] = $empresaNombre;
-            $row['Mandante'] = $empresaNombre;
+            $row['Contratista'] = $base['empresa'];
+            $row['Mandante'] = $base['empresa'];
             $row['SAGE'] = 'SI';
             $row['Estado'] = $base['estado'];
 
@@ -1224,7 +1357,7 @@ if (!function_exists('iheBuildDualSheetRows')) {
                 'nombre' => $base['nombre'],
                 'apellidos' => $base['apellidos'],
                 'cargo' => $base['cargo'],
-                'empresa' => $empresaNombre,
+                'empresa' => $base['empresa'],
                 'uo' => $base['uo'],
                 'servicio' => $definition['title'],
                 'estado_habilitacion' => $row['Habilitado'],
@@ -1256,6 +1389,8 @@ if (!function_exists('iheBuildCuadrillasRows')) {
             $row['Empresa'] = trim((string)($contractor['empresa'] ?? ''));
 
             if ($base !== null) {
+                $row['Cargo'] = trim((string)($base['cargo'] ?? ''));
+                $row['Empresa'] = trim((string)($base['empresa'] ?? ''));
                 $row['Fecha Prueba'] = iheFmtDate($base['teorica']['fecha'] ?? null);
                 $row['Nota Prueba'] = iheTrimmedNumber($base['teorica']['nota'] ?? null, 1);
                 $row['Prueba'] = $base['teorica']['aprobacion'] ?? 'Pendiente';
@@ -1272,8 +1407,8 @@ if (!function_exists('iheBuildCuadrillasRows')) {
                 'rut' => (string)$contractor['rut'],
                 'nombre' => trim((string)($contractor['nombre'] ?? '')),
                 'apellidos' => trim((string)($contractor['apellidos'] ?? '')),
-                'cargo' => trim((string)($contractor['cargo'] ?? '')),
-                'empresa' => trim((string)($contractor['empresa'] ?? '')),
+                'cargo' => trim((string)($base['cargo'] ?? $contractor['cargo'] ?? '')),
+                'empresa' => trim((string)($base['empresa'] ?? $contractor['empresa'] ?? '')),
                 'uo' => trim((string)($contractor['uo'] ?? '')),
                 'servicio' => $definition['title'],
                 'estado_habilitacion' => $base['habilitado'] ?? '',

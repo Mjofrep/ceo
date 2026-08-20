@@ -10,6 +10,32 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/functions.php';
 require_once __DIR__ . '/../src/Csrf.php';
 
+if (!function_exists('evaluadorImagenUrl')) {
+    function evaluadorImagenUrl(string $ruta): string
+    {
+        $ruta = trim($ruta);
+        if ($ruta === '') {
+            return '';
+        }
+        if (preg_match('/^https?:\/\//i', $ruta)) {
+            return $ruta;
+        }
+        if (defined('APP_BASE') && $ruta !== '' && strncmp($ruta, APP_BASE, strlen(APP_BASE)) === 0) {
+            return $ruta;
+        }
+        if (strncmp($ruta, '/public/uploads/', 16) === 0) {
+            $ruta = substr($ruta, 7);
+        }
+        if (strncmp($ruta, '/uploads/', 9) === 0) {
+            return (defined('APP_BASE') ? APP_BASE : '') . $ruta;
+        }
+        if (strncmp($ruta, 'uploads/', 8) === 0) {
+            return (defined('APP_BASE') ? APP_BASE : '') . '/' . $ruta;
+        }
+        return (defined('APP_BASE') ? APP_BASE : '') . '/' . ltrim($ruta, '/');
+    }
+}
+
 $pdo = db();
 $err  = '';
 $msg  = '';
@@ -57,6 +83,37 @@ function cargarEvaluacionProgramada(PDO $pdo, int $idProgramada, string $rut): ?
 
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
+}
+
+function registrarAuditoriaPruebaDesdeProgramada(PDO $pdo, string $evento, array $baseData, ?array $procRow, array $detalle = []): void
+{
+    if (!function_exists('auditPrueba')) {
+        return;
+    }
+
+    $idServicio = (int)($baseData['id_servicio'] ?? 0);
+    $servicioNombre = '';
+    if ($idServicio > 0) {
+        try {
+            $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id LIMIT 1');
+            $stmtServicio->execute([':id' => $idServicio]);
+            $servicioNombre = trim((string)($stmtServicio->fetchColumn() ?: ''));
+        } catch (Throwable $e) {
+            $servicioNombre = '';
+        }
+    }
+
+    auditPrueba($evento, [
+        'rut_evaluado' => (string)($baseData['rut_alumno'] ?? ''),
+        'id_servicio' => $idServicio > 0 ? $idServicio : null,
+        'servicio' => $servicioNombre,
+        'id_programada' => isset($baseData['proceso']) ? (int)$baseData['proceso'] : null,
+        'id_agrupacion' => isset($baseData['id_agrupacion']) ? (int)$baseData['id_agrupacion'] : null,
+        'cuadrilla' => isset($procRow['cuadrilla']) ? (int)$procRow['cuadrilla'] : null,
+        'id_proceso_habilitacion' => isset($procRow['id_proceso_habilitacion']) ? (int)$procRow['id_proceso_habilitacion'] : null,
+        'intento' => isset($procRow['intento']) ? (int)$procRow['intento'] : null,
+        'detalle' => $detalle,
+    ]);
 }
 
 /* ===========================================================
@@ -109,6 +166,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($idProcesoHab <= 0) {
                     throw new Exception('La evaluación no tiene un proceso de habilitación asociado. Genere o seleccione un proceso abierto antes de rendir la prueba.');
                 }
+
+                registrarAuditoriaPruebaDesdeProgramada($pdo, 'PRUEBA_INICIADA_EFECTIVA', $data, $procRow, [
+                    'total_preguntas_recibidas' => count($preguntas),
+                    'respuestas_recibidas' => is_array($respuestas) ? count($respuestas) : 0,
+                ]);
 
                 // =====================================================
                 // INSERTAR RESPUESTAS TEORICAS
@@ -314,53 +376,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':id'        => $data['proceso']
                 ]);
 
-                // =====================================================
-                // BLOQUEO POR VIGENCIA GENERAL ACTIVA
-                // =====================================================
-                if (!existeVigenciaGeneralActiva($pdo, $data['rut_alumno'], $cuadrilla)) {
-
-                    // =====================================================
-                    // INSERTAR VIGENCIA DETALLE SI APRUEBA
-                    // =====================================================
-                    if ($resultado === 'APROBADO') {
-
-                        $sqlVigencia = "
-                            INSERT INTO ceo_vigencia_detalle
-                            (
-                                rut,
-                                id_servicio,
-                                fechavig_ini,
-                                fechavig_fin,
-                                id_proceso,
-                                id_proceso_habilitacion,
-                                tipo
-                            )
-                            VALUES
-                            (
-                                :rut,
-                                :id_servicio,
-                                CURDATE(),
-                                DATE_ADD(CURDATE(), INTERVAL 3 YEAR),
-                                :id_proceso,
-                                :id_proceso_habilitacion,
-                                :tipo
-                            )
-                        ";
-
-                        $stmtVig = $pdo->prepare($sqlVigencia);
-                        $stmtVig->execute([
-                            ':rut'         => $data['rut_alumno'],
-                            ':id_servicio' => $data['id_servicio'],
-                            ':id_proceso'  => $cuadrilla,
-                            ':id_proceso_habilitacion' => $idProcesoHab,
-                            ':tipo'        => $procRow['tipo']
-                        ]);
-
-                        recalcularVigenciaGeneral($pdo, $data['rut_alumno'], $cuadrilla);
-
-                    }
-
-                }
+                registrarAuditoriaPruebaDesdeProgramada($pdo, 'PRUEBA_FINALIZADA', $data, $procRow, [
+                    'resultado' => $resultado,
+                    'porcentaje_obtenido' => $porcentajeObtenido,
+                    'porcentaje_minimo' => $porcentajeMinimo,
+                    'nota_final' => $notaFinal,
+                    'correctas' => $correctas,
+                    'incorrectas' => $incorrectas,
+                    'ncontestadas' => $ncontestadas,
+                    'total' => $total,
+                ]);
 
                 // =====================================================
                 // RECALCULAR RESULTADO FINAL DEL SERVICIO
@@ -381,7 +406,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->commit();
-                header('Location: evaluador_home.php?ok=1');
+
+                $redirectUrl = (defined('APP_BASE') ? APP_BASE : '') . '/public/evaluador_home.php?ok=1';
+                if (!headers_sent()) {
+                    header('Location: ' . $redirectUrl);
+                    exit;
+                }
+
+                echo '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($redirectUrl, ENT_QUOTES, 'UTF-8') . '"><title>Redirigiendo...</title></head><body><script>window.location.href=' . json_encode($redirectUrl, JSON_UNESCAPED_UNICODE) . ';</script></body></html>';
                 exit;
 
             } catch (Throwable $e) {
@@ -410,6 +442,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($data['id_servicio'] <= 0) {
         $err = "No se indicó servicio.";
+    }
+
+    if ($err === '' && $procRow) {
+        registrarAuditoriaPruebaDesdeProgramada($pdo, 'PRUEBA_ABIERTA', $data, $procRow, [
+            'origen' => 'pantalla_prueba',
+        ]);
     }
 }
 
@@ -778,7 +816,7 @@ $csrfToken = Csrf::token();
 
                         <?php if (!empty($preg['imagen'])): ?>
                             <div class="mb-3">
-                                <img src="<?= htmlspecialchars($preg['imagen']) ?>"
+                                <img src="<?= htmlspecialchars(evaluadorImagenUrl((string)$preg['imagen'])) ?>"
                                      alt="Imagen pregunta"
                                      class="img-fluid rounded">
                             </div>
@@ -801,7 +839,7 @@ $csrfToken = Csrf::token();
                                     </label>
                                     <?php if (!empty($alt['imagen'])): ?>
                                         <div class="mt-1">
-                                            <img src="<?= htmlspecialchars($alt['imagen']) ?>"
+                                            <img src="<?= htmlspecialchars(evaluadorImagenUrl((string)$alt['imagen'])) ?>"
                                                  alt="Imagen alternativa"
                                                  class="img-fluid rounded">
                                         </div>

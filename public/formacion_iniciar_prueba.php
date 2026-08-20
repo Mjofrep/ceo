@@ -67,6 +67,36 @@ $data = [
     'proceso'       => 0
 ];
 
+function registrarAuditoriaPruebaFormacion(PDO $pdo, string $evento, array $baseData, ?array $procRow = null, array $detalle = []): void
+{
+    if (!function_exists('auditPrueba')) {
+        return;
+    }
+
+    $idServicio = (int)($baseData['id_servicio'] ?? 0);
+    $servicioNombre = '';
+    if ($idServicio > 0) {
+        try {
+            $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_formacion_servicios WHERE id = :id LIMIT 1');
+            $stmtServicio->execute([':id' => $idServicio]);
+            $servicioNombre = trim((string)($stmtServicio->fetchColumn() ?: ''));
+        } catch (Throwable $e) {
+            $servicioNombre = '';
+        }
+    }
+
+    auditPrueba($evento, [
+        'rut_evaluado' => (string)($baseData['rut_alumno'] ?? ''),
+        'id_servicio' => $idServicio > 0 ? $idServicio : null,
+        'servicio' => $servicioNombre,
+        'id_programada' => isset($baseData['proceso']) ? (int)$baseData['proceso'] : null,
+        'id_agrupacion' => isset($baseData['id_agrupacion']) ? (int)$baseData['id_agrupacion'] : null,
+        'cuadrilla' => isset($procRow['cuadrilla']) ? (int)$procRow['cuadrilla'] : null,
+        'intento' => isset($procRow['intento']) ? (int)$procRow['intento'] : null,
+        'detalle' => $detalle,
+    ]);
+}
+
 /* ===========================================================
    1) RECIBIR PARAMETROS
    =========================================================== */
@@ -424,7 +454,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($err === '' && $data['proceso'] > 0) {
         $stmtProgramada = $pdo->prepare("
-            SELECT id_agrupacion
+            SELECT id_agrupacion, cuadrilla, intento
             FROM ceo_formacion_programadas
             WHERE id = :id
               AND rut = :rut
@@ -446,6 +476,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               AND fecha_inicio IS NULL
         ");
         $stmtInicio->execute([':id' => $data['proceso']]);
+
+        if ($programada) {
+            registrarAuditoriaPruebaFormacion($pdo, 'FORMACION_PRUEBA_ACTIVADA', $data, $programada, [
+                'origen' => 'pantalla_prueba_formacion',
+            ]);
+        }
     }
 }
 

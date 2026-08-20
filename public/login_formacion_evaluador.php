@@ -173,6 +173,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ];
                         }
 
+                        if (function_exists('auditPrueba')) {
+                            $detallePruebas = array_map(static function (array $prueba): array {
+                                return [
+                                    'id_programada' => (int)($prueba['id_programada'] ?? 0),
+                                    'id_servicio' => (int)($prueba['id_servicio'] ?? 0),
+                                    'id_agrupacion' => (int)($prueba['id_agrupacion'] ?? 0),
+                                    'titulo_prueba' => (string)($prueba['titulo_prueba'] ?? ''),
+                                    'servicio' => (string)($prueba['servicio'] ?? ''),
+                                    'cuadrilla' => isset($prueba['cuadrilla']) ? (int)$prueba['cuadrilla'] : null,
+                                    'intento' => isset($prueba['intento']) ? (int)$prueba['intento'] : null,
+                                ];
+                            }, $_SESSION['evaluado']['pruebas']);
+
+                            $primeraPrueba = $_SESSION['evaluado']['pruebas'][0] ?? [];
+                            auditPrueba('FORMACION_EVALUADO_CARGADO', [
+                                'rut_evaluado' => $rutAlumno,
+                                'id_servicio' => isset($primeraPrueba['id_servicio']) ? (int)$primeraPrueba['id_servicio'] : null,
+                                'servicio' => (string)($primeraPrueba['servicio'] ?? ''),
+                                'id_programada' => isset($primeraPrueba['id_programada']) ? (int)$primeraPrueba['id_programada'] : null,
+                                'id_agrupacion' => isset($primeraPrueba['id_agrupacion']) ? (int)$primeraPrueba['id_agrupacion'] : null,
+                                'cuadrilla' => isset($primeraPrueba['cuadrilla']) ? (int)$primeraPrueba['cuadrilla'] : null,
+                                'intento' => isset($primeraPrueba['intento']) ? (int)$primeraPrueba['intento'] : null,
+                                'detalle' => [
+                                    'cantidad_pruebas' => count($_SESSION['evaluado']['pruebas']),
+                                    'pruebas' => $detallePruebas,
+                                ],
+                            ]);
+                        }
+
                         file_put_contents(__DIR__.'/debug_redirect.log',
                                 date('Y-m-d H:i:s')." REDIRIGIENDO\n",
                                 FILE_APPEND

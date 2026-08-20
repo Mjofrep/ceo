@@ -55,6 +55,34 @@ function revFmtFechaHora($value): string
     return $ts ? date('d-m-Y H:i', $ts) : $text;
 }
 
+function revMaxFechaHora($primary, $secondary): string
+{
+    $values = [$primary, $secondary];
+    $best = null;
+
+    foreach ($values as $value) {
+        if ($value instanceof DateTimeImmutable) {
+            $current = $value;
+        } else {
+            $text = trim((string)$value);
+            if ($text === '') {
+                continue;
+            }
+            try {
+                $current = new DateTimeImmutable($text);
+            } catch (Throwable $e) {
+                continue;
+            }
+        }
+
+        if (!$best || $current > $best) {
+            $best = $current;
+        }
+    }
+
+    return $best ? $best->format('d-m-Y H:i') : '';
+}
+
 function revResolverPesos(?string $cargo): ?array
 {
     $cargoNorm = strtoupper(trim((string)$cargo));
@@ -82,13 +110,17 @@ function revAgruparDetalleHistorialEvaluaciones(array $rows): array
     foreach ($rows as $row) {
         $servicio = trim((string)($row['servicio'] ?? ''));
         $numeroProceso = trim((string)($row['numero_proceso'] ?? ''));
-        $key = $servicio . '|' . $numeroProceso;
+        $tipo = strtoupper(trim((string)($row['tipo'] ?? '')));
+        $detalleTeorica = $tipo === 'TEORICA' ? trim((string)($row['detalle_prueba'] ?? '')) : '';
+        $baseKey = $servicio . '|' . $numeroProceso;
+        $key = $detalleTeorica !== '' ? $baseKey . '|' . $detalleTeorica : $baseKey;
 
         if (!isset($grouped[$key])) {
             $grouped[$key] = [
                 'servicio' => $servicio,
                 'numero_proceso' => $numeroProceso,
                 'cargo' => trim((string)($row['cargo'] ?? '')),
+                'detalle_prueba' => $detalleTeorica,
                 'teorica' => null,
                 'terreno' => null,
                 'fecha_orden' => null,
@@ -107,16 +139,42 @@ function revAgruparDetalleHistorialEvaluaciones(array $rows): array
             $grouped[$key]['cargo'] = trim((string)$row['cargo']);
         }
 
-        $tipo = strtoupper(trim((string)($row['tipo'] ?? '')));
         if ($tipo === 'TEORICA') {
             $actual = $grouped[$key]['teorica']['fecha_hora'] ?? null;
             if (!($actual instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $actual)) {
                 $grouped[$key]['teorica'] = $row;
             }
         } elseif ($tipo === 'TERRENO') {
-            $actual = $grouped[$key]['terreno']['fecha_hora'] ?? null;
-            if (!($actual instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $actual)) {
-                $grouped[$key]['terreno'] = $row;
+            $targetKeys = [];
+            foreach (array_keys($grouped) as $groupKey) {
+                if (str_starts_with($groupKey, $baseKey . '|')) {
+                    $targetKeys[] = $groupKey;
+                }
+            }
+            if (empty($targetKeys)) {
+                $targetKeys[] = $key;
+            }
+
+            foreach ($targetKeys as $targetKey) {
+                if (!isset($grouped[$targetKey])) {
+                    $grouped[$targetKey] = [
+                        'servicio' => $servicio,
+                        'numero_proceso' => $numeroProceso,
+                        'cargo' => trim((string)($row['cargo'] ?? '')),
+                        'detalle_prueba' => '',
+                        'teorica' => null,
+                        'terreno' => null,
+                        'fecha_orden' => null,
+                    ];
+                }
+
+                $actual = $grouped[$targetKey]['terreno']['fecha_hora'] ?? null;
+                if (!($actual instanceof DateTimeImmutable) || ($fecha instanceof DateTimeImmutable && $fecha > $actual)) {
+                    $grouped[$targetKey]['terreno'] = $row;
+                }
+                if ($grouped[$targetKey]['fecha_orden'] === null || ($fecha instanceof DateTimeImmutable && $fecha > $grouped[$targetKey]['fecha_orden'])) {
+                    $grouped[$targetKey]['fecha_orden'] = $fecha;
+                }
             }
         }
     }
@@ -144,11 +202,16 @@ $detalleHistorialEvaluaciones = [];
 $detalleHistorialEvaluacionesAgrupado = [];
 $historialConsolidado = [];
 $analisisAreasTeorica = [];
+$analisisAreasTerreno = [];
 $analisisAreasMeta = [
     'intento' => null,
     'fecha_hora' => null,
 ];
+$analisisAreasTerrenoMeta = [
+    'fecha_hora' => null,
+];
 $idProcesoHabActual = 0;
+$historialCargaError = null;
 
 if ($rut) {
         $sql = "SELECT a.id, a.cuadrilla, b.rut, b.nombre, b.apellidos, COALESCE(cc.cargo, b.cargo) AS cargo, c.id_cargo, e.nombre as empresa, f.desc_uo as uo, a.id_servicio, g.servicio as servicio_descripcion,
@@ -250,19 +313,20 @@ if ($rut) {
             $agrupaciones = $stmtAgr->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $simulado = historicoSimularProcesos($pdo, (int)($trabajador['id_servicio'] ?? 0), $rut);
-        $eventosHistorial = $simulado['rows'];
-        if ($idProcesoHabActual > 0) {
-            $eventosProcesoActual = array_values(array_filter(
-                $eventosHistorial,
-                static fn(array $evento): bool => (int)($evento['id_proceso_habilitacion'] ?? 0) === $idProcesoHabActual
-            ));
-            if (!empty($eventosProcesoActual)) {
-                $eventosHistorial = $eventosProcesoActual;
+        try {
+            $simulado = historicoSimularProcesos($pdo, (int)($trabajador['id_servicio'] ?? 0), $rut);
+            $eventosHistorial = $simulado['rows'];
+            if ($idProcesoHabActual > 0) {
+                $eventosProcesoActual = array_values(array_filter(
+                    $eventosHistorial,
+                    static fn(array $evento): bool => (int)($evento['id_proceso_habilitacion'] ?? 0) === $idProcesoHabActual
+                ));
+                if (!empty($eventosProcesoActual)) {
+                    $eventosHistorial = $eventosProcesoActual;
+                }
             }
-        }
 
-        foreach ($eventosHistorial as $evento) {
+            foreach ($eventosHistorial as $evento) {
 
             $idServicio = (int)($evento['id_servicio'] ?? 0);
             $proceso = $evento['proceso_real'] !== null ? (string)$evento['proceso_real'] : 'H-' . (string)$evento['proceso'];
@@ -281,6 +345,7 @@ if ($rut) {
                     'servicio' => (string)($evento['servicio'] ?? ''),
                     'numero_proceso' => $proceso,
                     'cargo' => (string)($evento['cargo_evaluacion'] ?? ''),
+                    'detalle_prueba' => (string)($evento['detalle_prueba'] ?? ''),
                     'puntaje' => $evento['puntaje'] ?? null,
                     'nota_final' => $notaDetalle,
                     'resultado' => (string)($evento['resultado'] ?? ''),
@@ -325,9 +390,9 @@ if ($rut) {
                     $historialConsolidado[$key]['nota_terreno'] = $notaTerrenoEvento;
                 }
             }
-        }
+            }
 
-        foreach ($historialConsolidado as &$hc) {
+            foreach ($historialConsolidado as &$hc) {
             $notaPrueba = is_numeric((string)$hc['nota_prueba']) ? (float)$hc['nota_prueba'] : null;
             $notaTerreno = is_numeric((string)$hc['nota_terreno']) ? (float)$hc['nota_terreno'] : null;
             $pesos = revResolverPesos((string)$hc['cargo']);
@@ -339,25 +404,31 @@ if ($rut) {
             } elseif ($notaPrueba !== null || $notaTerreno !== null) {
                 $hc['estado'] = 'PENDIENTE';
             }
-        }
-        unset($hc);
+            }
+            unset($hc);
 
-        usort($historialConsolidado, static function (array $a, array $b): int {
+            usort($historialConsolidado, static function (array $a, array $b): int {
             $fechaA = $a['fecha_evaluacion'] instanceof DateTimeImmutable ? $a['fecha_evaluacion']->getTimestamp() : 0;
             $fechaB = $b['fecha_evaluacion'] instanceof DateTimeImmutable ? $b['fecha_evaluacion']->getTimestamp() : 0;
             return $fechaB <=> $fechaA;
-        });
+            });
 
-        usort($detalleHistorialEvaluaciones, static function (array $a, array $b): int {
+            usort($detalleHistorialEvaluaciones, static function (array $a, array $b): int {
             $fechaA = $a['fecha_hora'] instanceof DateTimeImmutable ? $a['fecha_hora']->getTimestamp() : 0;
             $fechaB = $b['fecha_hora'] instanceof DateTimeImmutable ? $b['fecha_hora']->getTimestamp() : 0;
             if ($fechaA !== $fechaB) {
                 return $fechaB <=> $fechaA;
             }
             return strcmp((string)$a['tipo'], (string)$b['tipo']);
-        });
+            });
 
-        $detalleHistorialEvaluacionesAgrupado = revAgruparDetalleHistorialEvaluaciones($detalleHistorialEvaluaciones);
+            $detalleHistorialEvaluacionesAgrupado = revAgruparDetalleHistorialEvaluaciones($detalleHistorialEvaluaciones);
+        } catch (Throwable $e) {
+            $historialCargaError = 'No fue posible cargar el historial de evaluaciones.';
+            if (defined('APP_DEBUG') && APP_DEBUG === true) {
+                $historialCargaError .= ' ' . $e->getMessage();
+            }
+        }
 }
 
 $intentos = [];
@@ -366,6 +437,7 @@ $evaluacionesTerreno = [];
 $estadoHab = null;
 $vigenciaGeneral = null;
 $vigenciaDetalle = [];
+$vigenciaError = null;
 
 if ($rut && !empty($trabajador['id_servicio'])) {
 
@@ -472,6 +544,86 @@ if ($rut && !empty($trabajador['id_servicio'])) {
                 ];
             }
         }
+
+        $rutNormalizadoAnalisis = strtoupper(str_replace(['.', '-', ' '], '', $rut));
+        $paramsUltimoTerreno = [
+            'rut' => $rutNormalizadoAnalisis,
+            'servicio' => (int)$trabajador['id_servicio'],
+        ];
+        $sqlUltimoTerreno = "
+            SELECT
+                rti.fecha_rendicion,
+                rti.hora_rendicion,
+                rti.id_proceso_habilitacion
+            FROM ceo_resultado_terreno_intento rti
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(rti.rut), '.', ''), '-', ''), ' ', '') = :rut
+              AND rti.id_servicio = :servicio
+        ";
+        if ($idProcesoHabActual > 0) {
+            $sqlUltimoTerreno .= " AND rti.id_proceso_habilitacion = :proceso_hab";
+            $paramsUltimoTerreno['proceso_hab'] = $idProcesoHabActual;
+        }
+        $sqlUltimoTerreno .= ' ORDER BY rti.fecha_rendicion DESC, rti.hora_rendicion DESC, rti.id DESC LIMIT 1';
+
+        $stmtUltimoTerreno = $pdo->prepare($sqlUltimoTerreno);
+        $stmtUltimoTerreno->execute($paramsUltimoTerreno);
+        $ultimoIntentoTerreno = $stmtUltimoTerreno->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        if ($ultimoIntentoTerreno && !empty($trabajador['cuadrilla'])) {
+            $analisisAreasTerrenoMeta['fecha_hora'] = trim((string)($ultimoIntentoTerreno['fecha_rendicion'] ?? '') . ' ' . (string)($ultimoIntentoTerreno['hora_rendicion'] ?? ''));
+
+            $stmtAreasTerreno = $pdo->prepare("
+                SELECT
+                    s.id AS id_area,
+                    COALESCE(NULLIF(TRIM(s.nombre), ''), NULLIF(TRIM(s.seccion), ''), 'Sin area de competencia') AS area,
+                    SUM(CASE WHEN rpt.cumple = 1 THEN 1 ELSE 0 END) AS cumple,
+                    SUM(CASE WHEN rpt.no_cumple = 1 THEN 1 ELSE 0 END) AS no_cumple,
+                    SUM(CASE WHEN rpt.no_aplica = 1 THEN 1 ELSE 0 END) AS no_aplica,
+                    SUM(CASE WHEN rpt.no_aplica = 0 THEN COALESCE(p.ponderacion, 0) ELSE 0 END) AS ponderacion_evaluable,
+                    SUM(CASE WHEN rpt.cumple = 1 THEN COALESCE(p.ponderacion, 0) ELSE 0 END) AS ponderacion_lograda
+                FROM ceo_seccion_resultado_terreno srt
+                INNER JOIN ceo_resultado_prueba_terreno rpt
+                    ON rpt.id_resultado = srt.id
+                INNER JOIN ceo_seccion_terreno s
+                    ON s.id = rpt.id_seccion
+                   AND s.orden > 1
+                INNER JOIN ceo_preguntas_seccion_terreno p
+                    ON p.id = rpt.id_pregunta
+                WHERE srt.id_servicio = :servicio
+                  AND srt.nsolicitud = :cuadrilla
+                  AND srt.fecha_examen = :fecha
+                  AND TIME(srt.hora_examen) = TIME(:hora)
+                  AND REPLACE(REPLACE(REPLACE(UPPER(rpt.rut_contratista), '.', ''), '-', ''), ' ', '') = :rut
+                GROUP BY s.id, area, s.orden
+                ORDER BY s.orden ASC, area ASC
+            ");
+            $stmtAreasTerreno->execute([
+                'servicio' => (int)$trabajador['id_servicio'],
+                'cuadrilla' => (int)$trabajador['cuadrilla'],
+                'fecha' => (string)($ultimoIntentoTerreno['fecha_rendicion'] ?? ''),
+                'hora' => (string)($ultimoIntentoTerreno['hora_rendicion'] ?? ''),
+                'rut' => $rutNormalizadoAnalisis,
+            ]);
+
+            foreach ($stmtAreasTerreno->fetchAll(PDO::FETCH_ASSOC) as $rowAreaTerreno) {
+                $ponderacionEvaluable = round((float)($rowAreaTerreno['ponderacion_evaluable'] ?? 0), 2);
+                $ponderacionLograda = round((float)($rowAreaTerreno['ponderacion_lograda'] ?? 0), 2);
+                $porcentajeAreaTerreno = $ponderacionEvaluable > 0
+                    ? round(($ponderacionLograda / $ponderacionEvaluable) * 100, 2)
+                    : 0.0;
+
+                $analisisAreasTerreno[] = [
+                    'id_area' => (int)($rowAreaTerreno['id_area'] ?? 0),
+                    'area' => (string)($rowAreaTerreno['area'] ?? ''),
+                    'cumple' => (int)($rowAreaTerreno['cumple'] ?? 0),
+                    'no_cumple' => (int)($rowAreaTerreno['no_cumple'] ?? 0),
+                    'no_aplica' => (int)($rowAreaTerreno['no_aplica'] ?? 0),
+                    'ponderacion_lograda' => $ponderacionLograda,
+                    'ponderacion_evaluable' => $ponderacionEvaluable,
+                    'porcentaje' => $porcentajeAreaTerreno,
+                ];
+            }
+        }
 	
 	    $sqlHist = "
 	        SELECT
@@ -561,72 +713,118 @@ SELECT
     ]);
     $estadoHab = $stmtEH->fetch(PDO::FETCH_ASSOC);
 
-    // ============================================================
-    // CONSULTA VIGENCIA GENERAL Y DETALLE POR RUT + PROCESO
-    // ============================================================
-    $sqlVigGen = "
-        SELECT
-            vg.id,
-            vg.rut,
-            vg.fechavig_ini,
-            vg.fechavig_fin,
-            vg.id_proceso
-        FROM ceo_vigencia_general vg
-        WHERE vg.rut = :rut
-          AND vg.id_proceso = :proceso
-        ORDER BY vg.fechavig_fin DESC, vg.id DESC
-        LIMIT 1
-    ";
-    $stmtVG = $pdo->prepare($sqlVigGen);
-    $stmtVG->execute([
-        'rut'     => $rut,
-        'proceso' => $cuadrillaProceso
-    ]);
-    $vigenciaGeneral = $stmtVG->fetch(PDO::FETCH_ASSOC);
-
-    $sqlVigDet = "
-        SELECT
-            vd.id,
-            vd.rut,
-            vd.id_servicio,
-            vd.fechavig_ini,
-            vd.fechavig_fin,
-            vd.id_proceso,
-            vd.tipo,
-            sp.servicio,
-            sp.descripcion,
-            CASE
-                WHEN UPPER(TRIM(vd.tipo)) = 'PRUEBA' THEN (
-                    SELECT rpi.notafinal
+    try {
+        // ============================================================
+        // CONSULTA VIGENCIA GENERAL Y DETALLE SEGUN SERVICIOS REQUERIDOS
+        // ============================================================
+        $sqlDetalleServicios = "
+            SELECT
+                sr.id_servicio,
+                sp.servicio,
+                sp.descripcion,
+                sr.id_cargo,
+                ch.cargo,
+                rfs.id_proceso_habilitacion,
+                ph.numero_proceso,
+                rfs.nota_prueba,
+                rfs.nota_terreno,
+                rfs.nota_final,
+                rfs.resultado_final,
+                rfs.observacion,
+                rfs.fecha_calculo,
+                (
+                    SELECT CONCAT(rpi.fecha_rendicion, ' ', COALESCE(rpi.hora_rendicion, '00:00:00'))
                     FROM ceo_resultado_prueba_intento rpi
-                    WHERE rpi.rut = vd.rut
-                      AND rpi.id_servicio = vd.id_servicio
-                    ORDER BY rpi.fecha_rendicion DESC, rpi.id DESC
+                    WHERE rpi.rut COLLATE utf8mb4_unicode_ci = sr.rut COLLATE utf8mb4_unicode_ci
+                      AND rpi.id_servicio = sr.id_servicio
+                      AND rfs.id_proceso_habilitacion IS NOT NULL
+                      AND rpi.id_proceso_habilitacion = rfs.id_proceso_habilitacion
+                    ORDER BY rpi.fecha_rendicion DESC, rpi.hora_rendicion DESC, rpi.id DESC
                     LIMIT 1
-                )
-                WHEN UPPER(TRIM(vd.tipo)) = 'TERRENO' THEN (
-                    SELECT rti.notafinal
+                ) AS fecha_teorica,
+                (
+                    SELECT CONCAT(rti.fecha_rendicion, ' ', COALESCE(rti.hora_rendicion, '00:00:00'))
                     FROM ceo_resultado_terreno_intento rti
-                    WHERE rti.rut = vd.rut
-                      AND rti.id_servicio = vd.id_servicio
-                    ORDER BY rti.id DESC
+                    WHERE rti.rut COLLATE utf8mb4_unicode_ci = sr.rut COLLATE utf8mb4_unicode_ci
+                      AND rti.id_servicio = sr.id_servicio
+                      AND rfs.id_proceso_habilitacion IS NOT NULL
+                      AND rti.id_proceso_habilitacion = rfs.id_proceso_habilitacion
+                    ORDER BY rti.fecha_rendicion DESC, rti.hora_rendicion DESC, rti.id DESC
                     LIMIT 1
-                )
-                ELSE NULL
-            END AS nota
-        FROM ceo_vigencia_detalle vd
-        INNER JOIN ceo_servicios_pruebas sp
-            ON sp.id = vd.id_servicio
-        WHERE vd.rut = :rut
-          AND vd.id_proceso = :proceso
-        ORDER BY sp.servicio ASC, vd.id DESC
-    ";
-    $stmtVD = $pdo->prepare($sqlVigDet);
-    $stmtVD->execute([
-        'rut'     => $rut,
-        'proceso' => $cuadrillaProceso
-    ]);
-    $vigenciaDetalle = $stmtVD->fetchAll(PDO::FETCH_ASSOC);
+                ) AS fecha_terreno
+            FROM ceo_servicios_rut sr
+            INNER JOIN ceo_servicios_pruebas sp ON sp.id = sr.id_servicio
+            LEFT JOIN ceo_cargos_habilitacion ch ON ch.id = sr.id_cargo
+            LEFT JOIN (
+                SELECT r1.*
+                FROM ceo_resultado_final_servicio r1
+                WHERE r1.rut = :rut_rfs_main
+                   AND r1.segmento = 'GENERAL'
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM ceo_resultado_final_servicio r2
+                       WHERE r2.rut = r1.rut
+                         AND r2.id_servicio = r1.id_servicio
+                         AND r2.segmento = r1.segmento
+                         AND (
+                             r2.fecha_calculo > r1.fecha_calculo
+                             OR (r2.fecha_calculo = r1.fecha_calculo AND r2.id > r1.id)
+                         )
+                   )
+             ) rfs ON rfs.id_servicio = sr.id_servicio
+            LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = rfs.id_proceso_habilitacion
+            WHERE sr.rut = :rut_sr
+            ORDER BY sp.servicio ASC, sr.id ASC
+        ";
+        $stmtDetalleServicios = $pdo->prepare($sqlDetalleServicios);
+        $stmtDetalleServicios->execute([
+            'rut_rfs_main' => $rut,
+            'rut_sr' => $rut,
+        ]);
+        $vigenciaDetalle = $stmtDetalleServicios->fetchAll(PDO::FETCH_ASSOC);
+
+        $serviciosAprobados = !empty($vigenciaDetalle);
+        $ultimaFechaTerrenoAprobada = null;
+        foreach ($vigenciaDetalle as $detalleServicio) {
+            $notaFinalServicio = is_numeric((string)($detalleServicio['nota_final'] ?? '')) ? (float)$detalleServicio['nota_final'] : null;
+            if ($notaFinalServicio === null || $notaFinalServicio < 4.0) {
+                $serviciosAprobados = false;
+                continue;
+            }
+
+            $fechaTerreno = trim((string)($detalleServicio['fecha_terreno'] ?? ''));
+            if ($fechaTerreno === '') {
+                $serviciosAprobados = false;
+                continue;
+            }
+
+            try {
+                $fechaTerrenoDt = new DateTimeImmutable($fechaTerreno);
+            } catch (Throwable $e) {
+                $serviciosAprobados = false;
+                continue;
+            }
+
+            if ($ultimaFechaTerrenoAprobada === null || $fechaTerrenoDt > $ultimaFechaTerrenoAprobada) {
+                $ultimaFechaTerrenoAprobada = $fechaTerrenoDt;
+            }
+        }
+
+        if ($serviciosAprobados && $ultimaFechaTerrenoAprobada instanceof DateTimeImmutable) {
+            $vigenciaGeneral = [
+                'rut' => $rut,
+                'fechavig_ini' => $ultimaFechaTerrenoAprobada->format('Y-m-d'),
+                'fechavig_fin' => $ultimaFechaTerrenoAprobada->modify('+3 years')->format('Y-m-d'),
+                'id_proceso' => $cuadrillaProceso,
+            ];
+        } else {
+            $vigenciaGeneral = null;
+        }
+    } catch (Throwable $e) {
+        $vigenciaError = 'No fue posible cargar la información de vigencia para este trabajador.';
+        $vigenciaGeneral = null;
+        $vigenciaDetalle = [];
+    }
 }
 
 $serviciosPrueba = $pdo->query("
@@ -744,6 +942,12 @@ body {background:#f7f9fc;}
 
 
 <div class="container-fluid px-4">
+
+    <?php if ($historialCargaError !== null): ?>
+        <div class="alert alert-danger rounded-3" role="alert">
+            <?= esc($historialCargaError) ?>
+        </div>
+    <?php endif; ?>
 
     <!-- ============================================================
          CARD PRINCIPAL
@@ -900,6 +1104,8 @@ body {background:#f7f9fc;}
             <?php endif; ?>
         </div>
 
+        <div class="fw-semibold text-primary mb-2">Teórica</div>
+
         <div class="table-responsive">
             <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
                 <thead>
@@ -924,15 +1130,12 @@ body {background:#f7f9fc;}
                 <?php else: ?>
                     <?php foreach ($analisisAreasTeorica as $areaRow): ?>
                         <?php
-                            if (($areaRow['objetivo'] ?? null) === null || (float)($areaRow['objetivo'] ?? 0) <= 0) {
-                                $senalTexto = 'Sin objetivo';
-                                $senalClass = 'secondary';
-                            } elseif (!empty($areaRow['debil'])) {
-                                $senalTexto = 'Debilidad';
-                                $senalClass = 'danger';
-                            } else {
+                            if ((float)($areaRow['porcentaje'] ?? 0) >= 80.0) {
                                 $senalTexto = 'Dentro objetivo';
                                 $senalClass = 'success';
+                            } else {
+                                $senalTexto = 'Debilidad';
+                                $senalClass = 'danger';
                             }
                         ?>
                         <tr>
@@ -943,6 +1146,65 @@ body {background:#f7f9fc;}
                             <td class="text-center"><?= esc((string)$areaRow['ncontestadas']) ?></td>
                             <td class="text-center"><?= esc((string)$areaRow['total']) ?></td>
                             <td class="text-end fw-semibold"><?= esc(number_format((float)$areaRow['porcentaje'], 2, '.', '')) ?>%</td>
+                            <td class="text-center"><span class="badge text-bg-<?= esc($senalClass) ?>"><?= esc($senalTexto) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="fw-semibold text-primary mt-4 mb-2">Terreno</div>
+        <div class="small text-muted mb-3">
+            Análisis ponderado del último intento de terreno de esta habilitación.
+            <?php if (!empty($analisisAreasTerrenoMeta['fecha_hora'])): ?>
+                Fecha: <strong><?= esc(revFmtFechaHora($analisisAreasTerrenoMeta['fecha_hora'])) ?></strong>
+            <?php endif; ?>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle excel-like-table mb-0">
+                <thead>
+                    <tr class="text-center">
+                        <th>Área</th>
+                        <th>Ponderación lograda</th>
+                        <th>Ponderación evaluable</th>
+                        <th>Cumple</th>
+                        <th>No cumple</th>
+                        <th>No aplica</th>
+                        <th>Porcentaje</th>
+                        <th>Señal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php if (empty($analisisAreasTerreno)): ?>
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">
+                            Sin detalle por áreas de terreno disponible para esta habilitación.
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($analisisAreasTerreno as $areaRowTerreno): ?>
+                        <?php
+                            if ((float)($areaRowTerreno['ponderacion_evaluable'] ?? 0) <= 0 && (int)($areaRowTerreno['no_aplica'] ?? 0) > 0) {
+                                $senalTexto = 'No aplica';
+                                $senalClass = 'secondary';
+                            } elseif ((float)($areaRowTerreno['porcentaje'] ?? 0) >= 80.0) {
+                                $senalTexto = 'Dentro objetivo';
+                                $senalClass = 'success';
+                            } else {
+                                $senalTexto = 'Debilidad';
+                                $senalClass = 'danger';
+                            }
+                        ?>
+                        <tr>
+                            <td><?= esc((string)$areaRowTerreno['area']) ?></td>
+                            <td class="text-end"><?= esc(number_format((float)$areaRowTerreno['ponderacion_lograda'], 2, '.', '')) ?></td>
+                            <td class="text-end"><?= esc(number_format((float)$areaRowTerreno['ponderacion_evaluable'], 2, '.', '')) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRowTerreno['cumple']) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRowTerreno['no_cumple']) ?></td>
+                            <td class="text-center"><?= esc((string)$areaRowTerreno['no_aplica']) ?></td>
+                            <td class="text-end fw-semibold"><?= esc(number_format((float)$areaRowTerreno['porcentaje'], 2, '.', '')) ?>%</td>
                             <td class="text-center"><span class="badge text-bg-<?= esc($senalClass) ?>"><?= esc($senalTexto) ?></span></td>
                         </tr>
                     <?php endforeach; ?>
@@ -968,6 +1230,7 @@ body {background:#f7f9fc;}
                 <thead>
                     <tr class="text-center">
                         <th>Servicio</th>
+                        <th>Detalle prueba</th>
                         <th>Número Proceso</th>
                         <th>Cargo</th>
                         <th>Fecha / Hora Teórica</th>
@@ -985,7 +1248,7 @@ body {background:#f7f9fc;}
                 <tbody>
                 <?php if (empty($detalleHistorialEvaluacionesAgrupado)): ?>
                     <tr>
-                        <td colspan="13" class="text-center text-muted">
+                        <td colspan="14" class="text-center text-muted">
                             Sin detalle histórico de evaluaciones para este RUT
                         </td>
                     </tr>
@@ -1009,6 +1272,7 @@ body {background:#f7f9fc;}
                         ?>
                         <tr>
                             <td><?= esc((string)$detalleHist['servicio']) ?></td>
+                            <td><?= esc((string)($detalleHist['detalle_prueba'] ?? '')) ?></td>
                             <td class="text-center"><?= esc((string)$detalleHist['numero_proceso']) ?></td>
                             <td><?= esc((string)$detalleHist['cargo']) ?></td>
                             <td class="text-center"><?= esc(revFmtFechaHora($teorica['fecha_hora'] ?? null)) ?></td>
@@ -1106,12 +1370,36 @@ body {background:#f7f9fc;}
                 <i class="bi bi-calendar-range me-2"></i>Vigencia General y Detalle
             </div>
 
+            <?php if ($vigenciaError !== null): ?>
+                <div class="alert alert-warning" role="alert">
+                    <?= esc($vigenciaError) ?>
+                </div>
+            <?php endif; ?>
+
             <?php
                 $hoy = date('Y-m-d');
                 $vigenciaActiva = false;
+                $tieneServiciosRequeridos = !empty($vigenciaDetalle);
+                $estadoVigenciaGeneralTexto = 'Sin servicios requeridos';
+                $estadoVigenciaGeneralClase = 'secondary';
 
                 if (!empty($vigenciaGeneral['fechavig_ini']) && !empty($vigenciaGeneral['fechavig_fin'])) {
                     $vigenciaActiva = ($hoy >= $vigenciaGeneral['fechavig_ini'] && $hoy <= $vigenciaGeneral['fechavig_fin']);
+                }
+
+                if ($tieneServiciosRequeridos) {
+                    if (!empty($vigenciaGeneral)) {
+                        if ($vigenciaActiva) {
+                            $estadoVigenciaGeneralTexto = 'Vigente';
+                            $estadoVigenciaGeneralClase = 'success';
+                        } else {
+                            $estadoVigenciaGeneralTexto = 'Vencida';
+                            $estadoVigenciaGeneralClase = 'danger';
+                        }
+                    } else {
+                        $estadoVigenciaGeneralTexto = 'No vigente';
+                        $estadoVigenciaGeneralClase = 'danger';
+                    }
                 }
             ?>
 
@@ -1148,13 +1436,7 @@ body {background:#f7f9fc;}
                 <div class="col-md-12">
                     <div class="box-label">Estado Vigencia General</div>
                     <div class="data-box">
-                        <?php if (empty($vigenciaGeneral)): ?>
-                            <span class="badge badge-soft-secondary">Sin vigencia general registrada</span>
-                        <?php elseif ($vigenciaActiva): ?>
-                            <span class="badge badge-soft-success">Vigente</span>
-                        <?php else: ?>
-                            <span class="badge badge-soft-danger">Vencida</span>
-                        <?php endif; ?>
+                        <span class="badge badge-soft-<?= esc($estadoVigenciaGeneralClase) ?>"><?= esc($estadoVigenciaGeneralTexto) ?></span>
                     </div>
                 </div>
             </div>
@@ -1164,26 +1446,37 @@ body {background:#f7f9fc;}
                     <thead>
                         <tr class="text-center">
                             <th>Servicio</th>
-                            <th>Tipo</th>
-                            <th>Vigencia Inicio</th>
-                            <th>Vigencia Fin</th>
-                            <th>Nota</th>
+                            <th>Teórica</th>
+                            <th>Terreno</th>
+                            <th>Nota final</th>
                             <th>Estado</th>
                         </tr>
                     </thead>
                     <tbody>
                     <?php if (empty($vigenciaDetalle)): ?>
                         <tr>
-                            <td colspan="6" class="text-center text-muted">
-                                Sin detalle de vigencia asociado al proceso
+                            <td colspan="5" class="text-center text-muted">
+                                Sin servicios requeridos asociados al trabajador
                             </td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($vigenciaDetalle as $vd): ?>
                             <?php
-                                $detalleVigente = false;
-                                if (!empty($vd['fechavig_ini']) && !empty($vd['fechavig_fin'])) {
-                                    $detalleVigente = ($hoy >= $vd['fechavig_ini'] && $hoy <= $vd['fechavig_fin']);
+                                $notaFinalDetalleServicio = is_numeric((string)($vd['nota_final'] ?? '')) ? (float)$vd['nota_final'] : null;
+                                $estadoDetalleServicio = $notaFinalDetalleServicio === null
+                                    ? 'PENDIENTE'
+                                    : ($notaFinalDetalleServicio >= 4.0 ? 'APROBADO' : 'REPROBADO');
+                                $estadoDetalleLabel = 'Sin resultado';
+                                $estadoDetalleClase = 'secondary';
+                                if ($estadoDetalleServicio === 'APROBADO') {
+                                    $estadoDetalleLabel = 'Habilitado';
+                                    $estadoDetalleClase = 'success';
+                                } elseif ($estadoDetalleServicio === 'REPROBADO') {
+                                    $estadoDetalleLabel = 'No habilitado';
+                                    $estadoDetalleClase = 'danger';
+                                } elseif ($estadoDetalleServicio === 'PENDIENTE') {
+                                    $estadoDetalleLabel = 'Pendiente';
+                                    $estadoDetalleClase = 'warning';
                                 }
                             ?>
                             <tr>
@@ -1195,27 +1488,29 @@ body {background:#f7f9fc;}
                                 </td>
 
                                 <td class="text-center">
-                                    <?= esc($vd['tipo'] ?? '-') ?>
-                                </td>
-
-                                <td class="text-center">
-                                    <?= !empty($vd['fechavig_ini']) ? esc(date('d-m-Y', strtotime($vd['fechavig_ini']))) : '-' ?>
-                                </td>
-
-                                <td class="text-center">
-                                    <?= !empty($vd['fechavig_fin']) ? esc(date('d-m-Y', strtotime($vd['fechavig_fin']))) : '-' ?>
-                                </td>
-
-                                <td class="text-center">
-                                    <?= ($vd['nota'] !== null && $vd['nota'] !== '') ? esc((string)$vd['nota']) : '-' ?>
-                                </td>
-
-                                <td class="text-center">
-                                    <?php if ($detalleVigente): ?>
-                                        <span class="badge badge-soft-success">Vigente</span>
+                                    <?php if ($vd['nota_prueba'] !== null && $vd['nota_prueba'] !== ''): ?>
+                                        <div class="fw-semibold"><?= esc(number_format((float)$vd['nota_prueba'], 2, '.', '')) ?></div>
+                                        <div class="small text-muted"><?= esc(revMaxFechaHora($vd['fecha_teorica'] ?? null, $vd['fecha_calculo'] ?? null) ?: '-') ?></div>
                                     <?php else: ?>
-                                        <span class="badge badge-soft-danger">Vencida</span>
+                                        <span class="text-muted">Pendiente</span>
                                     <?php endif; ?>
+                                </td>
+
+                                <td class="text-center">
+                                    <?php if ($vd['nota_terreno'] !== null && $vd['nota_terreno'] !== ''): ?>
+                                        <div class="fw-semibold"><?= esc(number_format((float)$vd['nota_terreno'], 2, '.', '')) ?></div>
+                                        <div class="small text-muted"><?= esc(revMaxFechaHora($vd['fecha_terreno'] ?? null, $vd['fecha_calculo'] ?? null) ?: '-') ?></div>
+                                    <?php else: ?>
+                                        <span class="text-muted">Pendiente</span>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td class="text-center">
+                                    <?= ($vd['nota_final'] !== null && $vd['nota_final'] !== '') ? esc(number_format((float)$vd['nota_final'], 2, '.', '')) : '-' ?>
+                                </td>
+
+                                <td class="text-center">
+                                    <span class="badge text-bg-<?= esc($estadoDetalleClase) ?>"><?= esc($estadoDetalleLabel) ?></span>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -1300,6 +1595,7 @@ body {background:#f7f9fc;}
 (() => {
   const rut = <?= json_encode($rut, JSON_UNESCAPED_UNICODE) ?>;
   const servicioActual = <?= json_encode((int)($trabajador['id_servicio'] ?? 0), JSON_UNESCAPED_UNICODE) ?>;
+  const cuadrillaActual = <?= json_encode((int)($trabajador['cuadrilla'] ?? 0), JSON_UNESCAPED_UNICODE) ?>;
   const btnGenerar = document.getElementById('btnGenerarProceso');
   const btnAnterior = document.getElementById('btnProcesoAnterior');
   const msg = document.getElementById('procesoMsg');
@@ -1346,7 +1642,7 @@ body {background:#f7f9fc;}
   }
 
   async function crearProceso(payload = {}) {
-    const json = await postJson('ajax_proceso_habilitacion_crear.php', {rut, ...payload});
+    const json = await postJson('ajax_proceso_habilitacion_crear.php', {rut, cuadrilla: cuadrillaActual, ...payload});
     if (json.requires_selection) {
       renderOpciones(json.options || []);
       modalOpciones?.show();
@@ -1402,7 +1698,7 @@ body {background:#f7f9fc;}
   btnAnterior?.addEventListener('click', async () => {
     try {
       btnAnterior.disabled = true;
-      const json = await postJson('ajax_procesos_habilitacion_rut.php', {rut});
+      const json = await postJson('ajax_procesos_habilitacion_rut.php', {rut, id_servicio: servicioActual, cuadrilla: cuadrillaActual});
       renderProcesos(json.data || []);
       modalAnteriores?.show();
     } catch (err) {
@@ -1434,7 +1730,12 @@ body {background:#f7f9fc;}
     if (!btn) return;
     try {
       btn.disabled = true;
-      await postJson('ajax_proceso_habilitacion_seleccionar.php', {rut, id: Number(btn.dataset.id)});
+      await postJson('ajax_proceso_habilitacion_seleccionar.php', {
+        rut,
+        id: Number(btn.dataset.id),
+        id_servicio: servicioActual,
+        cuadrilla: cuadrillaActual
+      });
       setProcesoMsg(`Proceso seleccionado para planificación: N° ${btn.dataset.numero} (${btn.dataset.servicio} / ${btn.dataset.cargo})`, 'success');
       modalAnteriores?.hide();
     } catch (err) {

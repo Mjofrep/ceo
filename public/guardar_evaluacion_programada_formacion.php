@@ -73,6 +73,10 @@ try {
 
     $registro = $stmtExiste->fetch(PDO::FETCH_ASSOC);
 
+    if ($registro && strtoupper(trim((string)($registro['estado'] ?? ''))) === 'EJECUTADA') {
+        throw new RuntimeException('La evaluación ya fue ejecutada y no puede reprogramarse desde esta pantalla.');
+    }
+
     if ($checked) {
 
         // Si ya existe, reactivar en vez de insertar

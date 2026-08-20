@@ -180,17 +180,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             // Por cada prueba pendiente, agregamos su info
                             $sqlServ = "SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id";
                             $stmtServ = $pdo->prepare($sqlServ);
+                            $stmtAgr = $pdo->prepare('SELECT titulo FROM ceo_agrupacion WHERE id = :id LIMIT 1');
                             
                             foreach ($pruebas as $p) {
                                 $idServicio = (int)($p['id_servicio'] ?? 0);
                             
                                 $stmtServ->execute(['id' => $idServicio]);
                                 $nombreServicio = (string)$stmtServ->fetchColumn();
-                            
+                                $idAgrupacion = (int)($p['id_agrupacion'] ?? 0);
+                                if ($idAgrupacion > 0) {
+                                    $stmtAgr->execute([':id' => $idAgrupacion]);
+                                    $tituloAgrupacion = trim((string)($stmtAgr->fetchColumn() ?: ''));
+                                    if ($tituloAgrupacion !== '') {
+                                        $nombreServicio .= ' - ' . $tituloAgrupacion;
+                                    }
+                                }
+
                                 $_SESSION['evaluado']['pruebas'][] = [
                                     'id_programada' => (int)$p['id'],                 // id de ceo_evaluaciones_programadas
                                     'id_servicio'   => $idServicio,
-                                    'id_agrupacion' => (int)($p['id_agrupacion'] ?? 0),
+                                    'id_agrupacion' => $idAgrupacion,
                                     'servicio'      => $nombreServicio,
                                     'nsolicitud'    => $p['nsolicitud'] ?? null,      // si existe columna
                                     'cuadrilla'     => $p['cuadrilla'] ?? null,
@@ -198,6 +207,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'fecha_prog'    => $p['fecha_programacion'] ?? null,
                                     'intento'       => $p['intento'] ?? null
                                 ];
+                            }
+
+                            if (function_exists('auditPrueba')) {
+                                $detallePruebas = array_map(static function (array $prueba): array {
+                                    return [
+                                        'id_programada' => (int)($prueba['id_programada'] ?? 0),
+                                        'id_servicio' => (int)($prueba['id_servicio'] ?? 0),
+                                        'id_agrupacion' => (int)($prueba['id_agrupacion'] ?? 0),
+                                        'servicio' => (string)($prueba['servicio'] ?? ''),
+                                        'cuadrilla' => isset($prueba['cuadrilla']) ? (int)$prueba['cuadrilla'] : null,
+                                        'numero_proceso' => (string)($prueba['numero_proceso'] ?? ''),
+                                        'intento' => isset($prueba['intento']) ? (int)$prueba['intento'] : null,
+                                    ];
+                                }, $_SESSION['evaluado']['pruebas']);
+
+                                $primeraPrueba = $_SESSION['evaluado']['pruebas'][0] ?? [];
+                                auditPrueba('EVALUADO_CARGADO', [
+                                    'rut_evaluado' => $rutAlumno,
+                                    'id_servicio' => isset($primeraPrueba['id_servicio']) ? (int)$primeraPrueba['id_servicio'] : null,
+                                    'servicio' => (string)($primeraPrueba['servicio'] ?? ''),
+                                    'id_programada' => isset($primeraPrueba['id_programada']) ? (int)$primeraPrueba['id_programada'] : null,
+                                    'id_agrupacion' => isset($primeraPrueba['id_agrupacion']) ? (int)$primeraPrueba['id_agrupacion'] : null,
+                                    'cuadrilla' => isset($primeraPrueba['cuadrilla']) ? (int)$primeraPrueba['cuadrilla'] : null,
+                                    'intento' => isset($primeraPrueba['intento']) ? (int)$primeraPrueba['intento'] : null,
+                                    'detalle' => [
+                                        'cantidad_pruebas' => count($_SESSION['evaluado']['pruebas']),
+                                        'pruebas' => $detallePruebas,
+                                    ],
+                                ]);
                             }
 
 

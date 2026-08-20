@@ -9,6 +9,17 @@ header('Content-Type: application/json; charset=utf-8');
 
 try {
 
+    if (empty($_SESSION['auth'])) {
+        throw new Exception('Sesión expirada. Vuelve a iniciar sesión.');
+    }
+
+    $evaluadorNombre = trim((string)($_SESSION['auth']['nombre'] ?? ''));
+    $evaluadorId = (int)($_SESSION['auth']['id_evaluador'] ?? 0);
+
+    if ($evaluadorId <= 0 || $evaluadorNombre === '') {
+        throw new Exception('No se pudo identificar al evaluador de terreno. Vuelve a iniciar sesión.');
+    }
+
     /* ============================================================
        1. VALIDACIONES BÁSICAS
        ============================================================ */
@@ -81,18 +92,16 @@ try {
         }
     }
 
-    foreach ($respuestas as $rut => $preguntas) {
-        if (!in_array((string)$rut, $rutsRinden, true)) {
-            throw new Exception("El RUT $rut fue enviado con respuestas pero no está marcado para rendir.");
-        }
+    foreach ($rutsRinden as $rutRinde) {
+        $preguntas = $respuestas[$rutRinde] ?? null;
 
         if (!is_array($preguntas) || empty($preguntas)) {
-            throw new Exception("No hay preguntas válidas para el RUT $rut.");
+            throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
         }
 
         foreach ($preguntas as $id_pregunta => $r) {
             if (!is_array($r)) {
-                throw new Exception("Formato inválido en respuesta de la pregunta $id_pregunta para RUT $rut.");
+                throw new Exception("Formato inválido en respuesta de la pregunta $id_pregunta para RUT $rutRinde.");
             }
 
             $si  = !empty($r['si']);
@@ -103,11 +112,11 @@ try {
             $marcadas = ($si ? 1 : 0) + ($no ? 1 : 0) + ($na ? 1 : 0);
 
             if ($marcadas !== 1) {
-                throw new Exception("Debe seleccionar exactamente una opción (SI / NO / NA) en la pregunta $id_pregunta del RUT $rut.");
+                throw new Exception("Debe seleccionar exactamente una opción (SI / NO / NA) en la pregunta $id_pregunta del RUT $rutRinde.");
             }
 
             if (($no || $na) && $obs === '') {
-                throw new Exception("Debe ingresar observación en la pregunta $id_pregunta del RUT $rut cuando marca NO o NA.");
+                throw new Exception("Debe ingresar observación en la pregunta $id_pregunta del RUT $rutRinde cuando marca NO o NA.");
             }
         }
     }
@@ -286,14 +295,6 @@ try {
         WHERE id = ?
           AND tipo = 'TERRENO'
           AND estado = 'PENDIENTE'
-    ");
-
-    // Insertar vigencia detalle (solo APROBADO y si NO hay general activa)
-    $stmtInsVigDet = $db->prepare("
-        INSERT INTO ceo_vigencia_detalle
-        (rut, id_servicio, fechavig_ini, fechavig_fin, id_proceso, id_proceso_habilitacion, tipo)
-        VALUES
-        (:rut, :id_servicio, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 3 YEAR), :id_proceso, :id_proceso_habilitacion, 'TERRENO')
     ");
 
     /* ============================================================
@@ -499,8 +500,6 @@ try {
         $cargoEvaluado  = $dat['cargo'] ?? '';
         $empresaEval    = $dat['empresa'] ?? '';
 
-        $evaluadorNombre = $_SESSION['auth']['nombre'] ?? null;
-
         // Contadores intento terreno
         $correctasTerr    = 0;
         $incorrectasTerr  = 0;
@@ -554,12 +553,11 @@ try {
         $stmtCerrar->execute([$idEvalRut]);
 
         // Insert intento terreno
-        $evaluadorId = (int)($_SESSION['auth']['id'] ?? 0);
         $stmtIntentoTerr->execute([
             ':rut'           => $rut,
             ':id_servicio'   => $id_servicio,
             ':id_proceso_habilitacion' => $idProcesoHab,
-            ':id_evaluador'  => ($evaluadorId > 0 ? $evaluadorId : null),
+            ':id_evaluador'  => $evaluadorId,
             ':fecha'         => $fecha,
             ':hora'          => $hora,
             ':puntaje_total' => $resultado,
@@ -569,29 +567,6 @@ try {
             ':noaplica'      => $noaplicaTerr,
             ':notafinal'     => $notaFinal
         ]);
-
-        // =====================================================
-        // VIGENCIA (DETALLE/GENERAL)
-        // =====================================================
-        if ($estadoFinal === 'APROBADO') {
-
-            if (function_exists('existeVigenciaGeneralActiva') && function_exists('recalcularVigenciaGeneral')) {
-                // Bloqueo: si ya existe general activa para ese rut+proceso, no se inserta nada
-                if (!existeVigenciaGeneralActiva($db, $rut, $cuadrillaRut)) {
-
-                    // Insertar vigencia detalle (rut+servicio+proceso)
-                    $stmtInsVigDet->execute([
-                        ':rut'         => $rut,
-                        ':id_servicio' => $id_servicio,
-                        ':id_proceso'  => $cuadrillaRut,
-                        ':id_proceso_habilitacion' => $idProcesoHab
-                    ]);
-
-                    // Intentar generar vigencia general (solo si ya corresponde)
-                    recalcularVigenciaGeneral($db, $rut, $cuadrillaRut);
-                }
-            }
-        }
 
         // =====================================================
         // RESULTADO FINAL DEL SERVICIO

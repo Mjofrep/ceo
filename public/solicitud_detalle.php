@@ -849,9 +849,13 @@ document.getElementById('btnGuardarParticipanteNuevo')?.addEventListener('click'
       <div class="modal-body">
         <input type="hidden" id="edit_nsolicitud" value="<?= (int)$sol['nsolicitud'] ?>">
         <div class="alert alert-light border small">
-          Solo se actualizarán Proceso, Patio, Unidad Operativa, Servicio, Habilitación CEO y Tipo Habilitación.
+          Solo se actualizarán Fecha, Proceso, Patio, Unidad Operativa, Servicio, Habilitación CEO y Tipo Habilitación.
         </div>
         <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Fecha</label>
+            <input type="date" id="edit_fecha" class="form-control form-control-sm" value="<?= htmlspecialchars((string)$sol['fecha']) ?>" required>
+          </div>
           <div class="col-md-6">
             <label class="form-label">Proceso</label>
             <select id="edit_proceso" class="form-select form-select-sm" required>
@@ -960,6 +964,7 @@ document.getElementById('btnGuardarParticipanteNuevo')?.addEventListener('click'
   btnGuardar?.addEventListener('click', async () => {
     const payload = {
       nsolicitud: document.getElementById('edit_nsolicitud')?.value || '',
+      fecha: document.getElementById('edit_fecha')?.value || '',
       proceso: document.getElementById('edit_proceso')?.value || '',
       patio: document.getElementById('edit_patio')?.value || '',
       uo: document.getElementById('edit_uo')?.value || '',

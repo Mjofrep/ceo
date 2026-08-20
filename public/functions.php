@@ -133,6 +133,212 @@ function obtenerUltimaNotaTerreno(PDO $pdo, string $rut, int $idServicio, int $i
     ];
 }
 
+function obtenerUltimaNotaTeoricaPorAgrupacion(PDO $pdo, string $rut, int $idServicio, int $idProceso, int $idAgrupacion, float $porcentajeMinimo): ?array
+{
+    $sql = "
+        SELECT
+            rpt.intento,
+            MAX(CONCAT(COALESCE(rpt.fecha_rendicion, '0000-00-00'), ' ', COALESCE(rpt.hora_rendicion, '00:00:00'))) AS fecha_hora,
+            SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+            COUNT(*) AS total
+        FROM ceo_resultado_pruebat rpt
+        INNER JOIN ceo_preguntas_servicios ps
+            ON ps.id = rpt.id_pregunta
+           AND ps.id_servicio = :id_servicio
+           AND ps.id_agrupacion = :id_agrupacion
+        WHERE rpt.rut = :rut
+          AND rpt.proceso = :id_proceso
+        GROUP BY rpt.intento
+        ORDER BY fecha_hora DESC, rpt.intento DESC
+        LIMIT 1
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':rut' => $rut,
+        ':id_servicio' => $idServicio,
+        ':id_agrupacion' => $idAgrupacion,
+        ':id_proceso' => $idProceso,
+    ]);
+
+    $fila = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$fila) {
+        return null;
+    }
+
+    $total = (int)($fila['total'] ?? 0);
+    if ($total <= 0) {
+        return null;
+    }
+
+    $correctas = (int)($fila['correctas'] ?? 0);
+    $porcentaje = round(($correctas / $total) * 100, 2);
+    $nota = calcularNotaFinalDesdePorcentaje($porcentaje, $porcentajeMinimo);
+
+    return [
+        'nota' => round($nota, 2),
+        'porcentaje' => $porcentaje,
+        'intento' => isset($fila['intento']) ? (int)$fila['intento'] : null,
+        'fecha_hora' => (string)($fila['fecha_hora'] ?? ''),
+    ];
+}
+
+function recalcularResultadoServicioLlee(PDO $pdo, string $rut, int $idServicio, int $idProceso, string $segmento = 'GENERAL'): array
+{
+    $cargo = obtenerCargoTrabajador($pdo, $rut);
+    if ($cargo === null) {
+        throw new RuntimeException("No se encontró cargo para el rut {$rut}");
+    }
+
+    $cfg = ceoGetLleeConfig();
+    $theory = obtenerUltimaNotaTeoricaPorAgrupacion($pdo, $rut, $idServicio, $idProceso, (int)$cfg['theory_group_id'], (float)$cfg['theory_min_pct']);
+    $hotline = obtenerUltimaNotaTeoricaPorAgrupacion($pdo, $rut, $idServicio, $idProceso, (int)$cfg['hotline_group_id'], (float)$cfg['hotline_min_pct']);
+    $terrain = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso);
+
+    $notaPrueba = $theory['nota'] ?? null;
+    $porcentajePrueba = $theory['porcentaje'] ?? null;
+    $notaTerreno = $terrain['nota'] ?? null;
+    $porcentajeTerreno = $terrain['porcentaje'] ?? null;
+    $notaHotline = $hotline['nota'] ?? null;
+    $porcentajeHotline = $hotline['porcentaje'] ?? null;
+
+    $notaFinal = null;
+    if ($notaPrueba !== null && $notaTerreno !== null) {
+        $notaFinal = round((($notaPrueba + $notaTerreno) / 2), 2);
+    }
+
+    if ($porcentajePrueba === null) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'PENDIENTE',
+            'observacion' => 'Falta resultado de prueba LLEE'
+        ];
+    }
+
+    if ($porcentajeHotline === null) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'PENDIENTE',
+            'observacion' => 'Falta resultado de prueba Hotline'
+        ];
+    }
+
+    if ($porcentajeTerreno === null) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'PENDIENTE',
+            'observacion' => 'Falta resultado de terreno'
+        ];
+    }
+
+    if ($porcentajePrueba < (float)$cfg['theory_min_pct']) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'REPROBADO',
+            'observacion' => 'No aprueba prueba LLEE'
+        ];
+    }
+
+    if ($porcentajeHotline < (float)$cfg['hotline_min_pct']) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'REPROBADO',
+            'observacion' => 'No aprueba Hotline'
+        ];
+    }
+
+    if ($porcentajeTerreno < (float)$cfg['terrain_min_pct']) {
+        return [
+            'rut' => $rut,
+            'id_servicio' => $idServicio,
+            'id_proceso' => $idProceso,
+            'cargo' => $cargo,
+            'segmento' => $segmento,
+            'nota_prueba' => $notaPrueba,
+            'nota_terreno' => $notaTerreno,
+            'porcentaje_prueba' => $porcentajePrueba,
+            'porcentaje_terreno' => $porcentajeTerreno,
+            'ponderacion_prueba' => 0.5,
+            'ponderacion_terreno' => 0.5,
+            'nota_final' => $notaFinal,
+            'resultado_final' => 'REPROBADO',
+            'observacion' => 'No aprueba terreno'
+        ];
+    }
+
+    return [
+        'rut' => $rut,
+        'id_servicio' => $idServicio,
+        'id_proceso' => $idProceso,
+        'cargo' => $cargo,
+        'segmento' => $segmento,
+        'nota_prueba' => $notaPrueba,
+        'nota_terreno' => $notaTerreno,
+        'porcentaje_prueba' => $porcentajePrueba,
+        'porcentaje_terreno' => $porcentajeTerreno,
+        'ponderacion_prueba' => 0.5,
+        'ponderacion_terreno' => 0.5,
+        'nota_final' => $notaFinal,
+        'resultado_final' => 'APROBADO',
+        'observacion' => 'OK LLEE'
+    ];
+}
+
 function recalcularResultadoServicio(
     PDO $pdo,
     string $rut,
@@ -141,6 +347,10 @@ function recalcularResultadoServicio(
     string $segmento = 'GENERAL',
     float $porcentajeMinimoAprobacion = 80.0
 ): array {
+    if (ceoIsLleeService($idServicio)) {
+        return recalcularResultadoServicioLlee($pdo, $rut, $idServicio, $idProceso, $segmento);
+    }
+
     // ----------------------------------------------------
     // 1) Obtener cargo
     // ----------------------------------------------------

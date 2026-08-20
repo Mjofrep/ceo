@@ -243,7 +243,7 @@ if (!empty($_FILES['adjuntos']['name'][0])) {
     $pdo = db();
     $in = implode(',', array_fill(0, count($ids), '?'));
 
-    $sql = "UPDATE ceo_habilitacion SET estado = 'Cerrado' WHERE cuadrilla IN ($in)";
+    $sql = "UPDATE ceo_habilitacion SET estado = 'Cerrado' WHERE cuadrilla IN ($in) AND estado <> 'Anulada'";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($ids);
 

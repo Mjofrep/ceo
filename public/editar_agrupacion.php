@@ -71,6 +71,10 @@ body {background:#f7f9fc; font-size:0.9rem;}
 
     <a href="terreno_gestion.php" class="btn btn-secondary mb-3">← Volver</a>
 
+    <?php if (isset($_GET['dup'])): ?>
+        <div class="alert alert-warning">Ya existe otra agrupación con el mismo nombre y servicio.</div>
+    <?php endif; ?>
+
     <div class="card shadow-sm">
         <div class="card-body">
 
@@ -88,8 +92,8 @@ body {background:#f7f9fc; font-size:0.9rem;}
                     <label>Servicio Asociado</label>
                     <select name="id_servicio" class="form-select" required>
                         <?php foreach ($servicios as $s): ?>
-                            <option value="<?= $s['id_servicio'] ?>"
-                                    <?= ($agr['id_servicio'] == $s['id_servicio']) ? 'selected' : '' ?>>
+                            <option value="<?= (int)$s['id'] ?>"
+                                    <?= ((int)$agr['id_servicio'] === (int)$s['id']) ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($s['servicio']) ?>
                             </option>
                         <?php endforeach; ?>

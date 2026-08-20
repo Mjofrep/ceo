@@ -8,7 +8,7 @@ require_once __DIR__ . '/../config/functions.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -42,6 +42,24 @@ function certFmtNota(mixed $value): string
         return '';
     }
     return number_format((float)$value, 2, '.', '');
+}
+
+function certFilePart(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return 'SinDato';
+    }
+
+    $value = strtr($value, [
+        'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N',
+        'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n',
+    ]);
+    $value = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
+    $value = preg_replace('/[^A-Za-z0-9]+/', '_', $value) ?? $value;
+    $value = trim($value, '_');
+
+    return $value !== '' ? $value : 'SinDato';
 }
 
 function certRegisterQrAutoload(): void
@@ -189,7 +207,7 @@ function certLogoDataUri(): string
         $logoPath,
         __DIR__ . '/' . ltrim($logoPath, '/'),
         dirname(__DIR__) . '/' . ltrim($logoPath, '/'),
-        dirname(__DIR__) . str_replace('/ceo.noetica.cl', '', $logoPath),
+        app_path_to_filesystem($logoPath),
     ];
     foreach ($paths as $path) {
         if (is_file($path)) {
@@ -373,8 +391,7 @@ function certEnsureTables(PDO $pdo): void
 function certCandidateKey(array $cand): string
 {
     return certRutKey((string)($cand['rut'] ?? ''))
-        . '|' . (int)($cand['id_servicio'] ?? 0)
-        . '|' . (int)($cand['id_proceso'] ?? 0);
+        . '|' . (int)($cand['id_servicio'] ?? 0);
 }
 
 function certCandidateScore(array $cand): int
@@ -435,15 +452,19 @@ function certCandidateSql(array $where): string
 {
     return '
         SELECT
-            vd.id AS id_vigencia_detalle,
+            rfs.id AS id_vigencia_detalle,
             vg.id AS id_vigencia_general,
-            vd.rut,
-            vd.id_servicio,
-            vd.id_proceso,
-            COALESCE(vd.tipo, "") AS tipo_vigencia_detalle,
-            COALESCE(vg.fechavig_ini, vd.fechavig_ini) AS fechavig_ini_cert,
-            COALESCE(vg.fechavig_fin, vd.fechavig_fin) AS fechavig_fin_cert,
-            CASE WHEN vg.id IS NULL THEN "DETALLE" ELSE "GENERAL" END AS fuente_vigencia,
+            rfs.rut,
+            rfs.id_servicio,
+            rfs.id_proceso,
+            COALESCE(vd.tipo, "GENERAL") AS tipo_vigencia_detalle,
+            COALESCE(vg.fechavig_ini, vd.fechavig_ini, DATE(rfs.fecha_calculo)) AS fechavig_ini_cert,
+            COALESCE(vg.fechavig_fin, vd.fechavig_fin, DATE_ADD(DATE(rfs.fecha_calculo), INTERVAL 3 YEAR)) AS fechavig_fin_cert,
+            CASE
+                WHEN vg.id IS NOT NULL THEN "GENERAL"
+                WHEN vd.id IS NOT NULL THEN "DETALLE"
+                ELSE "RESULTADO_FINAL"
+            END AS fuente_vigencia,
             sp.servicio,
             COALESCE(h.empresa, c.id_empresa) AS id_empresa,
             COALESCE(emp_h.nombre, emp_c.nombre, "") AS empresa,
@@ -455,36 +476,56 @@ function certCandidateSql(array $where): string
             rfs.nota_terreno,
             rfs.nota_final,
             rfs.resultado_final
-        FROM ceo_vigencia_detalle vd
+        FROM ceo_resultado_final_servicio rfs
+        INNER JOIN ceo_servicios_pruebas sp ON sp.id = rfs.id_servicio
+        LEFT JOIN ceo_vigencia_detalle vd
+          ON REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+         AND vd.id_servicio = rfs.id_servicio
+         AND vd.id_proceso = rfs.id_proceso
+         AND (
+              (rfs.id_proceso_habilitacion IS NOT NULL AND vd.id_proceso_habilitacion = rfs.id_proceso_habilitacion)
+              OR rfs.id_proceso_habilitacion IS NULL
+         )
+         AND vd.id = (
+             SELECT vd2.id
+             FROM ceo_vigencia_detalle vd2
+             WHERE REPLACE(REPLACE(REPLACE(UPPER(vd2.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+               AND vd2.id_servicio = rfs.id_servicio
+               AND vd2.id_proceso = rfs.id_proceso
+               AND (
+                    (rfs.id_proceso_habilitacion IS NOT NULL AND vd2.id_proceso_habilitacion = rfs.id_proceso_habilitacion)
+                    OR rfs.id_proceso_habilitacion IS NULL
+               )
+             ORDER BY vd2.fechavig_fin DESC, vd2.id DESC
+             LIMIT 1
+         )
         LEFT JOIN ceo_vigencia_general vg
-          ON REPLACE(REPLACE(REPLACE(UPPER(vg.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
-         AND CAST(vg.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci = CAST(vd.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci
-        INNER JOIN ceo_servicios_pruebas sp ON sp.id = vd.id_servicio
+          ON REPLACE(REPLACE(REPLACE(UPPER(vg.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+         AND CAST(vg.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci = CAST(rfs.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci
         LEFT JOIN ceo_habilitacion h
-          ON CAST(h.cuadrilla AS CHAR) COLLATE utf8mb4_unicode_ci = CAST(vd.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci
-         AND h.id_servicio = vd.id_servicio
+          ON CAST(h.cuadrilla AS CHAR) COLLATE utf8mb4_unicode_ci = CAST(rfs.id_proceso AS CHAR) COLLATE utf8mb4_unicode_ci
+         AND h.id_servicio = rfs.id_servicio
         LEFT JOIN ceo_habilitacion_participantes hp
           ON CAST(hp.id_cuadrilla AS CHAR) COLLATE utf8mb4_unicode_ci = CAST(h.cuadrilla AS CHAR) COLLATE utf8mb4_unicode_ci
-         AND REPLACE(REPLACE(REPLACE(UPPER(hp.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+         AND REPLACE(REPLACE(REPLACE(UPPER(hp.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
         LEFT JOIN ceo_contratistas c
-          ON REPLACE(REPLACE(REPLACE(UPPER(c.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+          ON REPLACE(REPLACE(REPLACE(UPPER(c.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
         LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
         LEFT JOIN ceo_empresas emp_h ON emp_h.id = h.empresa
         LEFT JOIN ceo_empresas emp_c ON emp_c.id = c.id_empresa
-        INNER JOIN ceo_resultado_final_servicio rfs
-          ON REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
-         AND rfs.id_servicio = vd.id_servicio
-         AND rfs.segmento = "GENERAL"
-         AND rfs.id = (
-            SELECT rfs2.id
-            FROM ceo_resultado_final_servicio rfs2
-            WHERE REPLACE(REPLACE(REPLACE(UPPER(rfs2.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(vd.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
-              AND rfs2.id_servicio = vd.id_servicio
-              AND rfs2.segmento = "GENERAL"
-            ORDER BY rfs2.fecha_calculo DESC, rfs2.id DESC
-            LIMIT 1
-         )
-        WHERE ' . implode(' AND ', $where) . '
+        WHERE rfs.segmento = "GENERAL"
+          AND NOT EXISTS (
+              SELECT 1
+              FROM ceo_resultado_final_servicio rfs2
+              WHERE REPLACE(REPLACE(REPLACE(UPPER(rfs2.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") COLLATE utf8mb4_unicode_ci
+                AND rfs2.id_servicio = rfs.id_servicio
+                AND rfs2.segmento = rfs.segmento
+                AND (
+                    rfs2.fecha_calculo > rfs.fecha_calculo
+                    OR (rfs2.fecha_calculo = rfs.fecha_calculo AND rfs2.id > rfs.id)
+                )
+          )
+          AND ' . implode(' AND ', $where) . '
     ';
 }
 
@@ -495,9 +536,9 @@ function certFindCandidate(PDO $pdo, int $idVigenciaDetalle): array
     }
 
     $postWhere = [
-        'vd.id = :post_id_vigencia_detalle',
+        'rfs.id = :post_id_vigencia_detalle',
         "(rfs.resultado_final = 'APROBADO' OR rfs.nota_final >= 4)",
-        'CURDATE() BETWEEN DATE(COALESCE(vg.fechavig_ini, vd.fechavig_ini)) AND DATE(COALESCE(vg.fechavig_fin, vd.fechavig_fin))',
+        'CURDATE() BETWEEN DATE(COALESCE(vg.fechavig_ini, vd.fechavig_ini, DATE(rfs.fecha_calculo))) AND DATE(COALESCE(vg.fechavig_fin, vd.fechavig_fin, DATE_ADD(DATE(rfs.fecha_calculo), INTERVAL 3 YEAR)))',
     ];
     $stmtPostCand = $pdo->prepare(certCandidateSql($postWhere) . ' LIMIT 1');
     $stmtPostCand->execute([':post_id_vigencia_detalle' => $idVigenciaDetalle]);
@@ -522,8 +563,11 @@ function certGenerateFromCandidate(PDO $pdo, array $cand): array
     }
 
     $rutArchivo = preg_replace('/[^0-9Kk]/', '', (string)$cand['rut']);
-    $nombreArchivo = 'Certificado_' . $codigoCertificado . '_' . $rutArchivo . '_S' . (int)$cand['id_servicio'] . '.pdf';
-    $nombreQr = 'Certificado_' . $codigoCertificado . '_' . $rutArchivo . '_S' . (int)$cand['id_servicio'] . '_qr.png';
+    $cargoArchivo = certFilePart((string)($cand['cargo'] ?? ''));
+    $servicioArchivo = certFilePart((string)($cand['servicio'] ?? ''));
+    $baseNombre = 'Certificado_' . $codigoCertificado . '_' . $rutArchivo . '_S' . (int)$cand['id_servicio'] . '_' . $cargoArchivo . '_' . $servicioArchivo;
+    $nombreArchivo = $baseNombre . '.pdf';
+    $nombreQr = $baseNombre . '_qr.png';
     $rutaRelativa = 'storage/certificados/' . $year . '/' . $nombreArchivo;
     $rutaFinal = $baseDir . DIRECTORY_SEPARATOR . $nombreArchivo;
     $rutaQr = $baseDir . DIRECTORY_SEPARATOR . $nombreQr;
@@ -769,6 +813,7 @@ function certSendMail(PDO $pdo, array $ids, string $paraText, string $ccText, st
 }
 
 $fRut = trim((string)($_GET['rut'] ?? ''));
+$fCertRut = trim((string)($_GET['rut_cert'] ?? ''));
 $fEmpresa = (int)($_GET['empresa'] ?? 0);
 $fServicio = (int)($_GET['servicio'] ?? 0);
 $fEstado = trim((string)($_GET['estado'] ?? ''));
@@ -837,9 +882,9 @@ try {
 
     $certWhere = ['1=1'];
     $certParams = [];
-    if ($fRut !== '') {
+    if ($fCertRut !== '') {
         $certWhere[] = "REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci = :cert_rut";
-        $certParams[':cert_rut'] = certRutKey($fRut);
+        $certParams[':cert_rut'] = certRutKey($fCertRut);
     }
     if ($fEmpresa > 0) {
         $certWhere[] = 'id_empresa = :cert_empresa';
@@ -866,17 +911,18 @@ try {
 
     $certVigentes = [];
     foreach ($pdo->query("SELECT rut, id_servicio, id_proceso, id_empresa, cargo, fechavig_fin FROM ceo_certificados WHERE estado = 'VIGENTE'")->fetchAll(PDO::FETCH_ASSOC) as $cert) {
-        $key = certRutKey((string)$cert['rut']) . '|' . (int)$cert['id_servicio'] . '|' . (int)$cert['id_proceso'];
+        $key = certRutKey((string)$cert['rut']) . '|' . (int)$cert['id_servicio'];
         $certVigentes[$key] = true;
     }
 
     $candWhere = [
         "(rfs.resultado_final = 'APROBADO' OR rfs.nota_final >= 4)",
-        'CURDATE() BETWEEN DATE(COALESCE(vg.fechavig_ini, vd.fechavig_ini)) AND DATE(COALESCE(vg.fechavig_fin, vd.fechavig_fin))',
+        'CURDATE() BETWEEN DATE(COALESCE(vg.fechavig_ini, vd.fechavig_ini, DATE(rfs.fecha_calculo))) AND DATE(COALESCE(vg.fechavig_fin, vd.fechavig_fin, DATE_ADD(DATE(rfs.fecha_calculo), INTERVAL 3 YEAR)))',
+        "DATE(rfs.fecha_calculo) >= '2026-06-01'",
     ];
     $candParams = [];
     if ($fRut !== '') {
-        $candWhere[] = "REPLACE(REPLACE(REPLACE(UPPER(vd.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci = :cand_rut";
+        $candWhere[] = "REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci = :cand_rut";
         $candParams[':cand_rut'] = certRutKey($fRut);
     }
     if ($fEmpresa > 0) {
@@ -884,12 +930,12 @@ try {
         $candParams[':cand_empresa'] = $fEmpresa;
     }
     if ($fServicio > 0) {
-        $candWhere[] = 'vd.id_servicio = :cand_servicio';
+        $candWhere[] = 'rfs.id_servicio = :cand_servicio';
         $candParams[':cand_servicio'] = $fServicio;
     }
 
     $sqlCand = certCandidateSql($candWhere) . '
-        ORDER BY vd.fechavig_fin DESC, vd.rut ASC, sp.servicio ASC
+        ORDER BY fechavig_fin_cert DESC, rfs.rut ASC, sp.servicio ASC
         LIMIT 2000
     ';
     $stmtCand = $pdo->prepare($sqlCand);
@@ -934,7 +980,7 @@ try {
         <small class="text-secondary"><?= certEsc(APP_SUBTITLE) ?></small>
       </div>
     </div>
-    <a href="/ceo.noetica.cl/public/general.php" class="btn btn-outline-primary btn-sm">&larr; Volver</a>
+    <a href="<?= APP_BASE ?>/public/general.php" class="btn btn-outline-primary btn-sm">&larr; Volver</a>
   </div>
 </header>
 
@@ -963,7 +1009,7 @@ try {
     <div class="card-body">
       <form method="get" class="row g-2 align-items-end">
         <div class="col-md-2">
-          <label class="form-label">RUT</label>
+          <label class="form-label">RUT candidato</label>
           <input type="text" name="rut" class="form-control form-control-sm" value="<?= certEsc($fRut) ?>" placeholder="12345678-9">
         </div>
         <div class="col-md-3">
@@ -1061,7 +1107,31 @@ try {
 
   <div class="card rounded-4">
     <div class="card-body">
-      <h5 class="text-primary mb-3"><i class="bi bi-file-earmark-check me-2"></i>Certificados registrados</h5>
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="text-primary mb-0"><i class="bi bi-file-earmark-check me-2"></i>Certificados registrados</h5>
+        <form method="get" class="row g-2 align-items-end">
+          <input type="hidden" name="rut" value="<?= certEsc($fRut) ?>">
+          <input type="hidden" name="empresa" value="<?= (int)$fEmpresa ?>">
+          <input type="hidden" name="servicio" value="<?= (int)$fServicio ?>">
+          <input type="hidden" name="estado" value="<?= certEsc($fEstado) ?>">
+          <div class="col-auto">
+            <label class="form-label">RUT certificado</label>
+            <input type="text" name="rut_cert" class="form-control form-control-sm" value="<?= certEsc($fCertRut) ?>" placeholder="12345678-9">
+          </div>
+          <div class="col-auto d-flex gap-2">
+            <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-search"></i> Filtrar</button>
+            <a
+              href="generar_certificados.php?<?= http_build_query([
+                  'rut' => $fRut,
+                  'empresa' => $fEmpresa,
+                  'servicio' => $fServicio,
+                  'estado' => $fEstado,
+              ]) ?>"
+              class="btn btn-outline-secondary btn-sm"
+            >Limpiar</a>
+          </div>
+        </form>
+      </div>
       <div class="table-responsive">
         <table class="table table-sm table-bordered table-hover align-middle">
           <thead class="text-center">

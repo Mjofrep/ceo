@@ -8,16 +8,44 @@ header('Content-Type: application/json; charset=utf-8');
 
 function normalizarRutSolicitudParticipante(string $rut): string
 {
-    $rut = strtoupper(preg_replace('/[^0-9Kk]/', '', $rut) ?? '');
-    if (strlen($rut) < 2) {
+    $rut = trim($rut);
+    if ($rut === '') {
         return '';
     }
 
-    return substr($rut, 0, -1) . '-' . substr($rut, -1);
+    if (esRutSolicitudParticipante($rut)) {
+        $rut = strtoupper(preg_replace('/[^0-9Kk]/', '', $rut) ?? '');
+        if (strlen($rut) < 2) {
+            return '';
+        }
+
+        return substr($rut, 0, -1) . '-' . substr($rut, -1);
+    }
+
+    return strtoupper($rut);
+}
+
+function esRutSolicitudParticipante(string $rut): bool
+{
+    $rut = trim($rut);
+    if ($rut === '') {
+        return false;
+    }
+
+    return preg_match('/^[0-9.]+-?[0-9Kk]$/', $rut) === 1;
 }
 
 function validarRutSolicitudParticipante(string $rut): bool
 {
+    $rut = trim($rut);
+    if ($rut === '') {
+        return false;
+    }
+
+    if (!esRutSolicitudParticipante($rut)) {
+        return preg_match('/^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]+$/', $rut) === 1;
+    }
+
     $rut = strtoupper(preg_replace('/[^0-9Kk]/', '', $rut) ?? '');
     if (strlen($rut) < 2) {
         return false;

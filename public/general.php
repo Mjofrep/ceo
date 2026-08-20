@@ -83,23 +83,25 @@ $apps = [
     [
         'title' => 'Gestión de Preguntas',
         'description' => 'Carga fuentes, genera preguntas con IA, revisa, visa y publica cuestionarios para CEONext.',
-        'url' => 'https://www.noetica.cl/ceo.noetica.cl/public/gp_login.php',
+        'url' => '/ceo.noetica.cl/public/sso_redirect.php?app=gp',
         'tag' => 'Banco de preguntas',
         'accent' => '#2563eb',
+        'allowed_ceo_roles' => [1],
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%232563eb'/%3E%3Cstop offset='100%25' stop-color='%2395b8ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='62' y='56' width='196' height='208' rx='28' fill='rgba(255,255,255,0.14)'/%3E%3Crect x='92' y='86' width='136' height='26' rx='13' fill='white' opacity='.92'/%3E%3Cpath d='M94 144h132M94 176h132M94 208h88' stroke='white' stroke-width='16' stroke-linecap='round' opacity='.9'/%3E%3Ccircle cx='232' cy='214' r='28' fill='rgba(255,255,255,0.92)'/%3E%3Cpath d='M221 214l8 8 16-20' stroke='%232563eb' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E",
     ],
     [
         'title' => 'Salud',
         'description' => 'Seguimiento y acceso a procesos vinculados a salud ocupacional.',
-        'url' => '#',
+        'url' => in_array($idRol, [1, 5], true) ? 'https://www.noetica.cl/ceo_salud/index.php' : 'https://www.noetica.cl/ceo_salud/auth/login.php',
         'tag' => 'Seguridad y cuidado',
         'accent' => '#18a36f',
+        'allowed_ceo_roles' => [1, 5],
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2318a36f'/%3E%3Cstop offset='100%25' stop-color='%2385e2bb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Cpath d='M160 255s-78-45-78-108c0-28 21-49 48-49 17 0 31 8 40 21 9-13 23-21 40-21 27 0 48 21 48 49 0 63-78 108-78 108z' fill='white' opacity='.9'/%3E%3Ccircle cx='160' cy='146' r='18' fill='%2318a36f'/%3E%3C/svg%3E",
     ],
     [
         'title' => 'Forms',
         'description' => 'Formularios operativos para capturar informacion de manera estructurada.',
-        'url' => 'https://www.noetica.cl/form2/index.php?path=/login',
+        'url' => '/ceo.noetica.cl/public/sso_redirect.php?app=forms',
         'tag' => 'Captura de datos',
         'accent' => '#9b5de5',
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%239b5de5'/%3E%3Cstop offset='100%25' stop-color='%23d7b9ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='72' y='56' width='176' height='208' rx='24' fill='rgba(255,255,255,0.88)'/%3E%3Cpath d='M106 120h108M106 156h108M106 192h68' stroke='%239b5de5' stroke-width='16' stroke-linecap='round'/%3E%3Ccircle cx='214' cy='194' r='18' fill='%239b5de5'/%3E%3C/svg%3E",
@@ -107,7 +109,7 @@ $apps = [
     [
         'title' => 'Feedback',
         'description' => 'Comentarios, seguimiento y administracion de respuestas del equipo.',
-        'url' => 'https://www.noetica.cl/feedback/admin/login.php',
+        'url' => '/ceo.noetica.cl/public/sso_redirect.php?app=feedback',
         'tag' => 'Escucha activa',
         'accent' => '#f97316',
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23f97316'/%3E%3Cstop offset='100%25' stop-color='%23ffd08a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Cpath d='M76 86h168c18 0 32 14 32 32v66c0 18-14 32-32 32h-79l-49 34v-34H76c-18 0-32-14-32-32v-66c0-18 14-32 32-32z' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M103 126h114M103 159h85' stroke='%23f97316' stroke-width='16' stroke-linecap='round'/%3E%3C/svg%3E",
@@ -121,9 +123,23 @@ $apps = [
         'roles' => ['administrador', 'registro asistencia'],
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230f766e'/%3E%3Cstop offset='100%25' stop-color='%2389e0cf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='58' y='88' width='204' height='146' rx='26' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M94 132h132M94 166h132M94 200h72' stroke='%230f766e' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M94 88l28-34h76l28 34' fill='none' stroke='rgba(255,255,255,0.9)' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='230' cy='200' r='24' fill='rgba(15,118,110,0.18)'/%3E%3Cpath d='M220 200h20M230 190v20' stroke='%230f766e' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E",
     ],
+    [
+        'title' => 'Portal Documental',
+        'description' => 'Acceso al CMS documental para gestionar contenidos y administracion del portal.',
+        'url' => 'https://noetica.cl/wp_cmrceo/wp-admin/index.php',
+        'tag' => 'CMS',
+        'accent' => '#7c3aed',
+        'roles' => ['administrador', 'registro asistencia'],
+        'target' => '_blank',
+        'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237c3aed'/%3E%3Cstop offset='100%25' stop-color='%23c4b5fd'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='64' y='62' width='192' height='196' rx='26' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M102 114h116M102 152h116M102 190h72' stroke='%237c3aed' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M204 184h28v42h-54v-16' fill='none' stroke='%237c3aed' stroke-width='10' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M190 210l26-26' fill='none' stroke='%237c3aed' stroke-width='10' stroke-linecap='round'/%3E%3C/svg%3E",
+    ],
 ];
 
-$apps = array_values(array_filter($apps, static function (array $app) use ($rolNormalizado): bool {
+$apps = array_values(array_filter($apps, static function (array $app) use ($rolNormalizado, $idRol): bool {
+    if (!empty($app['allowed_ceo_roles']) && !in_array($idRol, $app['allowed_ceo_roles'], true)) {
+        return false;
+    }
+
     if (empty($app['roles'])) {
         return true;
     }
@@ -871,6 +887,7 @@ $apps = array_values(array_filter($apps, static function (array $app) use ($rolN
               <a
                 class="app-card"
                 href="<?= htmlspecialchars($app['url'], ENT_QUOTES, 'UTF-8') ?>"
+                <?= !empty($app['target']) ? 'target="' . htmlspecialchars($app['target'], ENT_QUOTES, 'UTF-8') . '" rel="noopener noreferrer"' : '' ?>
                 data-index="<?= $index ?>"
                 data-title="<?= htmlspecialchars($app['title'], ENT_QUOTES, 'UTF-8') ?>"
                 style="--card-accent: <?= htmlspecialchars($app['accent'], ENT_QUOTES, 'UTF-8') ?>"

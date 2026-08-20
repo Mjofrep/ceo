@@ -9,14 +9,44 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-// Si NO existe sesión válida → volver al login
-if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
-    exit;
-}
+require_once __DIR__ . '/../config/app.php';
 require_once '../config/db.php';
 require_once '../config/functions.php';
-require_once __DIR__ . '/../config/app.php';
+
+set_exception_handler(static function (Throwable $e): void {
+    if (!headers_sent()) {
+        http_response_code(500);
+    }
+
+    ?>
+    <!doctype html>
+    <html lang="es">
+    <head>
+        <meta charset="utf-8">
+        <title>Error en revision_cuadrillas</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-light">
+        <div class="container py-4">
+            <div class="alert alert-danger shadow-sm">
+                <h1 class="h5 mb-3">Error al cargar la revision de cuadrillas</h1>
+                <p class="mb-2"><strong>Mensaje:</strong> <?= htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') ?></p>
+                <p class="mb-2"><strong>Archivo:</strong> <?= htmlspecialchars($e->getFile(), ENT_QUOTES, 'UTF-8') ?></p>
+                <p class="mb-0"><strong>Linea:</strong> <?= (int)$e->getLine() ?></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    <?php
+    exit;
+});
+
+// Si NO existe sesión válida → volver al login
+if (empty($_SESSION['auth'])) {
+    header('Location: ' . app_url('/public/index.php'));
+    exit;
+}
 
 function revisionHasColumn(PDO $pdo, string $table, string $column): bool
 {
@@ -43,9 +73,23 @@ function revisionHasColumn(PDO $pdo, string $table, string $column): bool
     return $cache[$key];
 }
 
+function formatearFechaRevision(mixed $valor, bool $conHora = false): string
+{
+    $fecha = trim((string)$valor);
+    if ($fecha === '' || str_starts_with($fecha, '0000-00-00')) {
+        return '';
+    }
+
+    try {
+        return (new DateTimeImmutable($fecha))->format($conHora ? 'd-m-Y H:i' : 'd-m-Y');
+    } catch (Throwable $e) {
+        return $fecha;
+    }
+}
+
 // Validación de sesión
 if (empty($_SESSION['auth'])) {
-    header("Location: /ceo/public/index.php");
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -152,7 +196,7 @@ if (empty($where)) {
         ? "(
         SELECT ep.id_agrupacion
         FROM ceo_evaluaciones_programadas ep
-        WHERE ep.rut = p.rut
+        WHERE ep.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
           AND ep.id_servicio = cs.id_servicio
           AND ep.cuadrilla = cs.cuadrilla
           AND ep.tipo = 'PRUEBA'
@@ -166,6 +210,8 @@ if (empty($where)) {
 	    p.rut,
     p.nombre,
     p.apellidos AS apellido,
+    cs.id AS id_habilitacion,
+    cs.estado AS estado_cuadrilla,
     u.desc_uo AS uo,
     p.cargo,
     e.nombre AS empresa,
@@ -175,7 +221,7 @@ if (empty($where)) {
         SELECT ph.numero_proceso
         FROM ceo_evaluaciones_programadas ep
         LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
-        WHERE ep.rut = p.rut
+        WHERE ep.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
           AND ep.id_servicio = cs.id_servicio
           AND ep.cuadrilla = cs.cuadrilla
         ORDER BY ep.id DESC
@@ -186,7 +232,7 @@ if (empty($where)) {
         WHEN EXISTS (
             SELECT 1 
             FROM ceo_resultado_prueba_intento x 
-            WHERE x.rut = p.rut
+            WHERE x.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
         ) THEN 1 ELSE 0 
     END AS existe,
 
@@ -194,7 +240,7 @@ if (empty($where)) {
         WHEN EXISTS (
             SELECT 1
             FROM ceo_resultado_prueba_intento x
-            WHERE x.rut = p.rut
+            WHERE x.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
               AND x.id_servicio = cs.id_servicio
         ) THEN 1 ELSE 0 
     END AS prueba,
@@ -203,7 +249,7 @@ if (empty($where)) {
         WHEN EXISTS (
             SELECT 1
             FROM ceo_evaluacion_terreno t
-            WHERE t.rut = p.rut
+            WHERE t.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
               AND t.id_servicio = cs.id_servicio
         ) THEN 1 ELSE 0 
     END AS terreno,
@@ -211,7 +257,7 @@ CASE
     WHEN EXISTS (
         SELECT 1
         FROM ceo_evaluaciones_programadas ep
-        WHERE ep.rut = p.rut
+        WHERE ep.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
           AND ep.id_servicio = cs.id_servicio
           AND ep.cuadrilla = cs.cuadrilla
           AND ep.tipo = 'PRUEBA'
@@ -222,7 +268,7 @@ CASE
     WHEN EXISTS (
         SELECT 1
         FROM ceo_evaluaciones_programadas ep
-        WHERE ep.rut = p.rut
+        WHERE ep.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
           AND ep.id_servicio = cs.id_servicio
           AND ep.cuadrilla = cs.cuadrilla
           AND ep.tipo = 'TERRENO'
@@ -230,11 +276,16 @@ CASE
     ) THEN 1 ELSE 0
 END AS eva_terreno
 
+,COALESCE(hp_estado.estado, 'ACTIVO') AS estado_persona
+
 
 FROM ceo_habilitacion_participantes p
 INNER JOIN ceo_habilitacion cs ON cs.cuadrilla = p.id_cuadrilla
 INNER JOIN ceo_empresas e      ON cs.empresa = e.id
 INNER JOIN ceo_uo u            ON cs.uo = u.id
+LEFT JOIN ceo_habilitacion_personas hp_estado
+       ON hp_estado.id_habilitacion = cs.id
+      AND hp_estado.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
 ";
 
     // Inyectar WHERE dinámico
@@ -282,12 +333,34 @@ $programaId = (int)($_GET['programa'] ?? 0);
 
 $nsolicitudCuadrilla = null;
 $servicioCuadrilla = null;
+$evaluadorTerrenoCuadrilla = null;
+$fechaPlanificacionTerrenoCuadrilla = null;
+$fechaEjecucionTerrenoCuadrilla = null;
 
 if ($programaId > 0) {
     $stmt = $pdo->prepare("
-        SELECT h.nsolicitud, sp.servicio
+        SELECT
+            h.nsolicitud,
+            sp.servicio,
+            TRIM(CONCAT(COALESCE(ev.nombre, ''), ' ', COALESCE(ev.apellidop, ''), ' ', COALESCE(ev.apellidom, ''))) AS responsable_linea,
+            (
+                SELECT MAX(ep.fecha_programacion)
+                FROM ceo_evaluaciones_programadas ep
+                WHERE ep.cuadrilla = h.cuadrilla
+                  AND ep.id_servicio = h.id_servicio
+                  AND ep.tipo = 'TERRENO'
+            ) AS fecha_planificacion_terreno,
+            (
+                SELECT MAX(ep.fecha_resultado)
+                FROM ceo_evaluaciones_programadas ep
+                WHERE ep.cuadrilla = h.cuadrilla
+                  AND ep.id_servicio = h.id_servicio
+                  AND ep.tipo = 'TERRENO'
+            ) AS fecha_ejecucion_terreno
         FROM ceo_habilitacion h
         LEFT JOIN ceo_servicios_pruebas sp ON sp.id = h.id_servicio
+        LEFT JOIN ceo_solicitudes s ON s.nsolicitud = h.nsolicitud
+        LEFT JOIN ceo_evaluador ev ON ev.id = s.resplinea
         WHERE h.id = :id
         LIMIT 1
     ");
@@ -297,6 +370,9 @@ if ($programaId > 0) {
     if ($programaInfo) {
         $nsolicitudCuadrilla = $programaInfo['nsolicitud'] ?? null;
         $servicioCuadrilla = $programaInfo['servicio'] ?? null;
+        $evaluadorTerrenoCuadrilla = trim((string)($programaInfo['responsable_linea'] ?? ''));
+        $fechaPlanificacionTerrenoCuadrilla = $programaInfo['fecha_planificacion_terreno'] ?? null;
+        $fechaEjecucionTerrenoCuadrilla = $programaInfo['fecha_ejecucion_terreno'] ?? null;
     }
 }
 
@@ -340,6 +416,14 @@ body {background:#f7f9fc;}
 
 .table td {
     vertical-align: middle;
+}
+
+.fila-anulada {
+    opacity: .65;
+}
+
+.fila-anulada td {
+    background: #f8f9fa;
 }
 
 td input[type=checkbox]{
@@ -448,6 +532,39 @@ td input[type=checkbox]{
                     >
                 </div>
 
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Evaluador terreno</label>
+                    <input
+                        type="text"
+                        class="form-control bg-light"
+                        value="<?= esc((string)($evaluadorTerrenoCuadrilla ?? '')) ?>"
+                        placeholder="Se completará cuando exista permiso asociado"
+                        readonly
+                    >
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Fecha planificación terreno</label>
+                    <input
+                        type="text"
+                        class="form-control bg-light"
+                        value="<?= esc(formatearFechaRevision($fechaPlanificacionTerrenoCuadrilla ?? null, true)) ?>"
+                        placeholder="No planificada"
+                        readonly
+                    >
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Fecha ejecución terreno</label>
+                    <input
+                        type="text"
+                        class="form-control bg-light"
+                        value="<?= esc(formatearFechaRevision($fechaEjecucionTerrenoCuadrilla ?? null, true)) ?>"
+                        placeholder="Sin ejecución"
+                        readonly
+                    >
+                </div>
+
                 <div class="col-12 text-end mt-2">
                     <button class="btn btn-success"><i class="bi bi-search"></i> Recuperar</button>
                   <?php if (empty($nsolicitudCuadrilla)): ?>
@@ -504,7 +621,13 @@ td input[type=checkbox]{
 
 <tbody>
 <?php foreach ($data as $d): ?>
-<tr class="fila-detalle" data-rut="<?= esc($d['rut']) ?>">
+<?php
+$estadoCuadrilla = trim((string)($d['estado_cuadrilla'] ?? 'Pendiente'));
+$estadoPersona = strtoupper(trim((string)($d['estado_persona'] ?? 'ACTIVO')));
+$cuadrillaAnulada = strcasecmp($estadoCuadrilla, 'Anulada') === 0;
+$personaAnulada = $estadoPersona === 'ELIMINADO';
+?>
+<tr class="fila-detalle<?= ($cuadrillaAnulada || $personaAnulada) ? ' fila-anulada' : '' ?>" data-rut="<?= esc($d['rut']) ?>">
 
     <td><?= esc($d['rut']) ?></td>
     <td><?= esc($d['nombre']) ?></td>
@@ -513,7 +636,12 @@ td input[type=checkbox]{
     <td><?= esc($d['cargo']) ?></td>
     <td><?= esc($d['empresa']) ?></td>
     <td class="text-center"><?= esc($d['numero_proceso'] !== null ? (string)$d['numero_proceso'] : '') ?></td>
-    <td class="text-center"><?= esc((string)$d['n_cuadrilla']) ?></td>
+    <td class="text-center">
+        <?= esc((string)$d['n_cuadrilla']) ?>
+        <?php if ($cuadrillaAnulada): ?>
+            <div><span class="badge text-bg-secondary mt-1">Anulada</span></div>
+        <?php endif; ?>
+    </td>
 
 <?php
 $cols = ['existe','prueba','terreno','eva_prueba'];
@@ -535,6 +663,7 @@ foreach ($cols as $c):
             data-rut="<?= esc($d['rut']) ?>"
             data-servicio="<?= (int)$d['id_servicio'] ?>"
             data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+            <?= ($cuadrillaAnulada || $personaAnulada) ? 'disabled' : '' ?>
         <?php endif; ?>
     >
 </td>
@@ -546,6 +675,7 @@ foreach ($cols as $c):
             data-rut="<?= esc($d['rut']) ?>"
             data-servicio="<?= (int)$d['id_servicio'] ?>"
             data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+            <?= ($cuadrillaAnulada || $personaAnulada) ? 'disabled' : '' ?>
         >
             <option value="">-- Seleccione prueba --</option>
             <?php foreach ($agrupacionesServicio as $agr): ?>
@@ -571,6 +701,7 @@ foreach ($cols as $c):
         data-rut="<?= esc($d['rut']) ?>"
         data-servicio="<?= (int)$d['id_servicio'] ?>"
         data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+        <?= ($cuadrillaAnulada || $personaAnulada) ? 'disabled' : '' ?>
     >
 </td>
 
@@ -582,9 +713,21 @@ foreach ($cols as $c):
             class="btn btn-sm btn-outline-danger btn-eliminar"
             data-rut="<?= esc($d['rut']) ?>"
             data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
-            title="Eliminar participante"
+            title="Eliminar participante de la cuadrilla"
             onclick="event.stopPropagation();">
             <i class="bi bi-trash"></i>
+        </button>
+        <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary btn-anular ms-1"
+            data-rut="<?= esc($d['rut']) ?>"
+            data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+            data-servicio="<?= (int)$d['id_servicio'] ?>"
+            data-nombre="<?= esc(trim((string)$d['nombre'] . ' ' . (string)$d['apellido'])) ?>"
+            title="Anular planificación por no asistencia"
+            <?= ($cuadrillaAnulada || $personaAnulada) ? 'disabled' : '' ?>
+            onclick="event.stopPropagation();">
+            <i class="bi bi-person-x"></i>
         </button>
     </td>
 
@@ -668,15 +811,67 @@ document.querySelectorAll(".btn-eliminar").forEach(btn => {
 });
 </script>
 <script>
+document.querySelectorAll(".btn-anular").forEach(btn => {
+
+    btn.addEventListener("click", function () {
+
+        const rut = this.dataset.rut;
+        const cuadrilla = this.dataset.cuadrilla;
+        const servicio = this.dataset.servicio;
+        const nombre = this.dataset.nombre || rut;
+        const fila = this.closest("tr");
+
+        if (!confirm("¿Está seguro de anular la planificación por no asistencia de " + nombre + "?\n\nSolo se anularán evaluaciones pendientes.")) {
+            return;
+        }
+
+        fetch("anular_participante_cuadrilla.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                rut: rut,
+                id_cuadrilla: cuadrilla,
+                id_servicio: servicio
+            })
+        })
+        .then(r => r.json())
+        .then(resp => {
+            if (resp.ok) {
+                alert(resp.msg || "Planificación anulada correctamente.");
+                if (resp.cuadrilla_anulada) {
+                    window.location.reload();
+                    return;
+                }
+
+                fila.classList.add("fila-anulada");
+                fila.querySelectorAll(".chk-eva, .sel-agrupacion-prueba, .btn-anular").forEach(el => {
+                    el.disabled = true;
+                });
+
+                const tdCuadrilla = fila.children[7] || null;
+                if (tdCuadrilla && resp.estado_cuadrilla === 'Anulada' && !tdCuadrilla.querySelector('.badge.text-bg-secondary')) {
+                    tdCuadrilla.insertAdjacentHTML('beforeend', '<div><span class="badge text-bg-secondary mt-1">Anulada</span></div>');
+                }
+            } else {
+                alert(resp.msg || "No fue posible anular la planificación.");
+            }
+        })
+        .catch(() => alert("Error de comunicación con el servidor"));
+    });
+
+});
+</script>
+<script>
 document.querySelectorAll(".chk-eva").forEach(chk => {
 
     chk.addEventListener("change", function () {
         const tr = this.closest("tr");
         const selAgrupacion = tr ? tr.querySelector(".sel-agrupacion-prueba") : null;
         const esPrueba = this.dataset.tipo === "PRUEBA";
+        const esLlee = Number(this.dataset.servicio || 0) === 1;
         const idAgrupacion = selAgrupacion ? Number(selAgrupacion.value || 0) : 0;
 
-        if (esPrueba && this.checked && idAgrupacion <= 0) {
+        if (esPrueba && this.checked && !esLlee && idAgrupacion <= 0) {
             alert("Debe seleccionar la prueba a aplicar antes de programarla.");
             this.checked = false;
             if (selAgrupacion) {
@@ -721,8 +916,13 @@ document.querySelectorAll(".sel-agrupacion-prueba").forEach(sel => {
         const tr = this.closest("tr");
         const chkPrueba = tr ? tr.querySelector('.chk-eva[data-tipo="PRUEBA"]') : null;
         const idAgrupacion = Number(this.value || 0);
+        const esLlee = Number(this.dataset.servicio || 0) === 1;
 
         if (!chkPrueba || !chkPrueba.checked) {
+            return;
+        }
+
+        if (esLlee) {
             return;
         }
 

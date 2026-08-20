@@ -15,7 +15,7 @@ require_once '../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
 
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -290,6 +290,19 @@ if ($empresaId <= 0 || $uoId <= 0 || $programaId <= 0) {
     die("❌ Parámetros insuficientes para generar permiso.");
 }
 
+$stmtPrograma = $pdo->prepare('
+    SELECT fecha
+    FROM ceo_habilitacion
+    WHERE id = :id
+    LIMIT 1
+');
+$stmtPrograma->execute([':id' => $programaId]);
+$programa = $stmtPrograma->fetch(PDO::FETCH_ASSOC) ?: null;
+
+if (!$programa) {
+    die("❌ No se encontró la habilitación seleccionada.");
+}
+
 /* ============================================================
    PARTICIPANTES DE LA CUADRILLA
 ============================================================ */
@@ -337,6 +350,15 @@ $resphse      = fetchPairs($pdo,"SELECT id,nombre FROM ceo_responsablehse ORDER 
 $resplinea    = fetchPairs($pdo,"SELECT id,CONCAT(nombre,' ',apellidop,' ',apellidom) AS nombre FROM ceo_evaluador WHERE tipo=2 ORDER BY nombre");
 $charlas      = fetchPairs($pdo,"SELECT id,desc_charlas AS nombre FROM ceo_charlas ORDER BY desc_charlas");
 $reinduccion  = fetchPairs($pdo,"SELECT id,reinduccion AS nombre FROM ceo_reinduccion ORDER BY reinduccion");
+
+$stmtHabDefault = $pdo->prepare('
+    SELECT id
+    FROM ceo_habilitaciontipo
+    WHERE LOWER(TRIM(desc_tipo)) = LOWER(TRIM(:nombre))
+    LIMIT 1
+');
+$stmtHabDefault->execute([':nombre' => 'Habilitación']);
+$habilitacionCeoDefault = (int)($stmtHabDefault->fetchColumn() ?: 0);
 
 /* ============================================================
    AGENDA SEMANAL (IGUAL A nueva_solicitud.php)
@@ -396,7 +418,10 @@ try {
     error_log($e->getMessage());
 }
 
-$fechaDefault = date('Y-m-d');
+$fechaDefault = trim((string)($programa['fecha'] ?? ''));
+if ($fechaDefault === '') {
+    $fechaDefault = date('Y-m-d');
+}
 
 /* ===============================================================
    ENDPOINTS AJAX (GET)
@@ -571,7 +596,7 @@ body{background:#f7f9fc}
 <select name="habilitacion_ceo" class="form-select form-select-sm" required>
 <option value="">— Seleccionar —</option>
 <?php foreach($habCeo as $i=>$t): ?>
-<option value="<?=$i?>"><?= esc($t) ?></option>
+<option value="<?=$i?>" <?= $habilitacionCeoDefault === (int)$i ? 'selected' : '' ?>><?= esc($t) ?></option>
 <?php endforeach; ?>
 </select>
 </div>
@@ -584,6 +609,39 @@ body{background:#f7f9fc}
 <option>Técnica</option>
 <option>Ambos</option>
 </select>
+</div>
+
+<!-- Patio -->
+<div class="col-md-6">
+<label class="form-label">Patio</label>
+<select name="patio" class="form-select form-select-sm" required>
+<option value="">— Seleccionar —</option>
+<?php foreach($patios as $i=>$t): ?>
+<option value="<?=$i?>"><?= esc($t) ?></option>
+<?php endforeach; ?>
+</select>
+</div>
+
+<!-- Responsable HSE -->
+<div class="col-md-6">
+  <label class="form-label">Responsable HSE</label>
+  <select name="resp_hse" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <?php foreach($resphse as $i=>$t): ?>
+      <option value="<?=$i?>"><?= esc($t) ?></option>
+    <?php endforeach; ?>
+  </select>
+</div>
+
+<!-- Responsable Línea -->
+<div class="col-md-6">
+  <label class="form-label">Responsable Línea</label>
+  <select name="resp_linea" class="form-select form-select-sm" required>
+    <option value="">— Seleccionar —</option>
+    <?php foreach($resplinea as $i=>$t): ?>
+      <option value="<?=$i?>"><?= esc($t) ?></option>
+    <?php endforeach; ?>
+  </select>
 </div>
 
 <div class="col-md-6">
@@ -604,44 +662,12 @@ body{background:#f7f9fc}
 <!-- Responsable UO -->
 <div class="col-md-6">
   <label class="form-label">Responsable UO</label>
-  <select name="resp_uo" id="resp_uo" class="form-select form-select-sm">
+  <select name="resp_uo" id="resp_uo" class="form-select form-select-sm" required>
     <option value="">— Seleccionar —</option>
     <?php foreach($responsables as $i=>$t): ?>
       <option value="<?=$i?>"><?= esc($t) ?></option>
     <?php endforeach; ?>
   </select>
-</div>
-
-<!-- Responsable HSE -->
-<div class="col-md-6">
-  <label class="form-label">Responsable HSE</label>
-  <select name="resp_hse" class="form-select form-select-sm">
-    <option value="">— Seleccionar —</option>
-    <?php foreach($resphse as $i=>$t): ?>
-      <option value="<?=$i?>"><?= esc($t) ?></option>
-    <?php endforeach; ?>
-  </select>
-</div>
-
-<!-- Responsable Línea -->
-<div class="col-md-6">
-  <label class="form-label">Responsable Línea</label>
-  <select name="resp_linea" class="form-select form-select-sm">
-    <option value="">— Seleccionar —</option>
-    <?php foreach($resplinea as $i=>$t): ?>
-      <option value="<?=$i?>"><?= esc($t) ?></option>
-    <?php endforeach; ?>
-  </select>
-</div>
-
-<div class="col-md-6">
-<label class="form-label">Patio</label>
-<select name="patio" class="form-select form-select-sm" required>
-<option value="">— Seleccionar —</option>
-<?php foreach($patios as $i=>$t): ?>
-<option value="<?=$i?>"><?= esc($t) ?></option>
-<?php endforeach; ?>
-</select>
 </div>
 
 <!-- ================== Capacitación ================== -->

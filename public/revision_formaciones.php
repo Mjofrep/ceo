@@ -11,7 +11,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 // Si NO existe sesión válida → volver al login
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 require_once '../config/db.php';
@@ -20,7 +20,7 @@ require_once __DIR__ . '/../config/app.php';
 
 // Validación de sesión
 if (empty($_SESSION['auth'])) {
-    header("Location: /ceo/public/index.php");
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -182,7 +182,19 @@ CASE
           AND ep.tipo = 'PRUEBA'
           AND ep.estado = 'PENDIENTE'
     ) THEN 1 ELSE 0
-    END AS eva_prueba
+    END AS eva_prueba,
+
+CASE 
+    WHEN EXISTS (
+        SELECT 1
+        FROM ceo_formacion_programadas ep
+        WHERE ep.rut = p.rut
+          AND ep.id_servicio = cs.id_servicio
+          AND ep.cuadrilla = cs.cuadrilla
+          AND ep.tipo = 'PRUEBA'
+          AND ep.estado = 'EJECUTADA'
+    ) THEN 1 ELSE 0
+    END AS eva_prueba_ejecutada
 
 FROM ceo_formacion_participantes p
 INNER JOIN ceo_formacion cs ON cs.cuadrilla = p.id_cuadrilla
@@ -413,19 +425,24 @@ $cols = ['existe','prueba','eva_prueba'];
 
 foreach ($cols as $c): 
     $isEva = ($c === 'eva_prueba');
-    $disabled = $isEva ? '' : 'disabled';
+    $evaEjecutada = $isEva && (int)($d['eva_prueba_ejecutada'] ?? 0) === 1;
+    $disabled = (!$isEva || $evaEjecutada) ? 'disabled' : '';
+    $checked = $isEva
+        ? (((int)($d[$c] ?? 0) === 1 || $evaEjecutada) ? 'checked' : '')
+        : (((int)($d[$c] ?? 0) === 1) ? 'checked' : '');
 ?>
 <td class="text-center">
     <input 
         type="checkbox"
         <?= $disabled ?>
-        <?= ($d[$c] == 1 ? 'checked' : '') ?>
+        <?= $checked ?>
         <?php if ($isEva): ?>
             class="chk-eva"
             data-tipo="PRUEBA"
             data-rut="<?= esc($d['rut']) ?>"
             data-servicio="<?= (int)$d['id_servicio'] ?>"
             data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
+            <?= $evaEjecutada ? 'title="Evaluación ya ejecutada"' : '' ?>
         <?php endif; ?>
     >
 </td>

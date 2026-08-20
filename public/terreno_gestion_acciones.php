@@ -27,7 +27,20 @@ if ($accion === "crear_agrupacion") {
     $grupo = trim($_POST['grupo']);
     $id_servicio = intval($_POST['id_servicio']);
 
-    $stmt = $db->prepare("
+    $stmtDup = $db->prepare('
+        SELECT id
+        FROM ceo_agrupacion_terreno
+        WHERE TRIM(grupo) = TRIM(?)
+          AND id_servicio = ?
+        LIMIT 1
+    ');
+    $stmtDup->execute([$grupo, $id_servicio]);
+    if ($stmtDup->fetchColumn()) {
+        header("Location: terreno_gestion.php?modo=agrupaciones&dup=1");
+        exit;
+    }
+
+    $stmt = $db->prepare(" 
         INSERT INTO ceo_agrupacion_terreno (grupo, id_servicio)
         VALUES (?, ?)
     ");
@@ -170,6 +183,20 @@ if ($accion === "editar_agrupacion") {
     $id = intval($_POST['id']);
     $grupo = trim($_POST['grupo']);
     $id_servicio = intval($_POST['id_servicio']);
+
+    $stmtDup = $db->prepare('
+        SELECT id
+        FROM ceo_agrupacion_terreno
+        WHERE TRIM(grupo) = TRIM(?)
+          AND id_servicio = ?
+          AND id <> ?
+        LIMIT 1
+    ');
+    $stmtDup->execute([$grupo, $id_servicio, $id]);
+    if ($stmtDup->fetchColumn()) {
+        header("Location: editar_agrupacion.php?id=" . $id . "&dup=1");
+        exit;
+    }
 
     $stmt = $db->prepare("UPDATE ceo_agrupacion_terreno 
                           SET grupo=?, id_servicio=? 

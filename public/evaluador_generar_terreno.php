@@ -5,6 +5,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/terreno_borrador.php';
 
 /* ============================================================
    1. VALIDAR ACCESO + SOLICITUD
@@ -74,6 +75,7 @@ $idServicio  = (int)$sol['servicio'];
 $fechaPrueba = $sol['fecha'];
 $horaInicio  = $sol['horainicio'];
 $horaTermino = $sol['horatermino'];
+$draftData = terrenoBorradorObtener($db, $idServicio, $idEvaluaciones) ?? ['participantes' => [], 'respuestas' => []];
 
 /* ============================================================
    3. OBTENER PARTICIPANTES AUTORIZADOS
@@ -268,7 +270,10 @@ body { background:#f7f9fc; }
 
 <div class="d-flex justify-content-between btn-top">
     <a href="evaluador_home_terreno.php" class="btn btn-secondary">← Volver</a>
-    <button type="button" class="btn btn-success" id="btnGuardar">💾 Guardar Evaluación</button>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-primary" id="btnGuardarTemporal">Guardar temporal</button>
+        <button type="button" class="btn btn-success" id="btnGuardar">💾 Guardar Evaluación</button>
+    </div>
 </div>
 
 <!-- SOLAPAS -->
@@ -292,7 +297,9 @@ body { background:#f7f9fc; }
 
 <?php foreach ($participantes as $i => $p): ?>
 
-<div id="alumno<?= $i ?>" class="tab-pane fade <?= $i==0?'show active':'' ?>">
+<div id="alumno<?= $i ?>" class="tab-pane fade <?= $i==0?'show active':'' ?>"
+     data-participante-nombre="<?= htmlspecialchars(trim($p['nombre']." ".$p['apellidop']." ".$p['apellidom'])) ?>"
+     data-participante-rut="<?= htmlspecialchars((string)$p['rut']) ?>">
 
     <h5 class="mt-3">Datos del Participante</h5>
 
@@ -344,7 +351,10 @@ body { background:#f7f9fc; }
                     <?php foreach ($sec['preguntas'] as $pre): ?>
                         <?php $grp = $p['rut'].'_'.$pre['id_pregunta']; ?>
 
-                        <tr class="<?= ($colorIndex%2==0?'row-green':'row-orange') ?>">
+                        <tr class="<?= ($colorIndex%2==0?'row-green':'row-orange') ?> pregunta-row"
+                            data-rut="<?= htmlspecialchars((string)$p['rut']) ?>"
+                            data-id-pregunta="<?= (int)$pre['id_pregunta'] ?>"
+                            data-id-seccion="<?= (int)$idSec ?>">
 
                             <td>
                                 <?= $pre['pregunta'] ?>
@@ -393,6 +403,7 @@ body { background:#f7f9fc; }
 <?php
 $jsCuadrillas = $cuadrillas; // array de cuadrillas válidas
 $jsIdsEvaluacion = $idEvaluaciones;
+$jsDraftData = $draftData;
 ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -400,6 +411,7 @@ $jsIdsEvaluacion = $idEvaluaciones;
 <script>
 const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
 const keepaliveIntervalMs = 5 * 60 * 1000;
+const draftData = <?= json_encode($jsDraftData, JSON_UNESCAPED_UNICODE) ?>;
 let keepaliveId = null;
 
 function startKeepalive() {
@@ -419,15 +431,225 @@ function stopKeepalive() {
 startKeepalive();
 window.addEventListener('beforeunload', stopKeepalive);
 
+function setExclusiveCheck(group, type, checked) {
+    const checks = document.querySelectorAll(`.chk[data-group="${group}"]`);
+    checks.forEach((check) => {
+        check.checked = checked && check.dataset.type === type;
+    });
+}
+
+function applyDraftData() {
+    if (!draftData || typeof draftData !== 'object') {
+        return;
+    }
+
+    const participantes = draftData.participantes || {};
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        const rut = String(chk.dataset.rut || '').trim();
+        if (!rut || !Object.prototype.hasOwnProperty.call(participantes, rut)) {
+            return;
+        }
+
+        chk.checked = !!participantes[rut].rinde;
+    });
+
+    const respuestas = draftData.respuestas || {};
+    Object.entries(respuestas).forEach(([rut, preguntas]) => {
+        if (!preguntas || typeof preguntas !== 'object') {
+            return;
+        }
+
+        Object.entries(preguntas).forEach(([idPregunta, respuesta]) => {
+            const group = `${rut}_${idPregunta}`;
+            if (respuesta.si) setExclusiveCheck(group, 'si', true);
+            else if (respuesta.no) setExclusiveCheck(group, 'no', true);
+            else if (respuesta.na) setExclusiveCheck(group, 'na', true);
+
+            const textarea = document.querySelector(`textarea[name="resp[${rut}][${idPregunta}][obs]"]`);
+            if (textarea) {
+                textarea.value = String(respuesta.obs || '');
+            }
+        });
+    });
+}
+
+function syncAllParticipantes() {
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        chk.dispatchEvent(new Event('change'));
+    });
+}
+
+function collectDraftPayload() {
+    const participantes = {};
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        const rut = String(chk.dataset.rut || '').trim();
+        if (!rut) return;
+
+        participantes[rut] = {
+            rinde: chk.checked
+        };
+    });
+
+    const respuestas = {};
+    document.querySelectorAll('.pregunta-row').forEach((row) => {
+        const rut = String(row.dataset.rut || '').trim();
+        const idPregunta = String(row.dataset.idPregunta || '').trim();
+        const idSeccion = parseInt(String(row.dataset.idSeccion || '0'), 10) || 0;
+        if (!rut || !idPregunta) return;
+
+        const group = `${rut}_${idPregunta}`;
+        const si = row.querySelector(`.chk[data-group="${group}"][data-type="si"]`);
+        const no = row.querySelector(`.chk[data-group="${group}"][data-type="no"]`);
+        const na = row.querySelector(`.chk[data-group="${group}"][data-type="na"]`);
+        const obs = row.querySelector('textarea');
+
+        if (!respuestas[rut]) respuestas[rut] = {};
+        respuestas[rut][idPregunta] = {
+            id_seccion: idSeccion,
+            si: !!si?.checked,
+            no: !!no?.checked,
+            na: !!na?.checked,
+            obs: String(obs?.value || '')
+        };
+    });
+
+    return {
+        id_evaluacion: <?= json_encode($idEvaluaciones) ?>,
+        nsolicitud: <?= json_encode($jsCuadrillas) ?>,
+        id_servicio: <?= $idServicio ?>,
+        id_empresa: <?= (int)$_SESSION['auth']['id_empresa'] ?>,
+        participantes,
+        respuestas
+    };
+}
+
+function activateTabForPanel(panel) {
+    if (!panel || !panel.id) {
+        return;
+    }
+
+    const tabButton = document.querySelector(`[data-bs-target="#${panel.id}"]`);
+    if (!tabButton) {
+        return;
+    }
+
+    const tab = bootstrap.Tab.getOrCreateInstance(tabButton);
+    tab.show();
+}
+
+function getPreguntaLabel(row) {
+    const cell = row.querySelector('td');
+    if (!cell) {
+        return 'Pregunta sin identificar';
+    }
+
+    const text = Array.from(cell.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent || '')
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return text || 'Pregunta sin identificar';
+}
+
+function clearPreguntaValidationState() {
+    document.querySelectorAll('.pregunta-row').forEach((row) => {
+        row.classList.remove('table-danger');
+        row.querySelectorAll('.chk').forEach((chk) => chk.classList.remove('is-invalid'));
+    });
+}
+
+function validatePreguntasCompletas(rutsRinden) {
+    clearPreguntaValidationState();
+
+    const faltantesPorParticipante = new Map();
+    let primerFaltante = null;
+
+    for (const row of document.querySelectorAll('.pregunta-row')) {
+        const rut = String(row.dataset.rut || '').trim();
+        if (!rutsRinden.includes(rut)) {
+            continue;
+        }
+
+        const checks = row.querySelectorAll('.chk');
+        const hasChecked = Array.from(checks).some((chk) => chk.checked);
+        if (hasChecked) {
+            continue;
+        }
+
+        row.classList.add('table-danger');
+        checks.forEach((chk) => chk.classList.add('is-invalid'));
+
+        const panel = row.closest('.tab-pane');
+        const nombre = String(panel?.dataset.participanteNombre || '').trim() || 'Participante sin identificar';
+        const rutLabel = String(panel?.dataset.participanteRut || rut).trim();
+        const pregunta = getPreguntaLabel(row);
+
+        if (!faltantesPorParticipante.has(rut)) {
+            faltantesPorParticipante.set(rut, {
+                nombre,
+                rut: rutLabel,
+                cantidad: 0
+            });
+        }
+
+        const participante = faltantesPorParticipante.get(rut);
+        participante.cantidad += 1;
+
+        if (!primerFaltante) {
+            primerFaltante = { panel, row, pregunta };
+        }
+    }
+
+    if (faltantesPorParticipante.size > 0) {
+        if (primerFaltante) {
+            activateTabForPanel(primerFaltante.panel);
+            primerFaltante.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const firstCheck = primerFaltante.row.querySelector('.chk');
+            if (firstCheck) {
+                firstCheck.focus();
+            }
+        }
+
+        const resumen = Array.from(faltantesPorParticipante.values())
+            .map((participante) => `- ${participante.nombre} (${participante.rut}): ${participante.cantidad} ítem(s) pendiente(s)`)
+            .join('\n');
+
+        alert(
+            '⚠️ Validación incompleta\n\n' +
+            'Faltan respuestas en los siguientes participantes:\n\n' +
+            resumen +
+            (primerFaltante ? `\n\nPrimer ítem detectado: ${primerFaltante.pregunta}` : '')
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+applyDraftData();
+
 // Exclusividad SI/NO/NA
 document.querySelectorAll('.chk').forEach(chk => {
     chk.addEventListener('change', () => {
         let group = chk.dataset.group;
         let type  = chk.dataset.type;
+        const row = chk.closest('.pregunta-row');
 
         if (chk.checked) {
             document.querySelectorAll(".chk[data-group='"+group+"']")
                 .forEach(c => { if (c.dataset.type !== type) c.checked = false; });
+        }
+
+        if (row) {
+            const groupChecks = row.querySelectorAll(`.chk[data-group="${group}"]`);
+            const hasChecked = Array.from(groupChecks).some((check) => check.checked);
+            if (hasChecked) {
+                row.classList.remove('table-danger');
+                groupChecks.forEach((check) => check.classList.remove('is-invalid'));
+            }
         }
     });
 });
@@ -439,8 +661,7 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
         .map((chk) => String(chk.dataset.rut || '').trim())
         .filter((rut) => rut !== '');
 
-    if (rutsRinden.length === 0) {
-        alert('⚠️ Debes seleccionar al menos un participante para rendir la evaluación.');
+    if (rutsRinden.length > 0 && !validatePreguntasCompletas(rutsRinden)) {
         return;
     }
 
@@ -450,22 +671,19 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     let error = false;
     let primerError = null;
 
-    document.querySelectorAll('.chk[data-type="no"]').forEach(chkNo => {
-        const panel = chkNo.closest('.tab-pane');
+    document.querySelectorAll('.chk[data-type="no"], .chk[data-type="na"]').forEach((chk) => {
+        const row = chk.closest('.pregunta-row');
+        if (!row) return;
+
+        const panel = row.closest('.tab-pane');
         const chkRinde = panel ? panel.querySelector('.chk-rinde') : null;
 
         if (chkRinde && !chkRinde.checked) return;
+        if (!chk.checked) return;
 
-        if (!chkNo.checked) return;
+        const textarea = row.querySelector('textarea');
 
-        const group = chkNo.dataset.group;
-
-        // Buscar textarea de observación del mismo grupo
-        const textarea = document.querySelector(
-            `textarea[name^="resp"][name*="[obs]"][name*="${group.split('_')[1]}"]`
-        );
-
-        if (!textarea || textarea.value.trim() === "") {
+        if (!textarea || textarea.value.trim() === '') {
             error = true;
             textarea?.classList.add('is-invalid');
 
@@ -480,7 +698,7 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     if (error) {
         alert(
             "⚠️ Validación incompleta\n\n" +
-            "Debes ingresar una OBSERVACIÓN en todas las preguntas marcadas como NO."
+            "Debes ingresar una OBSERVACIÓN en todas las preguntas marcadas como NO o NA de participantes que asisten."
         );
 
         if (primerError) {
@@ -543,6 +761,21 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
 
 });
 
+document.getElementById('btnGuardarTemporal').addEventListener('click', () => {
+    fetch('guardar_terreno_borrador.php', {
+        method: 'POST',
+        body: JSON.stringify(collectDraftPayload())
+    })
+    .then(r => r.json())
+    .then(r => {
+        if (r.ok) {
+            alert('✔ Guardado temporal realizado.');
+        } else {
+            alert('❌ Error: ' + r.error);
+        }
+    });
+});
+
 document.querySelectorAll('.chk-rinde').forEach((chk) => {
     const panel = chk.closest('.tab-pane');
     const preguntas = panel ? panel.querySelector('.participante-preguntas') : null;
@@ -561,6 +794,8 @@ document.querySelectorAll('.chk-rinde').forEach((chk) => {
     chk.addEventListener('change', syncParticipante);
     syncParticipante();
 });
+
+syncAllParticipantes();
 
 </script>
 

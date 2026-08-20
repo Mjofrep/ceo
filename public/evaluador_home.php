@@ -47,6 +47,9 @@ if ($rutAlumno !== '') {
         $pdo = db();
         $stmtPruebas = $pdo->prepare("SELECT ep.*, ph.numero_proceso
             FROM ceo_evaluaciones_programadas ep
+            INNER JOIN ceo_habilitacion h
+                    ON h.cuadrilla = ep.cuadrilla
+                   AND h.id_servicio = ep.id_servicio
             LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
             WHERE ep.rut = :rut
               AND ep.estado = 'PENDIENTE'
@@ -57,15 +60,25 @@ if ($rutAlumno !== '') {
         $pendientes = $stmtPruebas->fetchAll(PDO::FETCH_ASSOC);
 
         $stmtServicio = $pdo->prepare('SELECT servicio FROM ceo_servicios_pruebas WHERE id = :id LIMIT 1');
+        $stmtAgrupacion = $pdo->prepare('SELECT titulo FROM ceo_agrupacion WHERE id = :id LIMIT 1');
         $pruebas = [];
         foreach ($pendientes as $p) {
             $idServicio = (int)($p['id_servicio'] ?? 0);
+            $idAgrupacion = (int)($p['id_agrupacion'] ?? 0);
             $stmtServicio->execute([':id' => $idServicio]);
+            $nombreServicio = (string)$stmtServicio->fetchColumn();
+            if ($idAgrupacion > 0) {
+                $stmtAgrupacion->execute([':id' => $idAgrupacion]);
+                $tituloAgrupacion = trim((string)($stmtAgrupacion->fetchColumn() ?: ''));
+                if ($tituloAgrupacion !== '') {
+                    $nombreServicio .= ' - ' . $tituloAgrupacion;
+                }
+            }
             $pruebas[] = [
                 'id_programada' => (int)$p['id'],
                 'id_servicio' => $idServicio,
-                'id_agrupacion' => (int)($p['id_agrupacion'] ?? 0),
-                'servicio' => (string)$stmtServicio->fetchColumn(),
+                'id_agrupacion' => $idAgrupacion,
+                'servicio' => $nombreServicio,
                 'nsolicitud' => $p['nsolicitud'] ?? null,
                 'cuadrilla' => $p['cuadrilla'] ?? null,
                 'numero_proceso' => $p['numero_proceso'] ?? null,

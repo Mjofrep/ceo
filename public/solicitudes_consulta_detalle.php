@@ -132,7 +132,7 @@ function scdFetchRows(PDO $pdo, array $filters): array
         $params[':motivoreinduccion'] = $filters['motivoreinduccion'];
     }
     if ($filters['tipo_visita'] !== '') {
-        $where[] = 'COALESCE(s.tipo_visita, \'\') = :tipo_visita';
+        $where[] = "COALESCE(s.tipo_visita, '') = :tipo_visita";
         $params[':tipo_visita'] = $filters['tipo_visita'];
     }
     if ($filters['asistio'] !== '') {
@@ -141,6 +141,111 @@ function scdFetchRows(PDO $pdo, array $filters): array
     }
 
     $sql = scdBaseSql() . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function scdBuildAttendancePersonKeySql(): string
+{
+    return "
+        CASE
+            WHEN REPLACE(REPLACE(REPLACE(UPPER(COALESCE(ps.rut, '')), '.', ''), '-', ''), ' ', '') <> '' THEN REPLACE(REPLACE(REPLACE(UPPER(COALESCE(ps.rut, '')), '.', ''), '-', ''), ' ', '')
+            ELSE CONCAT(
+                'SOL-',
+                COALESCE(CAST(s.nsolicitud AS CHAR), ''),
+                '|',
+                UPPER(TRIM(COALESCE(ps.nombre, ''))),
+                '|',
+                UPPER(TRIM(COALESCE(ps.apellidop, ''))),
+                '|',
+                UPPER(TRIM(COALESCE(ps.apellidom, '')))
+            )
+        END
+    ";
+}
+
+function scdFetchAttendanceSummary(PDO $pdo, array $filters): array
+{
+    [$scopeWhere, $scopeParams] = scdBuildScope();
+
+    $where = [
+        $scopeWhere,
+        's.fecha BETWEEN :fecha_desde AND :fecha_hasta',
+        "COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') = '1'",
+        "UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) <> 'HABILITACIÓN'",
+    ];
+    $params = $scopeParams;
+    $params[':fecha_desde'] = $filters['fecha_desde'];
+    $params[':fecha_hasta'] = $filters['fecha_hasta'];
+
+    if ($filters['id'] > 0) {
+        $where[] = 's.nsolicitud = :nsolicitud';
+        $params[':nsolicitud'] = $filters['id'];
+    }
+    if ($filters['empresa'] > 0) {
+        $where[] = 's.contratista = :empresa';
+        $params[':empresa'] = $filters['empresa'];
+    }
+    if ($filters['solicitante'] > 0) {
+        $where[] = 's.solicitante = :solicitante';
+        $params[':solicitante'] = $filters['solicitante'];
+    }
+    if ($filters['patio'] > 0) {
+        $where[] = 's.patio = :patio';
+        $params[':patio'] = $filters['patio'];
+    }
+    if ($filters['proceso'] > 0) {
+        $where[] = 's.proceso = :proceso';
+        $params[':proceso'] = $filters['proceso'];
+    }
+    if ($filters['habilitacionceo'] > 0) {
+        $where[] = 's.habilitacionceo = :habilitacionceo';
+        $params[':habilitacionceo'] = $filters['habilitacionceo'];
+    }
+    if ($filters['tipohabilitacion'] !== '') {
+        $where[] = 's.tipohabilitacion = :tipohabilitacion';
+        $params[':tipohabilitacion'] = $filters['tipohabilitacion'];
+    }
+    if ($filters['charla'] > 0) {
+        $where[] = 's.charla = :charla';
+        $params[':charla'] = $filters['charla'];
+    }
+    if ($filters['motivoreinduccion'] > 0) {
+        $where[] = 's.motivoreinduccion = :motivoreinduccion';
+        $params[':motivoreinduccion'] = $filters['motivoreinduccion'];
+    }
+    if ($filters['tipo_visita'] !== '') {
+        $where[] = "COALESCE(s.tipo_visita, '') = :tipo_visita";
+        $params[':tipo_visita'] = $filters['tipo_visita'];
+    }
+
+    $personKeySql = scdBuildAttendancePersonKeySql();
+    $sql = "
+        SELECT
+            COALESCE(NULLIF(TRIM(ht.desc_tipo), ''), 'Sin habilitación CEO') AS habilitacionceo,
+            COALESCE(NULLIF(TRIM(pr.desc_proceso), ''), 'Sin proceso') AS proceso,
+            COALESCE(NULLIF(TRIM(ch.desc_charlas), ''), 'Sin capacitación') AS capacitacion,
+            COALESCE(NULLIF(TRIM(s.tipo_visita), ''), 'Sin tipo de visita') AS tipo_visita,
+            COUNT(DISTINCT {$personKeySql}) AS total
+        FROM ceo_solicitudes s
+        INNER JOIN ceo_participantes_solicitud ps ON ps.id_solicitud = s.nsolicitud
+        LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
+        LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
+        LEFT JOIN ceo_charlas ch ON ch.id = s.charla
+        WHERE " . implode(' AND ', $where) . "
+        GROUP BY
+            COALESCE(NULLIF(TRIM(ht.desc_tipo), ''), 'Sin habilitación CEO'),
+            COALESCE(NULLIF(TRIM(pr.desc_proceso), ''), 'Sin proceso'),
+            COALESCE(NULLIF(TRIM(ch.desc_charlas), ''), 'Sin capacitación'),
+            COALESCE(NULLIF(TRIM(s.tipo_visita), ''), 'Sin tipo de visita')
+        ORDER BY
+            COALESCE(NULLIF(TRIM(ht.desc_tipo), ''), 'Sin habilitación CEO') ASC,
+            COALESCE(NULLIF(TRIM(pr.desc_proceso), ''), 'Sin proceso') ASC,
+            COALESCE(NULLIF(TRIM(ch.desc_charlas), ''), 'Sin capacitación') ASC,
+            COALESCE(NULLIF(TRIM(s.tipo_visita), ''), 'Sin tipo de visita') ASC
+    ";
+
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -171,7 +276,7 @@ function scdFetchFormacionTotal(PDO $pdo, int $idServicio, array $filters): int
         WHERE f.id_servicio = :id_servicio
           AND f.fecha BETWEEN :fecha_desde AND :fecha_hasta
           AND UPPER(TRIM(COALESCE(fp.estado, ''))) <> 'ANULADA'
-          AND UPPER(TRIM(COALESCE(fp.resultado, ''))) IN ('APROBADO', 'REPROBADO')
+          AND UPPER(TRIM(COALESCE(fp.resultado, 'PENDIENTE'))) IN ('APROBADO', 'REPROBADO', 'PENDIENTE')
     ";
 
     return scdFetchScalar($pdo, $sql, [
@@ -196,7 +301,8 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo IS NOT NULL
+                AND s.habilitacionceo = 3
+                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
                 AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
                 AND (
                     UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%SUPERVISOR%'
@@ -216,10 +322,12 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND (
-                    UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%ACOMPA%'
-                    OR UPPER(TRIM(COALESCE(cc.cargo, ''))) LIKE '%CHOFER%'
-                )
+                AND s.habilitacionceo = 3
+                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
+                AND TRIM(COALESCE(cc.cargo, '')) <> ''
+                AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%SUPERVISOR%'
+                AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%OPERADOR%'
             ",
         ],
         [
@@ -234,8 +342,8 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo IS NOT NULL
-                AND UPPER(TRIM(COALESCE(e.nombre, ''))) LIKE '%ENEL X%'
+                AND s.habilitacionceo = 8
+                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'ENEL X'
             ",
         ],
         [
@@ -250,20 +358,18 @@ function scdSummaryDefinitions(): array
         [
             'key' => 'rdo',
             'titulo' => 'RDO',
-            'origen' => 'FORMACION',
-            'origen_label' => 'Formación',
-            'reference_label' => 'Cuadrilla',
-            'context_label' => 'Servicio / UO',
-            'service_id' => 15,
-        ],
-        [
-            'key' => 'formacion_inspectores',
-            'titulo' => 'Formación Inspectores',
-            'origen' => 'FORMACION',
-            'origen_label' => 'Formación',
-            'reference_label' => 'Cuadrilla',
-            'context_label' => 'Servicio / UO',
-            'service_id' => 19,
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.proceso = 24
+                AND s.habilitacionceo = 6
+            ",
         ],
         [
             'key' => 'reunion_gerencial',
@@ -277,12 +383,14 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'REUNIONES'
+                AND s.habilitacionceo = 5
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'VISITA EMPRESAS'
+                AND UPPER(COALESCE(s.observacion, '')) NOT LIKE '%WORKSHOP%'
             ",
         ],
         [
-            'key' => 'visitas_institucionales',
-            'titulo' => 'Visitas Institucionales',
+            'key' => 'visitas_municipios',
+            'titulo' => 'Visitas Municipios',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
@@ -292,21 +400,13 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) LIKE '%VISITA%'
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
-                    'MUNICIPIOS',
-                    'BOMBEROS',
-                    'PDI',
-                    'CARABINEROS',
-                    'ADUANAS',
-                    'ADUANA',
-                    'VISITA EMPRESAS'
-                )
+                AND s.habilitacionceo = 5
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'MUNICIPIOS'
             ",
         ],
         [
             'key' => 'visitas_educacionales',
-            'titulo' => 'Visitas Educacionales',
+            'titulo' => 'Visitas Colegios',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
@@ -316,14 +416,62 @@ function scdSummaryDefinitions(): array
                 AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
                 AND ps.fechaasistio >= :fecha_desde
                 AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) LIKE '%VISITA%'
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
-                    'COLEGIO',
-                    'COLEGIOS',
-                    'INSTITUTOS PROFESIONALES',
-                    'INSTITUTOS PREFESIONALES',
-                    'UNIVERSIDADES'
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'VISITAS DE LICEOS'
+                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            ",
+        ],
+        [
+            'key' => 'workshop',
+            'titulo' => 'Workshop',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.habilitacionceo = 5
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'VISITA EMPRESAS'
+                AND UPPER(COALESCE(s.observacion, '')) LIKE '%WORKSHOP%'
+            ",
+        ],
+        [
+            'key' => 'fundacion_colonias_urbanas_cruzando_fronteras_maipu',
+            'titulo' => 'FUNDACIÓN COLONIAS URBANAS CRUZANDO FRONTERAS DE MAIPÚ',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.habilitacionceo = 5
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'FUNDACIÓN'
+            ",
+        ],
+        [
+            'key' => 'capacitacion_grupo_electrogeno',
+            'titulo' => 'CAPACITACIÓN DE GRUPO ELECTRÓGENO',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => "
+                s.estado IN ('A', 'F')
+                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+                AND ps.fechaasistio >= :fecha_desde
+                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+                AND s.habilitacionceo = 6
+                AND UPPER(TRIM(COALESCE(s.tipohabilitacion, ''))) = 'SEGURIDAD'
+                AND (
+                    UPPER(COALESCE(s.observacion, '')) LIKE '%ELECTRÓGENO%'
+                    OR UPPER(COALESCE(s.observacion, '')) LIKE '%ELECTROGENO%'
                 )
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'OPERACIÓN DE GENERADOR'
             ",
         ],
         [
@@ -364,6 +512,7 @@ function scdSolicitudesSummaryFromSql(): string
         LEFT JOIN ceo_patios pa ON pa.id = s.patio
         LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
         LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
+        LEFT JOIN ceo_charlas ch ON ch.id = s.charla
     ";
 }
 
@@ -377,10 +526,166 @@ function scdBuildSummaryBaseParams(array $filters): array
     ];
 }
 
+function scdHabilitacionesSummaryResultBaseSql(): string
+{
+    return "
+        SELECT
+            REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '') AS rut_norm,
+            DATE(rfs.fecha_calculo) AS fecha_visita,
+            CASE
+                WHEN rfs.id_servicio IN (9, 10, 24) THEN 'SSEE'
+                WHEN rfs.id_servicio IN (7, 22) THEN 'INFRAESTRUCTURA AREAS'
+                WHEN rfs.id_servicio IN (11, 12) THEN 'INFRAESTRUCTURA SUBTERRANEA'
+                ELSE CONCAT('SERVICIO_', rfs.id_servicio)
+            END AS servicio_resumen,
+            COALESCE(sp.servicio, CONCAT('Servicio ', rfs.id_servicio)) AS servicio_nombre,
+            rfs.fecha_calculo,
+            rfs.id_servicio,
+            rfs.id_proceso,
+            rfs.id_proceso_habilitacion,
+            s.nsolicitud,
+            COALESCE(emp.nombre, '') AS empresa,
+            COALESCE(
+                CONCAT_WS(
+                    ' / ',
+                    NULLIF(TRIM(COALESCE(pa.desc_patios, '')), ''),
+                    NULLIF(TRIM(COALESCE(pr.desc_proceso, '')), '')
+                ),
+                ''
+            ) AS contexto,
+            COALESCE(rfs.rut, '') AS rut,
+            TRIM(
+                CONCAT(
+                    COALESCE(NULLIF(TRIM(COALESCE(c.nombre, '')), ''), NULLIF(TRIM(COALESCE(ps.nombre, '')), ''), ''),
+                    ' ',
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(c.apellidos, '')), ''),
+                        NULLIF(TRIM(CONCAT(COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))), ''),
+                        ''
+                    )
+                )
+            ) AS persona,
+            COALESCE(NULLIF(TRIM(COALESCE(ch.cargo, '')), ''), NULLIF(TRIM(COALESCE(cc.cargo, '')), ''), '') AS cargo
+        FROM ceo_resultado_final_servicio rfs
+        LEFT JOIN ceo_servicios_pruebas sp ON sp.id = rfs.id_servicio
+        LEFT JOIN ceo_cargos_habilitacion ch ON ch.id = rfs.cargo
+        LEFT JOIN ceo_contratistas c
+            ON REPLACE(REPLACE(REPLACE(UPPER(c.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '')
+        LEFT JOIN ceo_habilitacion h
+            ON h.cuadrilla = rfs.id_proceso
+           AND h.id_servicio = rfs.id_servicio
+        LEFT JOIN ceo_solicitudes s ON s.nsolicitud = h.nsolicitud
+        LEFT JOIN ceo_empresas emp ON emp.id = COALESCE(h.empresa, s.contratista, c.id_empresa)
+        LEFT JOIN ceo_patios pa ON pa.id = s.patio
+        LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
+        LEFT JOIN ceo_participantes_solicitud ps
+            ON ps.id_solicitud = s.nsolicitud
+           AND REPLACE(REPLACE(REPLACE(UPPER(ps.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '')
+        LEFT JOIN ceo_cargo_contratistas cc
+            ON cc.id = CASE
+                WHEN TRIM(COALESCE(ps.id_cargo, '')) REGEXP '^[0-9]+$'
+                    THEN CAST(ps.id_cargo AS UNSIGNED)
+                ELSE NULL
+            END
+    ";
+}
+
+function scdBuildHabilitacionesSummaryResultWhere(array $filters): array
+{
+    $where = [
+        "rfs.segmento = 'GENERAL'",
+        "rfs.resultado_final IN ('APROBADO', 'REPROBADO')",
+        'DATE(rfs.fecha_calculo) BETWEEN :fecha_desde AND :fecha_hasta',
+        "REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '') <> ''",
+    ];
+
+    $params = [
+        ':fecha_desde' => $filters['fecha_desde'],
+        ':fecha_hasta' => $filters['fecha_hasta'],
+    ];
+
+    return [$where, $params];
+}
+
+function scdFetchHabilitacionesSummaryTotal(PDO $pdo, array $filters): int
+{
+    $sql = '
+        SELECT COUNT(*)
+        FROM (
+            SELECT DISTINCT
+                REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") AS rut_norm,
+                DATE(rfs.fecha_calculo) AS fecha_visita,
+                CASE
+                    WHEN rfs.id_servicio IN (9, 10, 24) THEN "SSEE"
+                    WHEN rfs.id_servicio IN (7, 22) THEN "INFRAESTRUCTURA AREAS"
+                    WHEN rfs.id_servicio IN (11, 12) THEN "INFRAESTRUCTURA SUBTERRANEA"
+                    ELSE CONCAT("SERVICIO_", rfs.id_servicio)
+                END AS servicio_resumen
+            FROM ceo_resultado_final_servicio rfs
+            WHERE rfs.segmento = "GENERAL"
+              AND rfs.resultado_final IN ("APROBADO", "REPROBADO")
+              AND DATE(rfs.fecha_calculo) BETWEEN :fecha_desde AND :fecha_hasta
+              AND REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), ".", ""), "-", ""), " ", "") <> ""
+        ) agrupado
+    ';
+
+    $params = [
+        ':fecha_desde' => $filters['fecha_desde'],
+        ':fecha_hasta' => $filters['fecha_hasta'],
+    ];
+
+    return scdFetchScalar($pdo, $sql, $params);
+}
+
+function scdFetchHabilitacionesSummaryDetail(PDO $pdo, array $filters): array
+{
+    [$where, $params] = scdBuildHabilitacionesSummaryResultWhere($filters);
+    $sql = '
+        SELECT
+            base.fecha_visita AS fecha,
+            CASE
+                WHEN COUNT(DISTINCT base.nsolicitud) > 1 THEN "Multiples solicitudes"
+                ELSE CAST(MAX(base.nsolicitud) AS CHAR)
+            END AS referencia,
+            MAX(base.empresa) AS empresa,
+            CASE
+                WHEN COUNT(DISTINCT COALESCE(base.contexto, "")) > 1 THEN "Multiples solicitudes"
+                ELSE MAX(base.contexto)
+            END AS contexto,
+            MAX(base.rut) AS rut,
+            MAX(base.persona) AS persona,
+            MAX(base.cargo) AS cargo
+        FROM (
+            ' . scdHabilitacionesSummaryResultBaseSql() . '
+            WHERE ' . implode(' AND ', $where) . '
+        ) base
+        GROUP BY base.rut_norm, base.fecha_visita, base.servicio_resumen
+        ORDER BY base.fecha_visita ASC, MAX(base.persona) ASC, MAX(base.rut) ASC
+    ';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 function scdFetchSolicitudesSummaryTotal(PDO $pdo, array $filters, string $condition): int
 {
     [$scopeWhere] = scdBuildScope();
     $sql = "SELECT COUNT(*) " . scdSolicitudesSummaryFromSql() . " WHERE {$scopeWhere} AND {$condition}";
+    return scdFetchScalar($pdo, $sql, scdBuildSummaryBaseParams($filters));
+}
+
+function scdFetchSolicitudesSummaryUniquePersonTotal(PDO $pdo, array $filters, string $condition): int
+{
+    [$scopeWhere] = scdBuildScope();
+    $sql = "
+        SELECT COUNT(DISTINCT REPLACE(REPLACE(REPLACE(UPPER(ps.rut), '.', ''), '-', ''), ' ', ''))
+        " . scdSolicitudesSummaryFromSql() . "
+        WHERE {$scopeWhere}
+          AND {$condition}
+          AND TRIM(COALESCE(ps.rut, '')) <> ''
+    ";
+
     return scdFetchScalar($pdo, $sql, scdBuildSummaryBaseParams($filters));
 }
 
@@ -407,6 +712,49 @@ function scdFetchSolicitudesSummaryDetail(PDO $pdo, array $filters, string $cond
         WHERE {$scopeWhere}
           AND {$condition}
         ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(scdBuildSummaryBaseParams($filters));
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function scdFetchSolicitudesSummaryUniquePersonDetail(PDO $pdo, array $filters, string $condition): array
+{
+    [$scopeWhere] = scdBuildScope();
+    $sql = "
+        SELECT
+            MIN(s.fecha) AS fecha,
+            CASE
+                WHEN COUNT(DISTINCT s.nsolicitud) > 1 THEN 'Multiples solicitudes'
+                ELSE CAST(MIN(s.nsolicitud) AS CHAR)
+            END AS referencia,
+            COALESCE(e.nombre, '') AS empresa,
+            CASE
+                WHEN COUNT(DISTINCT s.nsolicitud) > 1 THEN 'Multiples solicitudes'
+                ELSE COALESCE(
+                    CONCAT_WS(
+                        ' / ',
+                        NULLIF(TRIM(COALESCE(pa.desc_patios, '')), ''),
+                        NULLIF(TRIM(COALESCE(pr.desc_proceso, '')), '')
+                    ),
+                    ''
+                )
+            END AS contexto,
+            COALESCE(ps.rut, '') AS rut,
+            TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))) AS persona,
+            COALESCE(cc.cargo, '') AS cargo
+        " . scdSolicitudesSummaryFromSql() . "
+        WHERE {$scopeWhere}
+          AND {$condition}
+          AND TRIM(COALESCE(ps.rut, '')) <> ''
+        GROUP BY
+            REPLACE(REPLACE(REPLACE(UPPER(ps.rut), '.', ''), '-', ''), ' ', ''),
+            COALESCE(e.nombre, ''),
+            COALESCE(ps.rut, ''),
+            TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))),
+            COALESCE(cc.cargo, '')
+        ORDER BY MIN(s.fecha) ASC, persona ASC
     ";
 
     $stmt = $pdo->prepare($sql);
@@ -449,7 +797,7 @@ function scdFetchFormacionDetalle(PDO $pdo, int $idServicio, array $filters): ar
         WHERE f.id_servicio = :id_servicio
           AND f.fecha BETWEEN :fecha_desde AND :fecha_hasta
           AND UPPER(TRIM(COALESCE(fp.estado, ''))) <> 'ANULADA'
-          AND UPPER(TRIM(COALESCE(fp.resultado, ''))) IN ('APROBADO', 'REPROBADO')
+          AND UPPER(TRIM(COALESCE(fp.resultado, 'PENDIENTE'))) IN ('APROBADO', 'REPROBADO', 'PENDIENTE')
         ORDER BY f.fecha ASC, f.cuadrilla ASC, p.apellidos ASC, p.nombre ASC
     ";
 
@@ -467,23 +815,34 @@ function scdFetchSolicitudesResumen(PDO $pdo, array $filters): array
     $rows = [];
 
     foreach (scdSummaryDefinitions() as $definition) {
+        $key = (string)($definition['key'] ?? '');
         $total = 0;
 
-        if ((string)$definition['origen'] === 'FORMACION') {
-            $total = scdFetchFormacionTotal($pdo, (int)($definition['service_id'] ?? 0), $filters);
-        } else {
-            $total = scdFetchSolicitudesSummaryTotal($pdo, $filters, (string)($definition['condition'] ?? '1=0'));
+        try {
+            if ($key === 'habilitaciones') {
+                $total = scdFetchHabilitacionesSummaryTotal($pdo, $filters);
+            } elseif ((string)$definition['origen'] === 'FORMACION') {
+                $total = scdFetchFormacionTotal($pdo, (int)($definition['service_id'] ?? 0), $filters);
+            } elseif (in_array($key, ['habilitaciones', 'apoyo_habilitaciones'], true)) {
+                $total = scdFetchSolicitudesSummaryUniquePersonTotal($pdo, $filters, (string)($definition['condition'] ?? '1=0'));
+            } else {
+                $total = scdFetchSolicitudesSummaryTotal($pdo, $filters, (string)($definition['condition'] ?? '1=0'));
+            }
+        } catch (Throwable $e) {
+            $total = 0;
         }
 
-        $rows[] = [
-            'key' => (string)$definition['key'],
-            'titulo' => (string)$definition['titulo'],
-            'total' => $total,
-            'origen' => (string)$definition['origen'],
-            'origen_label' => (string)$definition['origen_label'],
-            'reference_label' => (string)$definition['reference_label'],
-            'context_label' => (string)$definition['context_label'],
-        ];
+        if ($total > 0) {
+            $rows[] = [
+                'key' => (string)$definition['key'],
+                'titulo' => (string)$definition['titulo'],
+                'total' => $total,
+                'origen' => (string)$definition['origen'],
+                'origen_label' => (string)$definition['origen_label'],
+                'reference_label' => (string)$definition['reference_label'],
+                'context_label' => (string)$definition['context_label'],
+            ];
+        }
     }
 
     return $rows;
@@ -529,9 +888,13 @@ if ($summaryDetailKey !== '') {
             ], 404);
         }
 
-        $detailRows = (string)$summaryDefinition['origen'] === 'FORMACION'
-            ? scdFetchFormacionDetalle($pdo, (int)($summaryDefinition['service_id'] ?? 0), $filters)
-            : scdFetchSolicitudesSummaryDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'));
+        $detailRows = (string)$summaryDefinition['key'] === 'habilitaciones'
+            ? scdFetchHabilitacionesSummaryDetail($pdo, $filters)
+            : ((string)$summaryDefinition['origen'] === 'FORMACION'
+                ? scdFetchFormacionDetalle($pdo, (int)($summaryDefinition['service_id'] ?? 0), $filters)
+                : ((in_array((string)$summaryDefinition['key'], ['habilitaciones', 'apoyo_habilitaciones'], true))
+                ? scdFetchSolicitudesSummaryUniquePersonDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'))
+                : scdFetchSolicitudesSummaryDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'))));
 
         scdJsonResponse([
             'ok' => true,
@@ -576,6 +939,8 @@ $rows = [];
 $error = '';
 $summaryRows = [];
 $summaryError = '';
+$attendanceSummaryRows = [];
+$attendanceSummaryError = '';
 
 try {
     $rows = scdFetchRows($pdo, $filters);
@@ -589,9 +954,17 @@ try {
     $summaryError = defined('APP_DEBUG') && APP_DEBUG ? $e->getMessage() : 'No fue posible cargar el resumen temático.';
 }
 
+try {
+    $attendanceSummaryRows = scdFetchAttendanceSummary($pdo, $filters);
+} catch (Throwable $e) {
+    $attendanceSummaryError = defined('APP_DEBUG') && APP_DEBUG ? $e->getMessage() : 'No fue posible cargar el resumen por habilitación y proceso.';
+}
+
 $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filters);
 $summaryGrandTotal = array_sum(array_map(static fn(array $row): int => (int)($row['total'] ?? 0), $summaryRows));
 $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+$attendanceSummaryGrandTotal = array_sum(array_map(static fn(array $row): int => (int)($row['total'] ?? 0), $attendanceSummaryRows));
+$attendanceSummaryJson = json_encode($attendanceSummaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 ?>
 <!doctype html>
 <html lang="es">
@@ -614,6 +987,7 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     .summary-toolbar .btn { min-width:42px; }
     .summary-period { color:#d8ebff; }
     .summary-table thead th { background:#f2f7fc; color:#17324d; }
+    .summary-table td, .summary-table th { vertical-align:middle; }
     .summary-table tbody tr:nth-child(odd) { background:#fbfdff; }
     .summary-total { font-variant-numeric:tabular-nums; font-weight:700; color:#0b5a8f; }
     .summary-total-btn { font-variant-numeric:tabular-nums; font-weight:700; color:#0b5a8f; text-decoration:none; }
@@ -772,6 +1146,9 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
           <button type="button" class="btn btn-outline-primary btn-sm summary-trigger" data-bs-toggle="modal" data-bs-target="#resumenTemasModal" title="Resumen por tema" aria-label="Resumen por tema">
             <i class="bi bi-table"></i>
           </button>
+          <button type="button" class="btn btn-outline-primary btn-sm summary-trigger" data-bs-toggle="modal" data-bs-target="#resumenHabilitacionProcesoModal" title="Resumen por habilitación y proceso" aria-label="Resumen por habilitación y proceso">
+            <i class="bi bi-diagram-3"></i>
+          </button>
           <a href="general.php" class="btn btn-outline-secondary btn-sm">Volver</a>
         </div>
       </form>
@@ -784,6 +1161,10 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
 
   <?php if ($summaryError !== ''): ?>
     <div class="alert alert-warning"><?= scdEsc($summaryError) ?></div>
+  <?php endif; ?>
+
+  <?php if ($attendanceSummaryError !== ''): ?>
+    <div class="alert alert-warning"><?= scdEsc($attendanceSummaryError) ?></div>
   <?php endif; ?>
 
   <div class="card rounded-4">
@@ -914,6 +1295,68 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     </div>
   </div>
 </div>
+<div class="modal fade summary-modal" id="resumenHabilitacionProcesoModal" tabindex="-1" aria-labelledby="resumenHabilitacionProcesoModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header px-4 py-3">
+        <div>
+          <h2 class="h5 mb-1" id="resumenHabilitacionProcesoModalLabel">Resumen por Habilitación CEO y Proceso</h2>
+          <div class="small summary-period">Periodo <?= scdEsc($filters['fecha_desde']) ?> al <?= scdEsc($filters['fecha_hasta']) ?></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+          <p class="mb-0 text-muted">Personas únicas que asistieron en el período, agrupadas por Habilitación CEO y Proceso.</p>
+          <div class="d-flex gap-2 summary-toolbar">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="attendanceSummaryCopyBtn" title="Copiar tabla como imagen o descargar PNG" aria-label="Copiar tabla como imagen o descargar PNG">
+              <i class="bi bi-clipboard-image"></i>
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm" id="attendanceSummaryExportBtn" title="Exportar tabla" aria-label="Exportar tabla">
+              <i class="bi bi-download"></i>
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive" id="attendanceSummaryCaptureArea">
+          <table class="table table-sm table-bordered align-middle mb-0 summary-table" id="attendanceSummaryTable">
+            <thead>
+              <tr>
+                <th>Habilitación CEO</th>
+                <th>Proceso</th>
+                <th>Capacitación</th>
+                <th>Tipo de visita</th>
+                <th class="text-end">Total asistentes</th>
+              </tr>
+            </thead>
+            <tbody>
+            <?php if ($attendanceSummaryRows): ?>
+              <?php foreach ($attendanceSummaryRows as $attendanceSummaryRow): ?>
+                <tr>
+                  <td><?= scdEsc($attendanceSummaryRow['habilitacionceo']) ?></td>
+                  <td><?= scdEsc($attendanceSummaryRow['proceso']) ?></td>
+                  <td><?= scdEsc($attendanceSummaryRow['capacitacion']) ?></td>
+                  <td><?= scdEsc($attendanceSummaryRow['tipo_visita']) ?></td>
+                  <td class="text-end summary-total"><?= (int)$attendanceSummaryRow['total'] ?></td>
+                </tr>
+              <?php endforeach; ?>
+            <?php else: ?>
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">No hay asistentes para los filtros seleccionados.</td>
+              </tr>
+            <?php endif; ?>
+            </tbody>
+            <tfoot>
+              <tr>
+                <th colspan="4">TOTAL</th>
+                <th class="text-end summary-total"><?= (int)$attendanceSummaryGrandTotal ?></th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal fade summary-detail-modal" id="summaryDetailModal" tabindex="-1" aria-labelledby="summaryDetailModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-xl">
     <div class="modal-content">
@@ -935,23 +1378,30 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   const summaryRows = <?= $summaryJson ?: '[]' ?>;
+  const attendanceSummaryRows = <?= $attendanceSummaryJson ?: '[]' ?>;
   const summaryCopyBtn = document.getElementById('summaryCopyBtn');
   const summaryExportBtn = document.getElementById('summaryExportBtn');
+  const attendanceSummaryCopyBtn = document.getElementById('attendanceSummaryCopyBtn');
+  const attendanceSummaryExportBtn = document.getElementById('attendanceSummaryExportBtn');
   const summaryToast = document.getElementById('summaryToast');
   const summaryCaptureArea = document.getElementById('summaryCaptureArea');
   const summaryTopicsTable = document.getElementById('summaryTopicsTable');
+  const attendanceSummaryCaptureArea = document.getElementById('attendanceSummaryCaptureArea');
   const summaryModalElement = document.getElementById('resumenTemasModal');
+  const attendanceSummaryModalElement = document.getElementById('resumenHabilitacionProcesoModal');
   const summaryDetailModalElement = document.getElementById('summaryDetailModal');
   const summaryDetailModalLabel = document.getElementById('summaryDetailModalLabel');
   const summaryDetailModalMeta = document.getElementById('summaryDetailModalMeta');
   const summaryDetailModalBody = document.getElementById('summaryDetailModalBody');
   const summaryModalInstance = summaryModalElement ? bootstrap.Modal.getOrCreateInstance(summaryModalElement) : null;
+  const attendanceSummaryModalInstance = attendanceSummaryModalElement ? bootstrap.Modal.getOrCreateInstance(attendanceSummaryModalElement) : null;
   const summaryDetailModalInstance = summaryDetailModalElement ? bootstrap.Modal.getOrCreateInstance(summaryDetailModalElement) : null;
   const summaryPeriod = {
     desde: <?= json_encode($filters['fecha_desde'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
     hasta: <?= json_encode($filters['fecha_hasta'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
   };
   const summaryGrandTotal = <?= (int)$summaryGrandTotal ?>;
+  const attendanceSummaryGrandTotal = <?= (int)$attendanceSummaryGrandTotal ?>;
   let reopenSummaryOnDetailClose = false;
 
   function showSummaryToast(message) {
@@ -968,6 +1418,14 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
       ['Tema', 'Total'],
       ...summaryRows.map((row) => [String(row.titulo ?? ''), String(row.total ?? 0)]),
       ['TOTAL', String(summaryGrandTotal)],
+    ];
+  }
+
+  function buildAttendanceSummaryMatrix() {
+    return [
+      ['Habilitación CEO', 'Proceso', 'Capacitación', 'Tipo de visita', 'Total asistentes'],
+      ...attendanceSummaryRows.map((row) => [String(row.habilitacionceo ?? ''), String(row.proceso ?? ''), String(row.capacitacion ?? ''), String(row.tipo_visita ?? ''), String(row.total ?? 0)]),
+      ['TOTAL', '', '', '', String(attendanceSummaryGrandTotal)],
     ];
   }
 
@@ -1101,12 +1559,12 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     return payload;
   }
 
-  async function copySummaryAsImage() {
-    if (!summaryCaptureArea || typeof html2canvas === 'undefined') {
+  async function copyTableAsImage(captureArea) {
+    if (!captureArea || typeof html2canvas === 'undefined') {
       throw new Error('capture-unavailable');
     }
 
-    const canvas = await html2canvas(summaryCaptureArea, {
+    const canvas = await html2canvas(captureArea, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
@@ -1126,23 +1584,23 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     ]);
   }
 
-  async function renderSummaryCanvas() {
-    if (!summaryCaptureArea || typeof html2canvas === 'undefined') {
+  async function renderSummaryCanvas(captureArea) {
+    if (!captureArea || typeof html2canvas === 'undefined') {
       throw new Error('capture-unavailable');
     }
 
-    return html2canvas(summaryCaptureArea, {
+    return html2canvas(captureArea, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
     });
   }
 
-  async function downloadSummaryPng() {
-    const canvas = await renderSummaryCanvas();
+  async function downloadSummaryPng(captureArea, filename) {
+    const canvas = await renderSummaryCanvas(captureArea);
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
-    link.download = `resumen_temas_${summaryPeriod.desde}_${summaryPeriod.hasta}.png`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1151,14 +1609,48 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
   if (summaryCopyBtn) {
     summaryCopyBtn.addEventListener('click', async () => {
       try {
-        await copySummaryAsImage();
+        await copyTableAsImage(summaryCaptureArea);
         showSummaryToast('Tabla copiada como imagen.');
       } catch (error) {
         try {
-          await downloadSummaryPng();
+          await downloadSummaryPng(summaryCaptureArea, `resumen_temas_${summaryPeriod.desde}_${summaryPeriod.hasta}.png`);
           showSummaryToast('Tu navegador bloqueó el portapapeles. Se descargó un PNG.');
         } catch (downloadError) {
           const text = buildSummaryMatrix().map((row) => row.join('\t')).join('\n');
+          try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              await navigator.clipboard.writeText(text);
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            if (fallbackCopyText(text)) {
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            showSummaryToast('No fue posible copiar la tabla');
+          } catch (fallbackError) {
+            if (fallbackCopyText(text)) {
+              showSummaryToast('No fue posible copiar la imagen. Se copió como texto.');
+              return;
+            }
+            showSummaryToast('No fue posible copiar la tabla');
+          }
+        }
+      }
+    });
+  }
+
+  if (attendanceSummaryCopyBtn) {
+    attendanceSummaryCopyBtn.addEventListener('click', async () => {
+      try {
+        await copyTableAsImage(attendanceSummaryCaptureArea);
+        showSummaryToast('Tabla copiada como imagen.');
+      } catch (error) {
+        try {
+          await downloadSummaryPng(attendanceSummaryCaptureArea, `resumen_habilitacion_proceso_${summaryPeriod.desde}_${summaryPeriod.hasta}.png`);
+          showSummaryToast('Tu navegador bloqueó el portapapeles. Se descargó un PNG.');
+        } catch (downloadError) {
+          const text = buildAttendanceSummaryMatrix().map((row) => row.join('\t')).join('\n');
           try {
             if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
               await navigator.clipboard.writeText(text);
@@ -1200,6 +1692,24 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     });
   }
 
+  if (attendanceSummaryExportBtn) {
+    attendanceSummaryExportBtn.addEventListener('click', () => {
+      const csv = '\uFEFF' + buildAttendanceSummaryMatrix()
+        .map((row) => row.map(escapeCsvValue).join(';'))
+        .join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `resumen_habilitacion_proceso_${summaryPeriod.desde}_${summaryPeriod.hasta}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showSummaryToast('Tabla exportada.');
+    });
+  }
+
   if (summaryTopicsTable) {
     summaryTopicsTable.addEventListener('click', async (event) => {
       const trigger = event.target.closest('.summary-detail-btn');
@@ -1226,6 +1736,11 @@ $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
             summaryDetailModalInstance.show();
           }, { once: true });
           summaryModalInstance.hide();
+        } else if (attendanceSummaryModalElement && attendanceSummaryModalElement.classList.contains('show') && attendanceSummaryModalInstance && summaryDetailModalInstance) {
+          attendanceSummaryModalElement.addEventListener('hidden.bs.modal', () => {
+            summaryDetailModalInstance.show();
+          }, { once: true });
+          attendanceSummaryModalInstance.hide();
         } else {
           summaryDetailModalInstance?.show();
         }

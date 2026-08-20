@@ -61,13 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($accion === 'importar') {
         try {
-            if (!is_array($analisis) || (empty($analisis['rows_validos']) && empty($analisis['historia_rows']))) {
+            if (!is_array($analisis) || (empty($analisis['rows_validos']) && empty($analisis['rows_detalle']) && empty($analisis['historia_rows']))) {
                 throw new RuntimeException('No hay un análisis válido disponible para importar.');
             }
 
             $resultado = importarHistoricoTeorico(
                 $pdo,
                 $analisis['rows_validos'],
+                $analisis['rows_detalle'] ?? [],
                 $analisis['normalizacion']['detalles'] ?? [],
                 (int)$analisis['id_servicio'],
                 $analisis['historia_rows'] ?? []
@@ -77,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $resultadoImportacion = $resultado;
 
             $mensaje = sprintf(
-                'Carga finalizada. Importados: %d. Duplicados omitidos: %d. Contratistas creados: %d. Contratistas creados incompletos: %d. Procesos creados: %d. Procesos reutilizados: %d. Teóricas asociadas: %d. Terrenos asociados: %d. Intentos terreno asociados: %d. Conflictos de asociación: %d.',
+                'Carga finalizada. Importados: %d. Duplicados omitidos: %d. Contratistas creados: %d. Contratistas creados incompletos: %d. Procesos creados: %d. Procesos reutilizados: %d. Teóricas asociadas: %d. Terrenos asociados: %d. Intentos terreno asociados: %d. Filas detalle detectadas: %d. Detalles teóricos importados: %d. Detalles teóricos duplicados: %d. Conflictos de asociación: %d.',
                 $resultado['importados'],
                 $resultado['duplicados'],
                 $resultado['contratistas_creados'],
@@ -87,7 +88,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $resultado['teoricas_asociadas'],
                 $resultado['terrenos_asociados'],
                 $resultado['terreno_intentos_asociados'],
+                $resultado['detalle_rows_detectadas'],
+                $resultado['detalles_importados'],
+                $resultado['detalles_duplicados'],
                 $resultado['conflictos_asociacion']
+            );
+            $mensajeTipo = 'success';
+        } catch (Throwable $e) {
+            $mensaje = $e->getMessage();
+            $mensajeTipo = 'danger';
+        }
+    } elseif ($accion === 'recargar_detalle') {
+        try {
+            if (!is_array($analisis) || empty($analisis['rows_detalle'])) {
+                throw new RuntimeException('No hay un análisis válido disponible para recargar detalle.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $resultado = recargarDetalleHistoricoTeorico(
+                    $pdo,
+                    $analisis['rows_detalle'] ?? [],
+                    (int)$analisis['id_servicio']
+                );
+                $pdo->commit();
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
+
+            unset($_SESSION[HISTORICO_SESSION_KEY]);
+            $analisis = null;
+            $resultadoImportacion = $resultado;
+
+            $mensaje = sprintf(
+                'Recarga de detalle finalizada. Rendiciones analizadas: %d. Matches válidos: %d. Respuestas insertadas: %d. Respuestas duplicadas: %d. Sin cabecera: %d. Sin proceso: %d. Inconsistencias: %d.',
+                (int)($resultado['rendiciones_analizadas'] ?? 0),
+                (int)($resultado['rendiciones_match_ok'] ?? 0),
+                (int)($resultado['detalles_importados'] ?? 0),
+                (int)($resultado['detalles_duplicados'] ?? 0),
+                (int)($resultado['rendiciones_sin_cabecera'] ?? 0),
+                (int)($resultado['rendiciones_sin_proceso'] ?? 0),
+                (int)($resultado['rendiciones_inconsistentes'] ?? 0)
             );
             $mensajeTipo = 'success';
         } catch (Throwable $e) {
@@ -116,8 +158,8 @@ function analizarHistoricoTeorico(PDO $pdo, string $tmpPath, int $idServicio): a
     }
 
     $areasInfo = analizarSheetAreas($sheetAreas);
-    $preguntasInfo = analizarSheetPreguntas($sheetPreguntas, $idServicio);
-    $detalleInfo = analizarSheetDetalle($pdo, $sheetDetalle, $idServicio);
+    $preguntasInfo = analizarSheetPreguntas($pdo, $sheetPreguntas, $idServicio);
+    $detalleInfo = analizarSheetDetalle($pdo, $sheetDetalle, $idServicio, $preguntasInfo['mapa_por_numero'] ?? []);
     $historiaInfo = analizarSheetHistoriaEvaluaciones($pdo, $sheetHistoria, $idServicio, $detalleInfo['rows_validos']);
 
     return [
@@ -138,12 +180,14 @@ function analizarHistoricoTeorico(PDO $pdo, string $tmpPath, int $idServicio): a
         'historia_procesos' => $historiaInfo['procesos'],
         'historia_conflictos' => $historiaInfo['conflictos'],
         'normalizacion' => analizarNormalizacionContratistas($pdo, $detalleInfo['rows_normalizacion']),
+        'recarga_detalle' => analizarRecargaDetalleHistoricoTeorico($pdo, $detalleInfo['rows_detalle'], $idServicio),
         'rows_validos' => $detalleInfo['rows_validos'],
+        'rows_detalle' => $detalleInfo['rows_detalle'],
         'historia_rows' => $historiaInfo['rows_validos'],
     ];
 }
 
-function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $normalizacionDetalles, int $idServicio, array $historiaRows = []): array
+function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $rowsDetalle, array $normalizacionDetalles, int $idServicio, array $historiaRows = []): array
 {
     $stmtExiste = $pdo->prepare(
         'SELECT 1 FROM ceo_resultado_prueba_intento WHERE rut = :rut AND id_servicio = :servicio AND fecha_rendicion = :fecha AND hora_rendicion = :hora LIMIT 1'
@@ -165,11 +209,20 @@ function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $normaliza
         VALUES (:rut, :nombre, :apellidos, NULL, NULL, :id_cargo, CURDATE(), :id_empresa, :uo)
     ");
 
-    $stmtInsert = $pdo->prepare("
+    $stmtInsert = $pdo->prepare(" 
         INSERT INTO ceo_resultado_prueba_intento
             (rut, id_servicio, id_evaluador, fecha_rendicion, hora_rendicion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal)
         VALUES
             (:rut, :servicio, :evaluador, :fecha, :hora, :puntaje, :correctas, :incorrectas, :ncontestadas, :noaplica, :nota)
+    ");
+    $stmtExisteDetalle = $pdo->prepare(
+        'SELECT 1 FROM ceo_resultado_pruebat WHERE rut = :rut AND id_pregunta = :id_pregunta AND fecha_rendicion = :fecha AND hora_rendicion = :hora AND proceso = :proceso AND intento = :intento LIMIT 1'
+    );
+    $stmtInsertDetalle = $pdo->prepare(" 
+        INSERT INTO ceo_resultado_pruebat
+            (rut, id_pregunta, respuesta, fecha_rendicion, hora_rendicion, proceso, validacion, intento)
+        VALUES
+            (:rut, :id_pregunta, :respuesta, :fecha, :hora, :proceso, :validacion, :intento)
     ");
 
     $evaluadorId = (int)($_SESSION['auth']['id'] ?? 0);
@@ -184,6 +237,8 @@ function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $normaliza
     $terrenosAsociados = 0;
     $terrenoIntentosAsociados = 0;
     $conflictosAsociacion = 0;
+    $detallesImportados = 0;
+    $detallesDuplicados = 0;
     $detalles = [];
     $normalizacionMap = [];
     foreach ($normalizacionDetalles as $detalle) {
@@ -473,7 +528,12 @@ function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $normaliza
                         'motivo' => 'Proceso histórico N ' . $proceso['numero_historico'] . ' -> CEONext. Teóricas: ' . count($idsTeoria) . ', Terrenos: ' . count($idsTerreno) . ', Intentos terreno: ' . count($idsTerrenoIntento) . '. ' . implode(' ', $motivos) . ' TRAZA_TEORIA=' . json_encode($trazasTeoria, JSON_UNESCAPED_UNICODE),
                     ];
                 }
+
         }
+
+        $resultadoRecarga = recargarDetalleHistoricoTeorico($pdo, $rowsDetalle, $idServicio);
+        $detallesImportados = (int)($resultadoRecarga['detalles_importados'] ?? 0);
+        $detallesDuplicados = (int)($resultadoRecarga['detalles_duplicados'] ?? 0);
 
         $pdo->commit();
     } catch (Throwable $e) {
@@ -492,9 +552,275 @@ function importarHistoricoTeorico(PDO $pdo, array $rowsValidos, array $normaliza
         'teoricas_asociadas' => $teoricasAsociadas,
         'terrenos_asociados' => $terrenosAsociados,
         'terreno_intentos_asociados' => $terrenoIntentosAsociados,
+        'detalle_rows_detectadas' => count($rowsDetalle),
         'conflictos_asociacion' => $conflictosAsociacion,
+        'detalles_importados' => $detallesImportados,
+        'detalles_duplicados' => $detallesDuplicados,
         'detalles' => $detalles,
     ];
+}
+
+function analizarRecargaDetalleHistoricoTeorico(PDO $pdo, array $rowsDetalle, int $idServicio): array
+{
+    $cabeceras = cargarCabecerasTeoricasHistoricasPorClave($pdo, $idServicio);
+    $detallesExistentes = cargarDetalleTeoricoExistenteKeys($pdo, $idServicio);
+    $filas = [];
+    $resumen = [
+        'rendiciones_analizadas' => count($rowsDetalle),
+        'rendiciones_match_ok' => 0,
+        'rendiciones_sin_cabecera' => 0,
+        'rendiciones_sin_proceso' => 0,
+        'rendiciones_inconsistentes' => 0,
+        'rendiciones_sin_preguntas' => 0,
+        'respuestas_insertables' => 0,
+        'respuestas_duplicadas' => 0,
+    ];
+
+    foreach ($rowsDetalle as $rowDetalle) {
+        $fila = evaluarRecargaDetalleHistoricoFila($rowDetalle, $cabeceras, $detallesExistentes);
+        $filas[] = $fila;
+
+        $estado = (string)($fila['estado'] ?? '');
+        if ($estado === 'MATCH_OK') {
+            $resumen['rendiciones_match_ok']++;
+        } elseif ($estado === 'SIN_CABECERA') {
+            $resumen['rendiciones_sin_cabecera']++;
+        } elseif ($estado === 'SIN_PROCESO') {
+            $resumen['rendiciones_sin_proceso']++;
+        } elseif ($estado === 'INCONSISTENTE') {
+            $resumen['rendiciones_inconsistentes']++;
+        } elseif ($estado === 'SIN_PREGUNTAS') {
+            $resumen['rendiciones_sin_preguntas']++;
+        }
+
+        $resumen['respuestas_insertables'] += (int)($fila['respuestas_insertables'] ?? 0);
+        $resumen['respuestas_duplicadas'] += (int)($fila['respuestas_duplicadas'] ?? 0);
+    }
+
+    return $resumen + ['filas' => $filas];
+}
+
+function recargarDetalleHistoricoTeorico(PDO $pdo, array $rowsDetalle, int $idServicio): array
+{
+    $preview = analizarRecargaDetalleHistoricoTeorico($pdo, $rowsDetalle, $idServicio);
+    $stmtExisteDetalle = $pdo->prepare(
+        'SELECT 1 FROM ceo_resultado_pruebat WHERE rut = :rut AND id_pregunta = :id_pregunta AND fecha_rendicion = :fecha AND hora_rendicion = :hora AND proceso = :proceso AND intento = :intento LIMIT 1'
+    );
+    $stmtInsertDetalle = $pdo->prepare(" 
+        INSERT INTO ceo_resultado_pruebat
+            (rut, id_pregunta, respuesta, fecha_rendicion, hora_rendicion, proceso, validacion, intento)
+        VALUES
+            (:rut, :id_pregunta, :respuesta, :fecha, :hora, :proceso, :validacion, :intento)
+    ");
+
+    $detallesImportados = 0;
+    $detallesDuplicados = 0;
+    $detalles = [];
+
+    foreach (($preview['filas'] ?? []) as $fila) {
+        $estado = (string)($fila['estado'] ?? '');
+        if ($estado !== 'MATCH_OK') {
+            $detalles[] = [
+                'rut' => (string)($fila['rut'] ?? ''),
+                'fecha_hora' => (string)($fila['fecha_hora'] ?? ''),
+                'historial_estado' => $estado,
+                'contratista_estado' => 'N/A',
+                'motivo' => (string)($fila['motivo'] ?? ''),
+            ];
+            continue;
+        }
+
+        foreach (($fila['detalle_preguntas'] ?? []) as $detallePregunta) {
+            $idPregunta = (int)($detallePregunta['id_pregunta'] ?? 0);
+            if ($idPregunta <= 0) {
+                continue;
+            }
+
+            $stmtExisteDetalle->execute([
+                ':rut' => (string)$fila['rut'],
+                ':id_pregunta' => $idPregunta,
+                ':fecha' => (string)$fila['fecha_rendicion'],
+                ':hora' => (string)$fila['hora_rendicion'],
+                ':proceso' => (int)$fila['id_proceso_habilitacion'],
+                ':intento' => 1,
+            ]);
+
+            if ($stmtExisteDetalle->fetchColumn()) {
+                $detallesDuplicados++;
+                continue;
+            }
+
+            $stmtInsertDetalle->execute([
+                ':rut' => (string)$fila['rut'],
+                ':id_pregunta' => $idPregunta,
+                ':respuesta' => null,
+                ':fecha' => (string)$fila['fecha_rendicion'],
+                ':hora' => (string)$fila['hora_rendicion'],
+                ':proceso' => (int)$fila['id_proceso_habilitacion'],
+                ':validacion' => (int)($detallePregunta['validacion'] ?? 0),
+                ':intento' => 1,
+            ]);
+            $detallesImportados++;
+        }
+
+        $detalles[] = [
+            'rut' => (string)($fila['rut'] ?? ''),
+            'fecha_hora' => (string)($fila['fecha_hora'] ?? ''),
+            'historial_estado' => 'DETALLE_RECARGADO',
+            'contratista_estado' => 'N/A',
+            'motivo' => 'Proceso ' . (int)($fila['id_proceso_habilitacion'] ?? 0) . '. Insertables: ' . (int)($fila['respuestas_insertables'] ?? 0) . '. Ya existentes: ' . (int)($fila['respuestas_duplicadas'] ?? 0) . '.',
+        ];
+    }
+
+    return [
+        'rendiciones_analizadas' => (int)($preview['rendiciones_analizadas'] ?? 0),
+        'rendiciones_match_ok' => (int)($preview['rendiciones_match_ok'] ?? 0),
+        'rendiciones_sin_cabecera' => (int)($preview['rendiciones_sin_cabecera'] ?? 0),
+        'rendiciones_sin_proceso' => (int)($preview['rendiciones_sin_proceso'] ?? 0),
+        'rendiciones_inconsistentes' => (int)($preview['rendiciones_inconsistentes'] ?? 0),
+        'detalles_importados' => $detallesImportados,
+        'detalles_duplicados' => $detallesDuplicados,
+        'detalles' => $detalles,
+    ];
+}
+
+function evaluarRecargaDetalleHistoricoFila(array $rowDetalle, array $cabeceras, array $detallesExistentes): array
+{
+    $rut = (string)($rowDetalle['rut'] ?? '');
+    $fecha = (string)($rowDetalle['fecha_rendicion'] ?? '');
+    $hora = (string)($rowDetalle['hora_rendicion'] ?? '');
+    $clave = buildTeoricaHistoricaClave($rut, $fecha, $hora);
+    $fila = [
+        'rut' => $rut,
+        'fecha_rendicion' => $fecha,
+        'hora_rendicion' => $hora,
+        'fecha_hora' => trim($fecha . ' ' . $hora),
+        'detalle_preguntas' => $rowDetalle['detalle_preguntas'] ?? [],
+        'estado' => 'SIN_CABECERA',
+        'motivo' => 'No existe cabecera previa en ceo_resultado_prueba_intento para el mismo RUT/fecha/hora.',
+        'id_proceso_habilitacion' => 0,
+        'respuestas_insertables' => 0,
+        'respuestas_duplicadas' => 0,
+    ];
+
+    $cabecera = $cabeceras[$clave] ?? null;
+    if (!is_array($cabecera)) {
+        return $fila;
+    }
+
+    $fila['id_proceso_habilitacion'] = (int)($cabecera['id_proceso_habilitacion'] ?? 0);
+    if ($fila['id_proceso_habilitacion'] <= 0) {
+        $fila['estado'] = 'SIN_PROCESO';
+        $fila['motivo'] = 'La cabecera existe, pero no tiene id_proceso_habilitacion asociado.';
+        return $fila;
+    }
+
+    if (!coincidenTotalesHistoricoTeorico($rowDetalle, $cabecera)) {
+        $fila['estado'] = 'INCONSISTENTE';
+        $fila['motivo'] = 'Los totales del Excel no coinciden con ceo_resultado_prueba_intento para la cabecera encontrada.';
+        return $fila;
+    }
+
+    if (empty($fila['detalle_preguntas'])) {
+        $fila['estado'] = 'SIN_PREGUNTAS';
+        $fila['motivo'] = 'La fila no contiene respuestas por pregunta utilizables.';
+        return $fila;
+    }
+
+    foreach ($fila['detalle_preguntas'] as $detallePregunta) {
+        $idPregunta = (int)($detallePregunta['id_pregunta'] ?? 0);
+        if ($idPregunta <= 0) {
+            continue;
+        }
+
+        $detalleKey = buildDetalleTeoricoKey($rut, $idPregunta, $fecha, $hora, $fila['id_proceso_habilitacion'], 1);
+        if (isset($detallesExistentes[$detalleKey])) {
+            $fila['respuestas_duplicadas']++;
+        } else {
+            $fila['respuestas_insertables']++;
+        }
+    }
+
+    $fila['estado'] = 'MATCH_OK';
+    $fila['motivo'] = 'Cabecera encontrada con proceso ' . $fila['id_proceso_habilitacion'] . '. Respuestas nuevas: ' . $fila['respuestas_insertables'] . '. Ya existentes: ' . $fila['respuestas_duplicadas'] . '.';
+    return $fila;
+}
+
+function cargarCabecerasTeoricasHistoricasPorClave(PDO $pdo, int $idServicio): array
+{
+    $stmt = $pdo->prepare('SELECT rut, fecha_rendicion, hora_rendicion, id_proceso_habilitacion, puntaje_total, correctas, incorrectas, ncontestadas, noaplica, notafinal FROM ceo_resultado_prueba_intento WHERE id_servicio = :id_servicio');
+    $stmt->execute([':id_servicio' => $idServicio]);
+
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[buildTeoricaHistoricaClave((string)$row['rut'], (string)$row['fecha_rendicion'], (string)$row['hora_rendicion'])] = $row;
+    }
+
+    return $map;
+}
+
+function cargarDetalleTeoricoExistenteKeys(PDO $pdo, int $idServicio): array
+{
+    $stmt = $pdo->prepare(" 
+        SELECT rpt.rut, rpt.id_pregunta, rpt.fecha_rendicion, rpt.hora_rendicion, rpt.proceso, rpt.intento
+        FROM ceo_resultado_pruebat rpt
+        INNER JOIN ceo_preguntas_servicios ps
+            ON ps.id = rpt.id_pregunta
+           AND ps.id_servicio = :id_servicio
+    ");
+    $stmt->execute([':id_servicio' => $idServicio]);
+
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[buildDetalleTeoricoKey(
+            (string)$row['rut'],
+            (int)($row['id_pregunta'] ?? 0),
+            (string)$row['fecha_rendicion'],
+            (string)$row['hora_rendicion'],
+            (int)($row['proceso'] ?? 0),
+            (int)($row['intento'] ?? 0)
+        )] = true;
+    }
+
+    return $map;
+}
+
+function buildTeoricaHistoricaClave(string $rut, string $fecha, string $hora): string
+{
+    return normalizarRutHistorico($rut) . '|' . trim($fecha) . '|' . trim($hora);
+}
+
+function buildDetalleTeoricoKey(string $rut, int $idPregunta, string $fecha, string $hora, int $proceso, int $intento): string
+{
+    return normalizarRutHistorico($rut) . '|' . $idPregunta . '|' . trim($fecha) . '|' . trim($hora) . '|' . $proceso . '|' . $intento;
+}
+
+function coincidenTotalesHistoricoTeorico(array $excelRow, array $cabecera): bool
+{
+    return compararNumeroHistorico($excelRow['puntaje_total'] ?? null, $cabecera['puntaje_total'] ?? null)
+        && compararEnteroHistorico($excelRow['correctas'] ?? null, $cabecera['correctas'] ?? null)
+        && compararEnteroHistorico($excelRow['incorrectas'] ?? null, $cabecera['incorrectas'] ?? null)
+        && compararEnteroHistorico($excelRow['ncontestadas'] ?? null, $cabecera['ncontestadas'] ?? null)
+        && compararEnteroHistorico($excelRow['noaplica'] ?? null, $cabecera['noaplica'] ?? null)
+        && compararNumeroHistorico($excelRow['notafinal'] ?? null, $cabecera['notafinal'] ?? null);
+}
+
+function compararNumeroHistorico($left, $right): bool
+{
+    if ($left === null || $right === null) {
+        return $left === $right;
+    }
+
+    return abs((float)$left - (float)$right) < 0.01;
+}
+
+function compararEnteroHistorico($left, $right): bool
+{
+    if ($left === null || $right === null) {
+        return $left === $right;
+    }
+
+    return (int)$left === (int)$right;
 }
 
 function cargarTeoricasPorRutYFecha(PDOStatement $stmt, string $rut, int $idServicio, string $fecha): array
@@ -1019,7 +1345,7 @@ function analizarSheetAreas($sheet): array
     ];
 }
 
-function analizarSheetPreguntas($sheet, int $idServicio): array
+function analizarSheetPreguntas(PDO $pdo, $sheet, int $idServicio): array
 {
     $rows = $sheet->toArray(null, true, true, false);
     if (empty($rows)) {
@@ -1038,6 +1364,8 @@ function analizarSheetPreguntas($sheet, int $idServicio): array
     $nivelValido = 0;
     $preguntasHistoricas = [];
     $errores = [];
+    $mapaPorNumero = [];
+    $preguntasOficialesPorNumero = cargarPreguntasOficialesHistoricoPorNumero($pdo, $idServicio);
 
     foreach (array_slice($rows, 1) as $linea => $row) {
         $nivel = trim((string)cellByHeader($row, $headerMap, 'NIVEL'));
@@ -1058,17 +1386,47 @@ function analizarSheetPreguntas($sheet, int $idServicio): array
         if ($numeroHistorico !== '') {
             $preguntasHistoricas[] = $numeroHistorico;
         }
+
+        if ($pregunta !== '' && $numeroHistorico !== '') {
+            $numeroPregunta = parseNullableInt($numeroHistorico);
+            $tipo = parseNullableInt((string)cellByHeader($row, $headerMap, 'TIPO'));
+            $match = ($numeroPregunta !== null && $numeroPregunta > 0)
+                ? ($preguntasOficialesPorNumero[$numeroPregunta] ?? null)
+                : null;
+
+            if ($numeroPregunta === null || $numeroPregunta <= 0) {
+                $errores[] = 'Fila ' . ($linea + 2) . ': N de pregunta inválido.';
+            } elseif (!$match) {
+                $errores[] = 'Fila ' . ($linea + 2) . ': No se encontró pregunta oficial para N ' . $numeroPregunta . '.';
+            } elseif ($tipo !== null && (int)($match['areacomp'] ?? 0) > 0 && (int)$match['areacomp'] !== $tipo) {
+                $errores[] = 'Fila ' . ($linea + 2) . ': Área/TIPO no coincide para N ' . $numeroPregunta . '.';
+            } else {
+                $mapaPorNumero[$numeroPregunta] = [
+                    'id_pregunta' => (int)$match['id'],
+                    'pregunta' => (string)$match['pregunta'],
+                    'areacomp' => (int)($match['areacomp'] ?? 0),
+                ];
+
+                $preguntaNormExcel = normalizarTextoHistoricoPregunta($pregunta);
+                $preguntaNormOficial = normalizarTextoHistoricoPregunta((string)($match['pregunta'] ?? ''));
+                if ($preguntaNormExcel !== '' && $preguntaNormOficial !== '' && $preguntaNormExcel !== $preguntaNormOficial) {
+                    $errores[] = 'Fila ' . ($linea + 2) . ': Texto histórico distinto al oficial para N ' . $numeroPregunta . ' (se usó el mapeo por N).';
+                }
+            }
+        }
     }
 
     return [
         'registros' => $total,
         'nivel_valido' => $nivelValido,
         'preguntas_unicas' => count(array_unique($preguntasHistoricas)),
+        'preguntas_mapeadas' => count($mapaPorNumero),
+        'mapa_por_numero' => $mapaPorNumero,
         'errores' => $errores,
     ];
 }
 
-function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio): array
+function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio, array $mapaPreguntas = []): array
 {
     $rows = $sheet->toArray(null, true, true, false);
     if (empty($rows)) {
@@ -1100,6 +1458,7 @@ function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio): array
 
     $errores = [];
     $rowsValidos = [];
+    $rowsDetalle = [];
     $rowsNormalizacion = [];
     $duplicadas = 0;
     $totalFilas = 0;
@@ -1183,6 +1542,21 @@ function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio): array
             ':hora' => $hora,
         ]);
 
+        $rowBase = [
+            'rut' => $rut,
+            'fecha_rendicion' => $fecha,
+            'hora_rendicion' => $hora,
+            'puntaje_total' => $puntaje,
+            'correctas' => $correctas,
+            'incorrectas' => $incorrectas,
+            'ncontestadas' => $ncontestadas,
+            'noaplica' => $noaplica,
+            'notafinal' => $notafinal,
+            'detalle_preguntas' => construirDetallePreguntasHistorico($row, $headerMap, $mapaPreguntas),
+        ];
+
+        $rowsDetalle[] = $rowBase;
+
         if ($stmtExiste->fetchColumn()) {
             $duplicadas++;
             $detallesFilas[] = [
@@ -1195,17 +1569,7 @@ function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio): array
             continue;
         }
 
-        $rowsValidos[] = [
-            'rut' => $rut,
-            'fecha_rendicion' => $fecha,
-            'hora_rendicion' => $hora,
-            'puntaje_total' => $puntaje,
-            'correctas' => $correctas,
-            'incorrectas' => $incorrectas,
-            'ncontestadas' => $ncontestadas,
-            'noaplica' => $noaplica,
-            'notafinal' => $notafinal,
-        ];
+        $rowsValidos[] = $rowBase;
         $detallesFilas[] = [
             'fila' => $linea + 2,
             'rut' => $rut,
@@ -1220,9 +1584,64 @@ function analizarSheetDetalle(PDO $pdo, $sheet, int $idServicio): array
         'duplicadas' => $duplicadas,
         'errores' => $errores,
         'rows_validos' => $rowsValidos,
+        'rows_detalle' => $rowsDetalle,
         'rows_normalizacion' => $rowsNormalizacion,
         'detalles_filas' => $detallesFilas,
     ];
+}
+
+function cargarPreguntasOficialesHistoricoPorNumero(PDO $pdo, int $idServicio): array
+{
+    $stmt = $pdo->prepare('SELECT id, pregunta, areacomp FROM ceo_preguntas_servicios WHERE id_servicio = :id_servicio ORDER BY id ASC');
+    $stmt->execute([':id_servicio' => $idServicio]);
+    $map = [];
+    $numero = 1;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[$numero] = $row;
+        $numero++;
+    }
+    return $map;
+}
+
+function normalizarTextoHistoricoPregunta(string $texto): string
+{
+    $texto = trim($texto);
+    if ($texto === '') {
+        return '';
+    }
+    $texto = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $texto);
+    $texto = strtr($texto, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'Ñ' => 'N', 'ñ' => 'n']);
+    $texto = preg_replace('/\s+/', ' ', $texto) ?? $texto;
+    return mb_strtolower(trim($texto), 'UTF-8');
+}
+
+function construirDetallePreguntasHistorico(array $row, array $headerMap, array $mapaPreguntas): array
+{
+    $detalle = [];
+    foreach ($mapaPreguntas as $numero => $metaPregunta) {
+        $columna = (string)$numero;
+        if (!array_key_exists($columna, $headerMap)) {
+            continue;
+        }
+
+        $valor = trim((string)cellByHeader($row, $headerMap, $columna));
+        if ($valor === '') {
+            continue;
+        }
+
+        $validacion = parseNullableInt($valor);
+        if ($validacion === null || !in_array($validacion, [-1, 0, 1], true)) {
+            continue;
+        }
+
+        $detalle[] = [
+            'numero_pregunta' => (int)$numero,
+            'id_pregunta' => (int)($metaPregunta['id_pregunta'] ?? 0),
+            'validacion' => $validacion,
+        ];
+    }
+
+    return $detalle;
 }
 
 function obtenerContratistaPorRut(PDO $pdo, string $rut): ?array
@@ -1572,7 +1991,11 @@ function parseNullableFloat($value): ?float
         </div>
         <form method="post" class="m-0">
           <input type="hidden" name="accion" value="importar">
-          <button class="btn btn-success" type="submit" <?= (empty($analisis['rows_validos']) && empty($analisis['historia']['procesos_creables'])) ? 'disabled' : '' ?>><i class="bi bi-database-add me-1"></i>Confirmar carga</button>
+          <button class="btn btn-success" type="submit" <?= (empty($analisis['rows_validos']) && empty($analisis['rows_detalle']) && empty($analisis['historia']['procesos_creables'])) ? 'disabled' : '' ?>><i class="bi bi-database-add me-1"></i>Confirmar carga</button>
+        </form>
+        <form method="post" class="m-0">
+          <input type="hidden" name="accion" value="recargar_detalle">
+          <button class="btn btn-outline-primary" type="submit" <?= empty($analisis['recarga_detalle']['rendiciones_match_ok']) ? 'disabled' : '' ?>><i class="bi bi-arrow-repeat me-1"></i>Cargar detalle teórico faltante</button>
         </form>
       </div>
 
@@ -1594,6 +2017,13 @@ function parseNullableFloat($value): ?float
         <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">RUTs ya existentes</div><div class="fs-4 fw-bold text-primary"><?= (int)$analisis['normalizacion']['existentes'] ?></div></div></div>
         <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">Contratistas a crear</div><div class="fs-4 fw-bold text-success"><?= (int)$analisis['normalizacion']['normalizables'] ?></div></div></div>
         <div class="col-md-4"><div class="border rounded p-3 bg-light"><div class="small text-muted">Sin base para crear</div><div class="fs-4 fw-bold text-warning"><?= (int)$analisis['normalizacion']['sin_base'] ?></div></div></div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Recarga: match OK</div><div class="fs-4 fw-bold text-primary"><?= (int)($analisis['recarga_detalle']['rendiciones_match_ok'] ?? 0) ?></div></div></div>
+        <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Recarga: sin cabecera</div><div class="fs-4 fw-bold text-warning"><?= (int)($analisis['recarga_detalle']['rendiciones_sin_cabecera'] ?? 0) ?></div></div></div>
+        <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Recarga: respuestas nuevas</div><div class="fs-4 fw-bold text-success"><?= (int)($analisis['recarga_detalle']['respuestas_insertables'] ?? 0) ?></div></div></div>
+        <div class="col-md-3"><div class="border rounded p-3 bg-light"><div class="small text-muted">Recarga: ya existentes</div><div class="fs-4 fw-bold text-secondary"><?= (int)($analisis['recarga_detalle']['respuestas_duplicadas'] ?? 0) ?></div></div></div>
       </div>
 
       <div class="row g-4">
@@ -1669,6 +2099,55 @@ function parseNullableFloat($value): ?float
                     <td><?= esc((string)$detalle['uo']) ?></td>
                     <td><span class="badge text-bg-<?= esc($badge) ?>"><?= esc($estado) ?></span></td>
                     <td><?= esc((string)$detalle['detalle']) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <div class="row g-4 mt-1">
+        <div class="col-12">
+          <h6 class="text-primary">Preview recarga detalle teórico faltante</h6>
+          <?php if (empty($analisis['recarga_detalle']['filas'])): ?>
+            <div class="text-muted">No hay filas para evaluar en la recarga.</div>
+          <?php else: ?>
+            <div class="table-responsive" style="max-height:320px; overflow:auto;">
+              <table class="table table-sm table-bordered align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>RUT</th>
+                    <th>Fecha/Hora</th>
+                    <th>Estado</th>
+                    <th>Proceso</th>
+                    <th>Nuevas</th>
+                    <th>Existentes</th>
+                    <th>Motivo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                <?php foreach (($analisis['recarga_detalle']['filas'] ?? []) as $filaRecarga): ?>
+                  <?php
+                    $estadoRecarga = (string)($filaRecarga['estado'] ?? '');
+                    $badgeRecarga = 'secondary';
+                    if ($estadoRecarga === 'MATCH_OK') {
+                        $badgeRecarga = 'success';
+                    } elseif ($estadoRecarga === 'SIN_CABECERA' || $estadoRecarga === 'SIN_PROCESO') {
+                        $badgeRecarga = 'warning';
+                    } elseif ($estadoRecarga === 'INCONSISTENTE') {
+                        $badgeRecarga = 'danger';
+                    }
+                  ?>
+                  <tr>
+                    <td><?= esc((string)($filaRecarga['rut'] ?? '')) ?></td>
+                    <td><?= esc((string)($filaRecarga['fecha_hora'] ?? '')) ?></td>
+                    <td><span class="badge text-bg-<?= esc($badgeRecarga) ?>"><?= esc($estadoRecarga) ?></span></td>
+                    <td><?= (int)($filaRecarga['id_proceso_habilitacion'] ?? 0) ?></td>
+                    <td><?= (int)($filaRecarga['respuestas_insertables'] ?? 0) ?></td>
+                    <td><?= (int)($filaRecarga['respuestas_duplicadas'] ?? 0) ?></td>
+                    <td><?= esc((string)($filaRecarga['motivo'] ?? '')) ?></td>
                   </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -1846,9 +2325,10 @@ function parseNullableFloat($value): ?float
             </tr>
           </thead>
           <tbody>
-          <?php foreach ($resultadoImportacion['detalles'] as $detalleImport): ?>
+            <?php foreach ($resultadoImportacion['detalles'] as $detalleImport): ?>
             <?php
-              $badgeHist = ($detalleImport['historial_estado'] ?? '') === 'IMPORTADO' ? 'success' : 'warning';
+              $estadoHist = (string)($detalleImport['historial_estado'] ?? '');
+              $badgeHist = in_array($estadoHist, ['IMPORTADO', 'DETALLE_RECARGADO'], true) ? 'success' : 'warning';
               $badgeCont = 'secondary';
               if (($detalleImport['contratista_estado'] ?? '') === 'CREADO') {
                   $badgeCont = 'success';

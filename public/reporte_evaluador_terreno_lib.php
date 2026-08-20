@@ -132,6 +132,7 @@ function retFetchRows(PDO $pdo, array $filters): array
                 WHERE ep2.id_proceso_habilitacion = rti.id_proceso_habilitacion
                   AND ep2.id_servicio = rti.id_servicio
                   AND ep2.tipo = 'TERRENO'
+                  AND ep2.estado = 'EJECUTADA'
                   AND REPLACE(REPLACE(REPLACE(UPPER(ep2.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci =
                       REPLACE(REPLACE(REPLACE(UPPER(rti.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci
                 ORDER BY ep2.intento DESC, ep2.id DESC
@@ -169,5 +170,22 @@ function retFetchRows(PDO $pdo, array $filters): array
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $deduped = [];
+
+    foreach ($rows as $row) {
+        // Para pago se considera el cierre mas reciente por rut, servicio, cuadrilla y proceso.
+        $key = implode('|', [
+            retRutKey((string)($row['rut'] ?? '')),
+            (int)($row['id_servicio'] ?? 0),
+            (string)($row['cuadrilla'] ?? ''),
+            (string)($row['numero_proceso'] ?? ''),
+        ]);
+
+        if (!isset($deduped[$key])) {
+            $deduped[$key] = $row;
+        }
+    }
+
+    return array_values($deduped);
 }

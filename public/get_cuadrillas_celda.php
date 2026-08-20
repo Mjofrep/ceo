@@ -36,6 +36,7 @@ try {
         SELECT 
             h.cuadrilla,
             h.empresa,
+            h.estado,
             ce.nombre AS nombre_empresa,
             GROUP_CONCAT(DISTINCT ph.numero_proceso ORDER BY ph.numero_proceso SEPARATOR ', ') AS numeros_proceso,
             COUNT(DISTINCT p.id) AS total_participantes
@@ -63,7 +64,7 @@ try {
         WHERE h.fecha = :fecha
           AND h.jornada = :jornada
           AND h.id_servicio = :servicio
-        GROUP BY h.cuadrilla, h.empresa, ce.nombre
+        GROUP BY h.cuadrilla, h.empresa, h.estado, ce.nombre
         ORDER BY h.cuadrilla
     ";
 
@@ -77,7 +78,9 @@ try {
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($rows as &$row) {
-        $row['editable'] = !$esContratista || (int) ($row['empresa'] ?? 0) === $idEmpresaUser;
+        $estado = trim((string)($row['estado'] ?? 'Pendiente'));
+        $esAnulada = strcasecmp($estado, 'Anulada') === 0;
+        $row['editable'] = (!$esContratista || (int) ($row['empresa'] ?? 0) === $idEmpresaUser) && !$esAnulada;
     }
     unset($row);
 

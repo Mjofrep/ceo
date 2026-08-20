@@ -11,7 +11,7 @@ require_once '../config/app.php';
 require_once '../config/functions.php';
 
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -56,6 +56,49 @@ function formatearNotaHistorial(mixed $valor): string
     return number_format((float)$valor, 2, '.', '');
 }
 
+function historialEtiquetaDetallePrueba(array $row): string
+{
+    $detalle = trim((string)($row['detalle_prueba'] ?? ''));
+    if ($detalle !== '') {
+        return $detalle;
+    }
+
+    if (strtoupper(trim((string)($row['tipo_evaluacion'] ?? ''))) !== 'TEORICA') {
+        return '';
+    }
+
+    return 'Teórica';
+}
+
+function maxDateTimeHistorial(mixed $primary, mixed $secondary): ?DateTimeImmutable
+{
+    $best = null;
+
+    foreach ([$primary, $secondary] as $value) {
+        if ($value instanceof DateTimeImmutable) {
+            $current = $value;
+        } elseif ($value instanceof DateTimeInterface) {
+            $current = new DateTimeImmutable($value->format('Y-m-d H:i:s'));
+        } else {
+            $text = trim((string)$value);
+            if ($text === '' || str_starts_with($text, '0000-00-00')) {
+                continue;
+            }
+            try {
+                $current = new DateTimeImmutable($text);
+            } catch (Throwable $e) {
+                continue;
+            }
+        }
+
+        if ($best === null || $current > $best) {
+            $best = $current;
+        }
+    }
+
+    return $best;
+}
+
 function obtenerNotaDetalleHistorial(array $row, array $terrainThresholdsByService): string
 {
     $nota = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
@@ -76,15 +119,6 @@ function resolverPesosPorCargo(?string $cargo, ?int $idCargo = null): ?array
 {
     $operadorIds = [266, 268, 287];
     $supervisorIds = [294];
-
-    if ($idCargo !== null) {
-        if (in_array($idCargo, $supervisorIds, true)) {
-            return ['teorica' => 0.6, 'terreno' => 0.4];
-        }
-        if (in_array($idCargo, $operadorIds, true)) {
-            return ['teorica' => 0.4, 'terreno' => 0.6];
-        }
-    }
 
     $cargoNorm = strtoupper(trim((string)$cargo));
     $cargoNorm = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $cargoNorm);
@@ -110,12 +144,177 @@ function resolverPesosPorCargo(?string $cargo, ?int $idCargo = null): ?array
     ) {
         return ['teorica' => 0.4, 'terreno' => 0.6];
     }
+    if ($idCargo !== null) {
+        if (in_array($idCargo, $supervisorIds, true)) {
+            return ['teorica' => 0.6, 'terreno' => 0.4];
+        }
+        if (in_array($idCargo, $operadorIds, true)) {
+            return ['teorica' => 0.4, 'terreno' => 0.6];
+        }
+    }
     return null;
 }
 
-function buildInferredStatusSummary(array $rows, array $terrainNotesByService, array $terrainThresholdsByService): array
+function buildInferredStatusSummary(PDO $pdo, string $rut, array $rows, array $terrainNotesByService, array $terrainThresholdsByService): array
 {
     $summary = [];
+
+    $stmtFinal = $pdo->prepare('
+        SELECT
+            rfs.id_servicio,
+            sp.servicio,
+            ph.numero_proceso,
+            rfs.id_proceso,
+            rfs.id_proceso_habilitacion,
+            ch.cargo,
+            rfs.cargo AS id_cargo,
+            rfs.nota_final,
+            rfs.resultado_final,
+            rfs.observacion,
+            rfs.fecha_calculo
+        FROM ceo_resultado_final_servicio rfs
+        LEFT JOIN ceo_servicios_pruebas sp ON sp.id = rfs.id_servicio
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = rfs.id_proceso_habilitacion
+        LEFT JOIN ceo_cargos_habilitacion ch ON ch.id = rfs.cargo
+        WHERE rfs.rut = :rut_main
+          AND rfs.segmento = "GENERAL"
+          AND NOT EXISTS (
+              SELECT 1
+              FROM ceo_resultado_final_servicio rfs_newer
+              WHERE rfs_newer.rut = rfs.rut
+                AND rfs_newer.id_servicio = rfs.id_servicio
+                AND rfs_newer.segmento = rfs.segmento
+                AND (
+                    rfs_newer.fecha_calculo > rfs.fecha_calculo
+                    OR (rfs_newer.fecha_calculo = rfs.fecha_calculo AND rfs_newer.id > rfs.id)
+                )
+          )
+        ORDER BY sp.servicio ASC, rfs.id_servicio ASC
+    ');
+    $stmtFinal->execute([
+        ':rut_main' => $rut,
+    ]);
+
+    $stmtTeorica = $pdo->prepare('
+        SELECT
+            rpi.fecha_rendicion,
+            rpi.hora_rendicion,
+            rpi.notafinal,
+            rpi.puntaje_total
+        FROM ceo_resultado_prueba_intento rpi
+        WHERE rpi.rut = :rut
+          AND rpi.id_servicio = :id_servicio
+          AND rpi.id_proceso_habilitacion = :id_proceso_habilitacion
+        ORDER BY rpi.fecha_rendicion DESC, rpi.hora_rendicion DESC, rpi.id DESC
+        LIMIT 1
+    ');
+
+    $stmtTerreno = $pdo->prepare('
+        SELECT
+            rti.fecha_rendicion,
+            rti.hora_rendicion,
+            rti.notafinal,
+            rti.puntaje_total
+        FROM ceo_resultado_terreno_intento rti
+        WHERE rti.rut = :rut
+          AND rti.id_servicio = :id_servicio
+          AND rti.id_proceso_habilitacion = :id_proceso_habilitacion
+        ORDER BY rti.fecha_rendicion DESC, rti.hora_rendicion DESC, rti.id DESC
+        LIMIT 1
+    ');
+
+    foreach ($stmtFinal->fetchAll(PDO::FETCH_ASSOC) as $finalRow) {
+        $serviceId = (int)($finalRow['id_servicio'] ?? 0);
+        if ($serviceId <= 0) {
+            continue;
+        }
+
+        $serviceName = trim((string)($finalRow['servicio'] ?? ''));
+        if ($serviceName === '') {
+            $serviceName = 'Servicio ' . $serviceId;
+        }
+
+        $processHabId = (int)($finalRow['id_proceso_habilitacion'] ?? 0);
+        $teorica = null;
+        $practica = null;
+
+        if ($processHabId > 0) {
+            $stmtTeorica->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $serviceId,
+                ':id_proceso_habilitacion' => $processHabId,
+            ]);
+            $teorica = $stmtTeorica->fetch(PDO::FETCH_ASSOC) ?: null;
+
+            $stmtTerreno->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $serviceId,
+                ':id_proceso_habilitacion' => $processHabId,
+            ]);
+            $practica = $stmtTerreno->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+
+        $ultimaTeoricaFecha = null;
+        if ($teorica && !empty($teorica['fecha_rendicion'])) {
+            try {
+                $ultimaTeoricaFecha = new DateTimeImmutable(trim((string)$teorica['fecha_rendicion']) . ' ' . trim((string)($teorica['hora_rendicion'] ?? '00:00:00')));
+            } catch (Throwable $e) {
+                $ultimaTeoricaFecha = null;
+            }
+        }
+
+        $ultimaPracticaFecha = null;
+        if ($practica && !empty($practica['fecha_rendicion'])) {
+            try {
+                $ultimaPracticaFecha = new DateTimeImmutable(trim((string)$practica['fecha_rendicion']) . ' ' . trim((string)($practica['hora_rendicion'] ?? '00:00:00')));
+            } catch (Throwable $e) {
+                $ultimaPracticaFecha = null;
+            }
+        }
+
+        $fechaCalculo = null;
+        if (!empty($finalRow['fecha_calculo'])) {
+            try {
+                $fechaCalculo = new DateTimeImmutable(trim((string)$finalRow['fecha_calculo']));
+            } catch (Throwable $e) {
+                $fechaCalculo = null;
+            }
+        }
+
+        $fechaPracticaMostrada = maxDateTimeHistorial($ultimaPracticaFecha, $fechaCalculo);
+        $notaFinalPonderada = isset($finalRow['nota_final']) && is_numeric((string)$finalRow['nota_final']) ? (float)$finalRow['nota_final'] : null;
+        $resultadoInferido = $notaFinalPonderada === null ? 'Pendiente' : ($notaFinalPonderada >= 4.0 ? 'Habilitado' : 'No Habilitado');
+        $fechaHabilitacion = ($notaFinalPonderada !== null && $notaFinalPonderada >= 4.0) ? $fechaPracticaMostrada : null;
+        $vigenciaHasta = $fechaHabilitacion instanceof DateTimeImmutable ? $fechaHabilitacion->modify('+3 years') : null;
+
+        $summary[$serviceName] = [
+            'servicio' => $serviceName,
+            'id_servicio' => $serviceId,
+            'numero_proceso' => isset($finalRow['numero_proceso']) ? (int)$finalRow['numero_proceso'] : null,
+            'id_proceso_habilitacion_resumen' => $processHabId > 0 ? $processHabId : null,
+            'cargo' => trim((string)($finalRow['cargo'] ?? '')),
+            'id_cargo' => isset($finalRow['id_cargo']) ? (int)$finalRow['id_cargo'] : null,
+            'cargo_teorica' => trim((string)($finalRow['cargo'] ?? '')),
+            'id_cargo_teorica' => isset($finalRow['id_cargo']) ? (int)$finalRow['id_cargo'] : null,
+            'cargo_practica' => trim((string)($finalRow['cargo'] ?? '')),
+            'id_cargo_practica' => isset($finalRow['id_cargo']) ? (int)$finalRow['id_cargo'] : null,
+            'ultima_teorica_fecha' => $ultimaTeoricaFecha,
+            'ultima_teorica_resultado' => $teorica ? (((float)($teorica['puntaje_total'] ?? 0) >= 80.0) ? 'APROBADO' : 'REPROBADO') : null,
+            'ultima_teorica_nota' => $teorica && isset($teorica['notafinal']) ? (float)$teorica['notafinal'] : null,
+            'ultima_teorica_proceso' => isset($finalRow['numero_proceso']) ? (int)$finalRow['numero_proceso'] : null,
+            'ultima_teorica_origen' => $teorica ? 'HABILITACION' : null,
+            'ultima_teorica_id_proceso_habilitacion' => $processHabId > 0 ? $processHabId : null,
+            'ultima_practica_fecha' => $fechaPracticaMostrada,
+            'ultima_practica_resultado' => $practica ? (((float)($practica['puntaje_total'] ?? 0) >= 80.0) ? 'APROBADO' : 'REPROBADO') : null,
+            'ultima_practica_nota' => $practica && isset($practica['notafinal']) ? (float)$practica['notafinal'] : null,
+            'ultima_practica_porcentaje' => $practica && isset($practica['puntaje_total']) ? (float)$practica['puntaje_total'] : null,
+            'ultima_practica_proceso' => isset($finalRow['numero_proceso']) ? (int)$finalRow['numero_proceso'] : null,
+            'nota_final_ponderada' => $notaFinalPonderada,
+            'fecha_habilitacion' => $fechaHabilitacion,
+            'vigencia_hasta' => $vigenciaHasta,
+            'estado_inferido' => $resultadoInferido,
+        ];
+    }
 
     foreach ($rows as $row) {
         $servicio = trim((string)($row['servicio'] ?? ''));
@@ -128,8 +327,13 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
                 'servicio' => $servicio,
                 'id_servicio' => isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0,
                 'numero_proceso' => null,
+                'id_proceso_habilitacion_resumen' => null,
                 'cargo' => trim((string)($row['cargo'] ?? '')),
                 'id_cargo' => isset($row['id_cargo']) ? (int)$row['id_cargo'] : null,
+                'cargo_teorica' => null,
+                'id_cargo_teorica' => null,
+                'cargo_practica' => null,
+                'id_cargo_practica' => null,
                 'ultima_teorica_fecha' => null,
                 'ultima_teorica_resultado' => null,
                 'ultima_teorica_nota' => null,
@@ -161,6 +365,12 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
         $tipo = strtoupper(trim((string)($row['tipo_evaluacion'] ?? '')));
         $resultado = strtoupper(trim((string)($row['resultado_mostrado'] ?? '')));
         $nota = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
+        $rowProcesoHabId = isset($row['id_proceso_habilitacion']) ? (int)$row['id_proceso_habilitacion'] : 0;
+        $resumenProcesoHabId = isset($summary[$servicio]['id_proceso_habilitacion_resumen']) ? (int)$summary[$servicio]['id_proceso_habilitacion_resumen'] : 0;
+
+        if ($resumenProcesoHabId > 0 && $rowProcesoHabId > 0 && $resumenProcesoHabId !== $rowProcesoHabId) {
+            continue;
+        }
 
         if ($tipo === 'TEORICA') {
             if ($summary[$servicio]['ultima_teorica_fecha'] === null || $dt > $summary[$servicio]['ultima_teorica_fecha']) {
@@ -170,15 +380,15 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
                 $summary[$servicio]['ultima_teorica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
                 $summary[$servicio]['ultima_teorica_origen'] = strtoupper(trim((string)($row['origen'] ?? '')));
                 $summary[$servicio]['ultima_teorica_id_proceso_habilitacion'] = isset($row['id_proceso_habilitacion']) ? (int)$row['id_proceso_habilitacion'] : null;
+                $summary[$servicio]['cargo_teorica'] = trim((string)($row['cargo'] ?? ''));
+                $summary[$servicio]['id_cargo_teorica'] = isset($row['id_cargo']) ? (int)$row['id_cargo'] : null;
             }
         } elseif ($tipo === 'PRACTICA') {
             if ($summary[$servicio]['ultima_practica_fecha'] === null || $dt > $summary[$servicio]['ultima_practica_fecha']) {
                 $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
                 $notaTerreno = null;
                 $porcentajeTerreno = is_numeric((string)($row['nota_mostrada'] ?? '')) ? (float)$row['nota_mostrada'] : null;
-                if ($serviceId > 0 && isset($terrainNotesByService[$serviceId])) {
-                    $notaTerreno = $terrainNotesByService[$serviceId]['nota'];
-                } elseif ($serviceId > 0) {
+                if ($serviceId > 0) {
                     $porcentajeMinimo = (float)($terrainThresholdsByService[$serviceId] ?? 80.0);
                     if ($porcentajeTerreno !== null) {
                         $notaTerreno = calcularNotaFinalDesdePorcentaje($porcentajeTerreno, $porcentajeMinimo);
@@ -189,6 +399,8 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
                 $summary[$servicio]['ultima_practica_nota'] = $notaTerreno;
                 $summary[$servicio]['ultima_practica_porcentaje'] = $porcentajeTerreno;
                 $summary[$servicio]['ultima_practica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
+                $summary[$servicio]['cargo_practica'] = trim((string)($row['cargo'] ?? ''));
+                $summary[$servicio]['id_cargo_practica'] = isset($row['id_cargo']) ? (int)$row['id_cargo'] : null;
             }
         }
     }
@@ -197,9 +409,22 @@ function buildInferredStatusSummary(array $rows, array $terrainNotesByService, a
 
     foreach ($summary as $servicio => $data) {
         $summary[$servicio]['numero_proceso'] = $data['ultima_practica_proceso'] ?? ($data['ultima_teorica_proceso'] ?? null);
-        $pesos = resolverPesosPorCargo($data['cargo'] ?? '', isset($data['id_cargo']) ? (int)$data['id_cargo'] : null);
+        if ($data['ultima_practica_proceso'] !== null) {
+            $summary[$servicio]['cargo'] = (string)($data['cargo_practica'] ?? '');
+            $summary[$servicio]['id_cargo'] = isset($data['id_cargo_practica']) ? (int)$data['id_cargo_practica'] : null;
+        } elseif ($data['ultima_teorica_proceso'] !== null) {
+            $summary[$servicio]['cargo'] = (string)($data['cargo_teorica'] ?? '');
+            $summary[$servicio]['id_cargo'] = isset($data['id_cargo_teorica']) ? (int)$data['id_cargo_teorica'] : null;
+        }
+        $cargoResumen = (string)($summary[$servicio]['cargo'] ?? '');
+        $idCargoResumen = isset($summary[$servicio]['id_cargo']) ? (int)$summary[$servicio]['id_cargo'] : null;
+        $pesos = resolverPesosPorCargo($cargoResumen, $idCargoResumen);
         $notaTeorica = $data['ultima_teorica_nota'];
         $notaTerreno = $data['ultima_practica_nota'];
+
+        if ((int)($data['id_proceso_habilitacion_resumen'] ?? 0) > 0) {
+            continue;
+        }
 
         if ($pesos !== null && $notaTeorica !== null && $notaTerreno !== null && $data['ultima_practica_fecha'] instanceof DateTimeImmutable) {
             $notaFinal = round(($notaTeorica * $pesos['teorica']) + ($notaTerreno * $pesos['terreno']), 2);
@@ -243,9 +468,8 @@ function buildProcessHistoryRows(array $rows): array
                 'numero_proceso' => $processNumber,
                 'empresa' => trim((string)($row['empresa'] ?? '')),
                 'cargo' => trim((string)($row['cargo'] ?? '')),
-                'teorica_total' => 0,
+                'teoricas' => [],
                 'practica_total' => 0,
-                'teorica' => null,
                 'practica' => null,
                 'fecha_orden' => null,
             ];
@@ -276,12 +500,14 @@ function buildProcessHistoryRows(array $rows): array
 
         $tipo = strtoupper(trim((string)($row['tipo_evaluacion'] ?? '')));
         if ($tipo === 'TEORICA') {
-            $grouped[$groupKey]['teorica_total']++;
-            $current = $grouped[$groupKey]['teorica']['fecha_dt'] ?? null;
+            $detallePrueba = historialEtiquetaDetallePrueba($row);
+            $theoryKey = $detallePrueba !== '' ? $detallePrueba : 'Teórica';
+            $current = $grouped[$groupKey]['teoricas'][$theoryKey]['fecha_dt'] ?? null;
             if (!($current instanceof DateTimeImmutable) || ($dt instanceof DateTimeImmutable && $dt > $current)) {
-                $grouped[$groupKey]['teorica'] = [
+                $grouped[$groupKey]['teoricas'][$theoryKey] = [
                     'row' => $row,
                     'fecha_dt' => $dt,
+                    'detalle_prueba' => $theoryKey,
                 ];
             }
         } elseif ($tipo === 'PRACTICA') {
@@ -364,6 +590,21 @@ if ($rutNormalizado !== '') {
             rpi.notafinal AS nota_mostrada,
             ct.id_cargo AS id_cargo,
             COALESCE((
+                SELECT NULLIF(TRIM(COALESCE(et_recent.contratista, '')), '')
+                FROM ceo_evaluacion_terreno et_recent
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                  AND et_recent.id_servicio = rpi.id_servicio
+                ORDER BY et_recent.fecha_evaluacion DESC, et_recent.id DESC
+                LIMIT 1
+            ), (
+                SELECT emp_recent.nombre
+                FROM ceo_habilitacion_participantes hp_recent
+                INNER JOIN ceo_habilitacion h_recent ON h_recent.cuadrilla = hp_recent.id_cuadrilla
+                LEFT JOIN ceo_empresas emp_recent ON emp_recent.id = h_recent.empresa
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(hp_recent.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY h_recent.fecha DESC, h_recent.cuadrilla DESC, hp_recent.id DESC
+                LIMIT 1
+            ), (
                 SELECT emp_h.nombre
                 FROM ceo_evaluaciones_programadas ep_h
                 INNER JOIN ceo_habilitacion h ON h.cuadrilla = ep_h.cuadrilla AND h.id_servicio = ep_h.id_servicio
@@ -375,7 +616,36 @@ if ($rutNormalizado !== '') {
                 ORDER BY ep_h.id DESC
                 LIMIT 1
             ), emp.nombre) AS empresa,
-            cargo.cargo AS cargo,
+            COALESCE((
+                SELECT NULLIF(TRIM(COALESCE(et_recent.cargo, '')), '')
+                FROM ceo_evaluacion_terreno et_recent
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                  AND et_recent.id_servicio = rpi.id_servicio
+                ORDER BY et_recent.fecha_evaluacion DESC, et_recent.id DESC
+                LIMIT 1
+            ), (
+                SELECT NULLIF(TRIM(cc_recent.cargo), '')
+                FROM ceo_habilitacion_participantes hp_recent
+                INNER JOIN ceo_habilitacion h_recent ON h_recent.cuadrilla = hp_recent.id_cuadrilla
+                INNER JOIN ceo_participantes_solicitud ps_recent
+                    ON ps_recent.id_solicitud = h_recent.nsolicitud
+                   AND REPLACE(REPLACE(REPLACE(UPPER(ps_recent.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(hp_recent.rut), '.', ''), '-', ''), ' ', '')
+                LEFT JOIN ceo_cargo_contratistas cc_recent ON cc_recent.id = ps_recent.id_cargo
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(hp_recent.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY h_recent.fecha DESC, h_recent.cuadrilla DESC, hp_recent.id DESC
+                LIMIT 1
+            ), (
+                SELECT NULLIF(TRIM(hp_h.cargo), '')
+                FROM ceo_evaluaciones_programadas ep_h_cargo
+                INNER JOIN ceo_habilitacion_participantes hp_h
+                    ON hp_h.id_cuadrilla = ep_h_cargo.cuadrilla
+                   AND hp_h.rut COLLATE utf8mb4_unicode_ci = ep_h_cargo.rut COLLATE utf8mb4_unicode_ci
+                WHERE ep_h_cargo.id_proceso_habilitacion = rpi.id_proceso_habilitacion
+                  AND ep_h_cargo.id_servicio = rpi.id_servicio
+                  AND REPLACE(REPLACE(REPLACE(UPPER(ep_h_cargo.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(rpi.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY CASE WHEN ep_h_cargo.tipo = 'PRUEBA' THEN 0 ELSE 1 END, ep_h_cargo.id DESC
+                LIMIT 1
+            ), cargo.cargo) AS cargo,
             CASE
                 WHEN rpi.id_evaluador IS NULL THEN 'Carga histórica'
                 ELSE TRIM(CONCAT(COALESCE(usr.nombres, ''), ' ', COALESCE(usr.apellidos, '')))
@@ -409,6 +679,21 @@ if ($rutNormalizado !== '') {
             CAST(REPLACE(COALESCE(et.resultado, '0'), ',', '.') AS DECIMAL(10,2)) AS nota_mostrada,
             ct2.id_cargo AS id_cargo,
             COALESCE((
+                SELECT NULLIF(TRIM(COALESCE(et_recent2.contratista, '')), '')
+                FROM ceo_evaluacion_terreno et_recent2
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                  AND et_recent2.id_servicio = et.id_servicio
+                ORDER BY et_recent2.fecha_evaluacion DESC, et_recent2.id DESC
+                LIMIT 1
+            ), (
+                SELECT emp_recent2.nombre
+                FROM ceo_habilitacion_participantes hp_recent2
+                INNER JOIN ceo_habilitacion h_recent2 ON h_recent2.cuadrilla = hp_recent2.id_cuadrilla
+                LEFT JOIN ceo_empresas emp_recent2 ON emp_recent2.id = h_recent2.empresa
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(hp_recent2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY h_recent2.fecha DESC, h_recent2.cuadrilla DESC, hp_recent2.id DESC
+                LIMIT 1
+            ), (
                 SELECT emp_h2.nombre
                 FROM ceo_evaluaciones_programadas ep_h2
                 INNER JOIN ceo_habilitacion h2 ON h2.cuadrilla = ep_h2.cuadrilla AND h2.id_servicio = ep_h2.id_servicio
@@ -420,7 +705,36 @@ if ($rutNormalizado !== '') {
                 ORDER BY ep_h2.id DESC
                 LIMIT 1
             ), emp2.nombre) AS empresa,
-            COALESCE(et.cargo, cargo2.cargo) AS cargo,
+            COALESCE((
+                SELECT NULLIF(TRIM(COALESCE(et_recent2.cargo, '')), '')
+                FROM ceo_evaluacion_terreno et_recent2
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                  AND et_recent2.id_servicio = et.id_servicio
+                ORDER BY et_recent2.fecha_evaluacion DESC, et_recent2.id DESC
+                LIMIT 1
+            ), (
+                SELECT NULLIF(TRIM(cc_recent2.cargo), '')
+                FROM ceo_habilitacion_participantes hp_recent2
+                INNER JOIN ceo_habilitacion h_recent2 ON h_recent2.cuadrilla = hp_recent2.id_cuadrilla
+                INNER JOIN ceo_participantes_solicitud ps_recent2
+                    ON ps_recent2.id_solicitud = h_recent2.nsolicitud
+                   AND REPLACE(REPLACE(REPLACE(UPPER(ps_recent2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(hp_recent2.rut), '.', ''), '-', ''), ' ', '')
+                LEFT JOIN ceo_cargo_contratistas cc_recent2 ON cc_recent2.id = ps_recent2.id_cargo
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(hp_recent2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY h_recent2.fecha DESC, h_recent2.cuadrilla DESC, hp_recent2.id DESC
+                LIMIT 1
+            ), (
+                SELECT NULLIF(TRIM(hp_h2.cargo), '')
+                FROM ceo_evaluaciones_programadas ep_h2_cargo
+                INNER JOIN ceo_habilitacion_participantes hp_h2
+                    ON hp_h2.id_cuadrilla = ep_h2_cargo.cuadrilla
+                   AND hp_h2.rut COLLATE utf8mb4_unicode_ci = ep_h2_cargo.rut COLLATE utf8mb4_unicode_ci
+                WHERE ep_h2_cargo.id_proceso_habilitacion = et.id_proceso_habilitacion
+                  AND ep_h2_cargo.id_servicio = et.id_servicio
+                  AND REPLACE(REPLACE(REPLACE(UPPER(ep_h2_cargo.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '')
+                ORDER BY CASE WHEN ep_h2_cargo.tipo = 'TERRENO' THEN 0 ELSE 1 END, ep_h2_cargo.id DESC
+                LIMIT 1
+            ), NULLIF(TRIM(et.cargo), ''), cargo2.cargo) AS cargo,
             COALESCE(et.evaluador, '') AS evaluador,
             uo2.desc_uo AS uo,
             '' AS region,
@@ -441,6 +755,174 @@ if ($rutNormalizado !== '') {
         ':rut_terreno' => $rutNormalizado,
     ]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $lleeConfig = ceoGetLleeConfig();
+    if (!empty($rows)) {
+        foreach ($rows as &$row) {
+            $row['detalle_prueba'] = '';
+        }
+        unset($row);
+    }
+
+    if ((int)($lleeConfig['service_id'] ?? 0) > 0) {
+        $stmtLlee = $pdo->prepare("
+            SELECT
+                base.id_servicio,
+                (
+                    SELECT rpi2.id_proceso_habilitacion
+                    FROM ceo_resultado_prueba_intento rpi2
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(base.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = base.id_servicio
+                      AND rpi2.fecha_rendicion = base.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS id_proceso_habilitacion,
+                (
+                    SELECT ph2.numero_proceso
+                    FROM ceo_resultado_prueba_intento rpi2
+                    LEFT JOIN ceo_proceso_habilitacion ph2 ON ph2.id = rpi2.id_proceso_habilitacion
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(base.rut), '.', ''), '-', ''), ' ', '')
+                      AND rpi2.id_servicio = base.id_servicio
+                      AND rpi2.fecha_rendicion = base.fecha_rendicion
+                    ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                    LIMIT 1
+                ) AS numero_proceso,
+                CONCAT(base.fecha_rendicion, ' ', base.hora_rendicion) AS fecha_hora,
+                base.porcentaje AS puntaje_total,
+                base.resultado_mostrado,
+                base.detalle_prueba,
+                base.id_agrupacion,
+                base.intento,
+                COALESCE((
+                    SELECT NULLIF(TRIM(COALESCE(et_recent.contratista, '')), '')
+                    FROM ceo_evaluacion_terreno et_recent
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent.rut), '.', ''), '-', ''), ' ', '') = :rut_llee_cmp_1
+                      AND et_recent.id_servicio = base.id_servicio
+                    ORDER BY et_recent.fecha_evaluacion DESC, et_recent.id DESC
+                    LIMIT 1
+                ), emp.nombre) AS empresa,
+                COALESCE((
+                    SELECT NULLIF(TRIM(COALESCE(et_recent.cargo, '')), '')
+                    FROM ceo_evaluacion_terreno et_recent
+                    WHERE REPLACE(REPLACE(REPLACE(UPPER(et_recent.rut), '.', ''), '-', ''), ' ', '') = :rut_llee_cmp_2
+                      AND et_recent.id_servicio = base.id_servicio
+                    ORDER BY et_recent.fecha_evaluacion DESC, et_recent.id DESC
+                    LIMIT 1
+                ), cargo.cargo) AS cargo,
+                ct.id_cargo,
+                CASE
+                    WHEN (
+                        SELECT rpi2.id_evaluador
+                        FROM ceo_resultado_prueba_intento rpi2
+                        WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(base.rut), '.', ''), '-', ''), ' ', '')
+                          AND rpi2.id_servicio = base.id_servicio
+                          AND rpi2.fecha_rendicion = base.fecha_rendicion
+                        ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                        LIMIT 1
+                    ) IS NULL THEN 'Carga histórica'
+                    ELSE (
+                        SELECT TRIM(CONCAT(COALESCE(usr2.nombres, ''), ' ', COALESCE(usr2.apellidos, '')))
+                        FROM ceo_resultado_prueba_intento rpi2
+                        INNER JOIN ceo_usuarios usr2 ON usr2.id = rpi2.id_evaluador
+                        WHERE REPLACE(REPLACE(REPLACE(UPPER(rpi2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(base.rut), '.', ''), '-', ''), ' ', '')
+                          AND rpi2.id_servicio = base.id_servicio
+                          AND rpi2.fecha_rendicion = base.fecha_rendicion
+                        ORDER BY COALESCE(rpi2.hora_rendicion, '00:00:00') DESC, rpi2.id DESC
+                        LIMIT 1
+                    )
+                END AS evaluador,
+                uo.desc_uo AS uo,
+                '' AS region,
+                'HABILITACION' AS origen
+            FROM (
+                SELECT
+                    rpt.rut,
+                    rpt.fecha_rendicion,
+                    COALESCE(MAX(rpt.hora_rendicion), '00:00:00') AS hora_rendicion,
+                    rpt.intento,
+                    ps.id_servicio,
+                    ps.id_agrupacion,
+                    ROUND((SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) AS porcentaje,
+                    CASE
+                        WHEN ROUND((SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) >= CASE WHEN ps.id_agrupacion = :hotline_group_id_result THEN :hotline_min_pct_result ELSE :theory_min_pct_result END THEN 'APROBADO'
+                        ELSE 'REPROBADO'
+                    END AS resultado_mostrado,
+                    CASE WHEN ps.id_agrupacion = :hotline_group_id_label THEN 'Hotline' ELSE 'LLEE' END AS detalle_prueba
+                FROM ceo_resultado_pruebat rpt
+                INNER JOIN ceo_preguntas_servicios ps
+                    ON ps.id = rpt.id_pregunta
+                   AND ps.id_servicio = :llee_service_id
+                   AND ps.id_agrupacion IN (:hotline_group_id_filter, :theory_group_id_filter)
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '') = :rut_llee
+                GROUP BY rpt.rut, rpt.fecha_rendicion, rpt.intento, ps.id_servicio, ps.id_agrupacion
+                HAVING COUNT(*) > 0
+            ) base
+            INNER JOIN ceo_servicios_pruebas ps ON ps.id = base.id_servicio
+            LEFT JOIN ceo_contratistas ct ON ct.rut = base.rut
+            LEFT JOIN ceo_empresas emp ON emp.id = ct.id_empresa
+            LEFT JOIN ceo_cargo_contratistas cargo ON cargo.id = ct.id_cargo
+            LEFT JOIN ceo_uo uo ON uo.id = ct.uo
+            ORDER BY fecha_hora DESC, detalle_prueba ASC
+        ");
+        $stmtLlee->execute([
+            ':rut_llee_cmp_1' => $rutNormalizado,
+            ':rut_llee_cmp_2' => $rutNormalizado,
+            ':hotline_group_id_result' => (int)($lleeConfig['hotline_group_id'] ?? 0),
+            ':hotline_min_pct_result' => (float)($lleeConfig['hotline_min_pct'] ?? 100.0),
+            ':theory_min_pct_result' => (float)($lleeConfig['theory_min_pct'] ?? 80.0),
+            ':hotline_group_id_label' => (int)($lleeConfig['hotline_group_id'] ?? 0),
+            ':llee_service_id' => (int)($lleeConfig['service_id'] ?? 0),
+            ':hotline_group_id_filter' => (int)($lleeConfig['hotline_group_id'] ?? 0),
+            ':theory_group_id_filter' => (int)($lleeConfig['theory_group_id'] ?? 0),
+            ':rut_llee' => $rutNormalizado,
+        ]);
+
+        $rowsSinTeoricaLlee = [];
+        foreach ($rows as $row) {
+            if (
+                strtoupper(trim((string)($row['tipo_evaluacion'] ?? ''))) === 'TEORICA'
+                && (int)($row['id_servicio'] ?? 0) === (int)($lleeConfig['service_id'] ?? 0)
+            ) {
+                continue;
+            }
+            $rowsSinTeoricaLlee[] = $row;
+        }
+
+        foreach ($stmtLlee->fetchAll(PDO::FETCH_ASSOC) as $rowLlee) {
+            $idAgrupacionLlee = isset($rowLlee['id_agrupacion']) ? (int)$rowLlee['id_agrupacion'] : 0;
+            $puntajeLlee = isset($rowLlee['puntaje_total']) ? (float)$rowLlee['puntaje_total'] : null;
+            $minimoLlee = $idAgrupacionLlee === (int)($lleeConfig['hotline_group_id'] ?? 0)
+                ? (float)($lleeConfig['hotline_min_pct'] ?? 100.0)
+                : (float)($lleeConfig['theory_min_pct'] ?? 80.0);
+            $rowsSinTeoricaLlee[] = [
+                'tipo_evaluacion' => 'TEORICA',
+                'servicio' => (string)($rowLlee['servicio'] ?? 'LLEE'),
+                'id_servicio' => (int)($rowLlee['id_servicio'] ?? 0),
+                'id_proceso_habilitacion' => isset($rowLlee['id_proceso_habilitacion']) ? (int)$rowLlee['id_proceso_habilitacion'] : null,
+                'numero_proceso' => $rowLlee['numero_proceso'],
+                'fecha_hora' => (string)($rowLlee['fecha_hora'] ?? ''),
+                'resultado_mostrado' => (string)($rowLlee['resultado_mostrado'] ?? ''),
+                'nota_mostrada' => $puntajeLlee !== null ? round(calcularNotaFinalDesdePorcentaje($puntajeLlee, $minimoLlee), 2) : null,
+                'id_cargo' => isset($rowLlee['id_cargo']) ? (int)$rowLlee['id_cargo'] : null,
+                'empresa' => (string)($rowLlee['empresa'] ?? ''),
+                'cargo' => (string)($rowLlee['cargo'] ?? ''),
+                'evaluador' => (string)($rowLlee['evaluador'] ?? ''),
+                'uo' => (string)($rowLlee['uo'] ?? ''),
+                'region' => '',
+                'origen' => (string)($rowLlee['origen'] ?? 'HABILITACION'),
+                'detalle_prueba' => (string)($rowLlee['detalle_prueba'] ?? ''),
+            ];
+        }
+
+        $rows = $rowsSinTeoricaLlee;
+        usort($rows, static function (array $a, array $b): int {
+            $servicioCmp = strcasecmp((string)($a['servicio'] ?? ''), (string)($b['servicio'] ?? ''));
+            if ($servicioCmp !== 0) {
+                return $servicioCmp;
+            }
+            return strcmp((string)($b['fecha_hora'] ?? ''), (string)($a['fecha_hora'] ?? ''));
+        });
+    }
 
     $stmtTerrenoNotas = $pdo->prepare('
         SELECT id_servicio, fecha_rendicion, hora_rendicion, notafinal
@@ -475,7 +957,7 @@ if ($rutNormalizado !== '') {
         }
     }
 
-    $resumenServicios = buildInferredStatusSummary($rows, $terrainNotesByService, $terrainThresholdsByService);
+    $resumenServicios = buildInferredStatusSummary($pdo, $rutNormalizado, $rows, $terrainNotesByService, $terrainThresholdsByService);
     $rowsByProcess = buildProcessHistoryRows($rows);
 }
 ?>
@@ -511,7 +993,7 @@ body { background:#f7f9fc; }
         <small class="text-muted"><?= APP_SUBTITLE ?></small>
       </div>
     </div>
-    <a href="https://www.noetica.cl/ceo.noetica.cl/public/general.php"
+    <a href="<?= APP_BASE ?>/public/general.php"
        class="btn btn-outline-secondary btn-sm">
        ← Volver
     </a>
@@ -578,6 +1060,7 @@ body { background:#f7f9fc; }
                 <th>Servicio</th>
                 <th>Proceso</th>
                 <th>Cargo</th>
+                <th>Detalle teórica</th>
                 <th>Nota teórica</th>
                 <th>Última teórica</th>
                 <th>Resultado teórica</th>
@@ -588,6 +1071,7 @@ body { background:#f7f9fc; }
                 <th>Nota final</th>
                 <th>Fecha habilitación</th>
                 <th>Vigencia hasta</th>
+                <th>Vigencia</th>
                 <th>Estado inferido</th>
               </tr>
             </thead>
@@ -600,11 +1084,22 @@ body { background:#f7f9fc; }
                 } elseif ($resumen['estado_inferido'] === 'No Habilitado') {
                   $estadoBadge = 'danger';
                 }
+                $notaFinalPonderada = isset($resumen['nota_final_ponderada']) && is_numeric((string)$resumen['nota_final_ponderada'])
+                  ? (float)$resumen['nota_final_ponderada']
+                  : null;
+                $cumpleNotaMinimaVigencia = $notaFinalPonderada !== null && $notaFinalPonderada >= 4.0;
+                $mostrarFechasHabilitacion = $cumpleNotaMinimaVigencia;
+                $vigenciaActiva = $cumpleNotaMinimaVigencia
+                  && ($resumen['vigencia_hasta'] ?? null) instanceof DateTimeImmutable
+                  && (new DateTimeImmutable('today')) <= $resumen['vigencia_hasta'];
+                $vigenciaBadge = $vigenciaActiva ? 'success' : 'danger';
+                $vigenciaTexto = $vigenciaActiva ? 'Vigente' : 'No Vigente';
               ?>
               <tr>
                 <td><?= esc((string)$resumen['servicio']) ?></td>
                 <td class="text-center"><?= esc($resumen['numero_proceso'] !== null ? (string)$resumen['numero_proceso'] : '') ?></td>
                 <td><?= esc((string)($resumen['cargo'] ?? '')) ?></td>
+                <td><?= esc((int)($resumen['id_servicio'] ?? 0) === (int)(ceoGetLleeConfig()['service_id'] ?? 0) ? 'LLEE / Hotline' : 'Teórica') ?></td>
                 <td><?= esc(formatearNotaHistorial($resumen['ultima_teorica_nota'] ?? null)) ?></td>
                 <td><?= esc(formatearFechaHistorial($resumen['ultima_teorica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_teorica_resultado'] ?? '')) ?></td>
@@ -628,8 +1123,9 @@ body { background:#f7f9fc; }
                 <td><?= esc(formatearFechaHistorial($resumen['ultima_practica_fecha'] ?? null, true)) ?></td>
                 <td><?= esc((string)($resumen['ultima_practica_resultado'] ?? '')) ?></td>
                 <td><?= esc(formatearNotaHistorial($resumen['nota_final_ponderada'] ?? null)) ?></td>
-                <td><?= esc(formatearFechaHistorial($resumen['fecha_habilitacion'] ?? null)) ?></td>
-                <td><?= esc(formatearFechaHistorial($resumen['vigencia_hasta'] ?? null)) ?></td>
+                <td><?= esc($mostrarFechasHabilitacion ? formatearFechaHistorial($resumen['fecha_habilitacion'] ?? null) : '') ?></td>
+                <td><?= esc($mostrarFechasHabilitacion ? formatearFechaHistorial($resumen['vigencia_hasta'] ?? null) : '') ?></td>
+                <td><span class="badge text-bg-<?= esc($vigenciaBadge) ?>"><?= esc($vigenciaTexto) ?></span></td>
                 <td><span class="badge text-bg-<?= esc($estadoBadge) ?>"><?= esc((string)$resumen['estado_inferido']) ?></span></td>
               </tr>
             <?php endforeach; ?>
@@ -652,12 +1148,11 @@ body { background:#f7f9fc; }
               <th>Proceso</th>
               <th>Empresa</th>
               <th>Cargo</th>
-              <th>Teóricas</th>
+              <th>Detalle teórica</th>
               <th>Última teórica</th>
               <th>Resultado teórica</th>
               <th>Nota teórica</th>
               <th>Eval. teórica</th>
-              <th>Terrenos</th>
               <th>Último terreno</th>
               <th>Resultado terreno</th>
               <th>Nota terreno</th>
@@ -667,25 +1162,32 @@ body { background:#f7f9fc; }
           <tbody>
           <?php foreach ($rowsByProcess as $item): ?>
             <?php
-              $teorica = $item['teorica']['row'] ?? null;
               $practica = $item['practica']['row'] ?? null;
+              $teoricas = $item['teoricas'] ?? [];
+              if (empty($teoricas)) {
+                $teoricas = [
+                  ['row' => null, 'detalle_prueba' => '']
+                ];
+              }
             ?>
-            <tr>
-              <td><?= esc((string)$item['servicio']) ?></td>
-              <td class="text-center"><?= esc((string)($item['numero_proceso'] ?? '')) ?></td>
-              <td><?= esc((string)($item['empresa'] ?? '')) ?></td>
-              <td><?= esc((string)($item['cargo'] ?? '')) ?></td>
-              <td class="text-center"><?= (int)($item['teorica_total'] ?? 0) ?></td>
-              <td class="text-center"><?= esc(formatearFechaHistorial($teorica['fecha_hora'] ?? null, true)) ?></td>
-              <td class="text-center"><?= esc((string)($teorica['resultado_mostrado'] ?? '')) ?></td>
-              <td class="text-center"><?= esc($teorica ? obtenerNotaDetalleHistorial($teorica, $terrainThresholdsByService ?? []) : '') ?></td>
-              <td><?= esc((string)($teorica['evaluador'] ?? '')) ?></td>
-              <td class="text-center"><?= (int)($item['practica_total'] ?? 0) ?></td>
-              <td class="text-center"><?= esc(formatearFechaHistorial($practica['fecha_hora'] ?? null, true)) ?></td>
-              <td class="text-center"><?= esc((string)($practica['resultado_mostrado'] ?? '')) ?></td>
-              <td class="text-center"><?= esc($practica ? obtenerNotaDetalleHistorial($practica, $terrainThresholdsByService ?? []) : '') ?></td>
-              <td><?= esc((string)($practica['evaluador'] ?? '')) ?></td>
-            </tr>
+            <?php foreach ($teoricas as $teoricaItem): ?>
+              <?php $teorica = $teoricaItem['row'] ?? null; ?>
+              <tr>
+                <td><?= esc((string)$item['servicio']) ?></td>
+                <td class="text-center"><?= esc((string)($item['numero_proceso'] ?? '')) ?></td>
+                <td><?= esc((string)($item['empresa'] ?? '')) ?></td>
+                <td><?= esc((string)($item['cargo'] ?? '')) ?></td>
+                <td><?= esc((string)($teoricaItem['detalle_prueba'] ?? '')) ?></td>
+                <td class="text-center"><?= esc(formatearFechaHistorial($teorica['fecha_hora'] ?? null, true)) ?></td>
+                <td class="text-center"><?= esc((string)($teorica['resultado_mostrado'] ?? '')) ?></td>
+                <td class="text-center"><?= esc($teorica ? obtenerNotaDetalleHistorial($teorica, $terrainThresholdsByService ?? []) : '') ?></td>
+                <td><?= esc((string)($teorica['evaluador'] ?? '')) ?></td>
+                <td class="text-center"><?= esc(formatearFechaHistorial($practica['fecha_hora'] ?? null, true)) ?></td>
+                <td class="text-center"><?= esc((string)($practica['resultado_mostrado'] ?? '')) ?></td>
+                <td class="text-center"><?= esc($practica ? obtenerNotaDetalleHistorial($practica, $terrainThresholdsByService ?? []) : '') ?></td>
+                <td><?= esc((string)($practica['evaluador'] ?? '')) ?></td>
+              </tr>
+            <?php endforeach; ?>
           <?php endforeach; ?>
           </tbody>
         </table>

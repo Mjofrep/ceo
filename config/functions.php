@@ -25,6 +25,47 @@ function esc($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+if (!function_exists('ceoGetLleeConfig')) {
+    function ceoGetLleeConfig(): array
+    {
+        return [
+            'service_id' => 1,
+            'theory_group_id' => 13,
+            'hotline_group_id' => 12,
+            'terrain_group_id' => 16,
+            'theory_min_pct' => 80.0,
+            'terrain_min_pct' => 80.0,
+            'hotline_min_pct' => 100.0,
+        ];
+    }
+}
+
+if (!function_exists('ceoIsLleeService')) {
+    function ceoIsLleeService(int $serviceId): bool
+    {
+        return $serviceId === (int)(ceoGetLleeConfig()['service_id'] ?? 0);
+    }
+}
+
+if (!function_exists('ceoGetPodasConfig')) {
+    function ceoGetPodasConfig(): array
+    {
+        return [
+            'service_id' => 8,
+            'three_d_min_pct' => 80.0,
+            'theory_min_pct' => 80.0,
+            'terrain_min_pct' => 80.0,
+        ];
+    }
+}
+
+if (!function_exists('ceoIsPodasService')) {
+    function ceoIsPodasService(int $serviceId): bool
+    {
+        return $serviceId === (int)(ceoGetPodasConfig()['service_id'] ?? 0);
+    }
+}
+
 if (!function_exists('asegurarTablaEmpresaCorreos')) {
     function asegurarTablaEmpresaCorreos(PDO $pdo): void
     {
@@ -214,6 +255,223 @@ if (!function_exists('auditLog')) {
                 ':url' => $url
             ]);
         } catch (Throwable $e) {
+            return;
+        }
+    }
+}
+
+if (!function_exists('ensureAuditPruebaTable')) {
+    function ensureAuditPruebaTable(\PDO $pdo): void
+    {
+        static $checked = false;
+
+        if ($checked) {
+            return;
+        }
+
+        $checked = true;
+
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS ceo_auditoria_prueba (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                evento VARCHAR(80) NOT NULL,
+                usuario_id INT NULL,
+                usuario_codigo VARCHAR(80) NOT NULL DEFAULT '',
+                usuario_nombre VARCHAR(180) NOT NULL DEFAULT '',
+                usuario_rol VARCHAR(120) NOT NULL DEFAULT '',
+                rut_evaluado VARCHAR(30) NOT NULL DEFAULT '',
+                id_servicio INT NULL,
+                servicio VARCHAR(255) NOT NULL DEFAULT '',
+                id_programada INT NULL,
+                id_agrupacion INT NULL,
+                cuadrilla INT NULL,
+                id_proceso_habilitacion INT NULL,
+                intento INT NULL,
+                ip VARCHAR(64) NOT NULL DEFAULT '',
+                user_agent VARCHAR(255) NOT NULL DEFAULT '',
+                metodo VARCHAR(10) NOT NULL DEFAULT '',
+                url VARCHAR(255) NOT NULL DEFAULT '',
+                detalle LONGTEXT NULL,
+                KEY idx_aud_prueba_fecha (created_at),
+                KEY idx_aud_prueba_evento (evento),
+                KEY idx_aud_prueba_rut (rut_evaluado),
+                KEY idx_aud_prueba_servicio (id_servicio),
+                KEY idx_aud_prueba_programada (id_programada),
+                KEY idx_aud_prueba_proceso_hab (id_proceso_habilitacion)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        } catch (\Throwable $e) {
+            return;
+        }
+    }
+}
+
+if (!function_exists('auditPrueba')) {
+    function auditPrueba(string $evento, array $data = [], array $usuario = []): void
+    {
+        if (!function_exists('db')) {
+            return;
+        }
+
+        $sessionUser = $_SESSION['auth'] ?? [];
+
+        $usuarioId = $usuario['id'] ?? $sessionUser['id'] ?? null;
+        $usuarioCodigo = (string)($usuario['codigo'] ?? $sessionUser['codigo'] ?? '');
+        $usuarioNombre = (string)($usuario['nombre'] ?? $sessionUser['nombre'] ?? '');
+        $usuarioRol = (string)($usuario['rol'] ?? $sessionUser['rol'] ?? '');
+
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        $userAgent = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+        $metodo = (string)($_SERVER['REQUEST_METHOD'] ?? '');
+        $url = (string)($_SERVER['REQUEST_URI'] ?? '');
+
+        $detalle = $data['detalle'] ?? [];
+        $detalleJson = '{}';
+        if (!empty($detalle)) {
+            $encoded = json_encode($detalle, JSON_UNESCAPED_UNICODE);
+            if ($encoded !== false) {
+                $detalleJson = $encoded;
+            }
+        }
+
+        try {
+            $pdo = db();
+            ensureAuditPruebaTable($pdo);
+
+            $stmt = $pdo->prepare("INSERT INTO ceo_auditoria_prueba
+                (created_at, evento, usuario_id, usuario_codigo, usuario_nombre, usuario_rol,
+                 rut_evaluado, id_servicio, servicio, id_programada, id_agrupacion, cuadrilla,
+                 id_proceso_habilitacion, intento, ip, user_agent, metodo, url, detalle)
+                VALUES
+                (NOW(), :evento, :usuario_id, :usuario_codigo, :usuario_nombre, :usuario_rol,
+                 :rut_evaluado, :id_servicio, :servicio, :id_programada, :id_agrupacion, :cuadrilla,
+                 :id_proceso_habilitacion, :intento, :ip, :user_agent, :metodo, :url, :detalle)");
+
+            $stmt->execute([
+                ':evento' => $evento,
+                ':usuario_id' => $usuarioId,
+                ':usuario_codigo' => $usuarioCodigo,
+                ':usuario_nombre' => $usuarioNombre,
+                ':usuario_rol' => $usuarioRol,
+                ':rut_evaluado' => (string)($data['rut_evaluado'] ?? ''),
+                ':id_servicio' => isset($data['id_servicio']) ? (int)$data['id_servicio'] : null,
+                ':servicio' => (string)($data['servicio'] ?? ''),
+                ':id_programada' => isset($data['id_programada']) ? (int)$data['id_programada'] : null,
+                ':id_agrupacion' => isset($data['id_agrupacion']) ? (int)$data['id_agrupacion'] : null,
+                ':cuadrilla' => isset($data['cuadrilla']) ? (int)$data['cuadrilla'] : null,
+                ':id_proceso_habilitacion' => isset($data['id_proceso_habilitacion']) ? (int)$data['id_proceso_habilitacion'] : null,
+                ':intento' => isset($data['intento']) ? (int)$data['intento'] : null,
+                ':ip' => $ip,
+                ':user_agent' => mb_substr($userAgent, 0, 255),
+                ':metodo' => mb_substr($metodo, 0, 10),
+                ':url' => mb_substr($url, 0, 255),
+                ':detalle' => $detalleJson,
+            ]);
+        } catch (\Throwable $e) {
+            return;
+        }
+    }
+}
+
+if (!function_exists('ensureAuditDataEditTable')) {
+    function ensureAuditDataEditTable(\PDO $pdo): void
+    {
+        static $checked = false;
+
+        if ($checked) {
+            return;
+        }
+
+        $checked = true;
+
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS ceo_auditoria_edicion_datos (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario_id INT NULL,
+                usuario_codigo VARCHAR(80) NOT NULL DEFAULT '',
+                usuario_nombre VARCHAR(180) NOT NULL DEFAULT '',
+                usuario_rol VARCHAR(120) NOT NULL DEFAULT '',
+                tabla VARCHAR(120) NOT NULL,
+                llave_registro VARCHAR(255) NOT NULL,
+                columna VARCHAR(120) NOT NULL,
+                valor_anterior LONGTEXT NULL,
+                valor_nuevo LONGTEXT NULL,
+                ip VARCHAR(64) NOT NULL DEFAULT '',
+                user_agent VARCHAR(255) NOT NULL DEFAULT '',
+                metodo VARCHAR(10) NOT NULL DEFAULT '',
+                url VARCHAR(255) NOT NULL DEFAULT '',
+                KEY idx_aud_edicion_fecha (created_at),
+                KEY idx_aud_edicion_tabla (tabla),
+                KEY idx_aud_edicion_llave (llave_registro)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        } catch (\Throwable $e) {
+            return;
+        }
+    }
+}
+
+if (!function_exists('auditDataEdit')) {
+    function auditDataEdit(string $tabla, string $llaveRegistro, string $columna, mixed $valorAnterior, mixed $valorNuevo, array $usuario = []): void
+    {
+        if (!function_exists('db')) {
+            return;
+        }
+
+        $sessionUser = $_SESSION['auth'] ?? [];
+
+        $usuarioId = $usuario['id'] ?? $sessionUser['id'] ?? null;
+        $usuarioCodigo = (string)($usuario['codigo'] ?? $sessionUser['codigo'] ?? '');
+        $usuarioNombre = (string)($usuario['nombre'] ?? $sessionUser['nombre'] ?? '');
+        $usuarioRol = (string)($usuario['rol'] ?? $sessionUser['rol'] ?? '');
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        $userAgent = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+        $metodo = (string)($_SERVER['REQUEST_METHOD'] ?? '');
+        $url = (string)($_SERVER['REQUEST_URI'] ?? '');
+
+        $normalizar = static function (mixed $valor): ?string {
+            if ($valor === null) {
+                return null;
+            }
+            if (is_bool($valor)) {
+                return $valor ? '1' : '0';
+            }
+            if (is_array($valor) || is_object($valor)) {
+                $json = json_encode($valor, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                return $json !== false ? $json : null;
+            }
+            return (string)$valor;
+        };
+
+        try {
+            $pdo = db();
+            ensureAuditDataEditTable($pdo);
+
+            $stmt = $pdo->prepare("INSERT INTO ceo_auditoria_edicion_datos
+                (created_at, usuario_id, usuario_codigo, usuario_nombre, usuario_rol,
+                 tabla, llave_registro, columna, valor_anterior, valor_nuevo,
+                 ip, user_agent, metodo, url)
+                VALUES
+                (NOW(), :usuario_id, :usuario_codigo, :usuario_nombre, :usuario_rol,
+                 :tabla, :llave_registro, :columna, :valor_anterior, :valor_nuevo,
+                 :ip, :user_agent, :metodo, :url)");
+
+            $stmt->execute([
+                ':usuario_id' => $usuarioId,
+                ':usuario_codigo' => $usuarioCodigo,
+                ':usuario_nombre' => $usuarioNombre,
+                ':usuario_rol' => $usuarioRol,
+                ':tabla' => $tabla,
+                ':llave_registro' => $llaveRegistro,
+                ':columna' => $columna,
+                ':valor_anterior' => $normalizar($valorAnterior),
+                ':valor_nuevo' => $normalizar($valorNuevo),
+                ':ip' => $ip,
+                ':user_agent' => mb_substr($userAgent, 0, 255),
+                ':metodo' => mb_substr($metodo, 0, 10),
+                ':url' => mb_substr($url, 0, 255),
+            ]);
+        } catch (\Throwable $e) {
             return;
         }
     }
@@ -1161,6 +1419,65 @@ if (!function_exists('obtenerUltimaNotaTeorica')) {
     }
 }
 
+if (!function_exists('obtenerUltimaNotaTeoricaPorAgrupacion')) {
+    function obtenerUltimaNotaTeoricaPorAgrupacion(
+        
+        \PDO $pdo,
+        string $rut,
+        int $idServicio,
+        int $idProceso,
+        int $idAgrupacion,
+        float $porcentajeMinimo
+    ): ?array {
+        $sql = "
+            SELECT
+                rpt.intento,
+                MAX(CONCAT(COALESCE(rpt.fecha_rendicion, '0000-00-00'), ' ', COALESCE(rpt.hora_rendicion, '00:00:00'))) AS fecha_hora,
+                SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
+                COUNT(*) AS total
+            FROM ceo_resultado_pruebat rpt
+            INNER JOIN ceo_preguntas_servicios ps
+                ON ps.id = rpt.id_pregunta
+               AND ps.id_servicio = :id_servicio
+               AND ps.id_agrupacion = :id_agrupacion
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(rpt.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(:rut), '.', ''), '-', ''), ' ', '')
+              AND rpt.proceso = :id_proceso
+            GROUP BY rpt.intento
+            ORDER BY fecha_hora DESC, rpt.intento DESC
+            LIMIT 1
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            ':rut' => $rut,
+            ':id_servicio' => $idServicio,
+            ':id_agrupacion' => $idAgrupacion,
+            ':id_proceso' => $idProceso,
+        ]);
+
+        $fila = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$fila) {
+            return null;
+        }
+
+        $total = (int)($fila['total'] ?? 0);
+        if ($total <= 0) {
+            return null;
+        }
+
+        $correctas = (int)($fila['correctas'] ?? 0);
+        $porcentaje = round(($correctas / $total) * 100, 2);
+        $nota = round(calcularNotaFinalDesdePorcentaje($porcentaje, $porcentajeMinimo), 2);
+
+        return [
+            'nota' => $nota,
+            'porcentaje' => $porcentaje,
+            'intento' => isset($fila['intento']) ? (int)$fila['intento'] : null,
+            'fecha_hora' => (string)($fila['fecha_hora'] ?? ''),
+        ];
+    }
+}
+
 /* ===========================================================
    ULTIMA NOTA TERRENO
    =========================================================== */
@@ -1233,6 +1550,36 @@ if (!function_exists('obtenerUltimaNotaTerreno')) {
     }
 }
 
+if (!function_exists('obtenerResultadoPodas3d')) {
+    function obtenerResultadoPodas3d(\PDO $pdo, string $rut): ?array
+    {
+        $stmt = $pdo->prepare(' 
+            SELECT rut_usuario, fecha_registro, puntuacion_final_2
+            FROM ceo_prueba_3d
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(rut_usuario), ".", ""), "-", ""), " ", "") = REPLACE(REPLACE(REPLACE(UPPER(:rut), ".", ""), "-", ""), " ", "")
+            ORDER BY id DESC
+            LIMIT 1
+        ');
+
+        try {
+            $stmt->execute([':rut' => $rut]);
+        } catch (Throwable $e) {
+            return null;
+        }
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+
+        return [
+            'rut' => (string)($row['rut_usuario'] ?? ''),
+            'fecha_registro' => trim((string)($row['fecha_registro'] ?? '')),
+            'puntaje' => isset($row['puntuacion_final_2']) ? (float)$row['puntuacion_final_2'] : null,
+        ];
+    }
+}
+
 /* ===========================================================
    RECALCULAR RESULTADO FINAL DEL SERVICIO
    =========================================================== */
@@ -1252,6 +1599,156 @@ if (!function_exists('recalcularResultadoServicio')) {
         float $porcentajeMinimoAprobacion = 80.0,
         ?int $idProcesoHabilitacion = null
     ): array {
+        if (ceoIsLleeService($idServicio)) {
+            $cargo = obtenerCargoTrabajador($pdo, $rut, $idServicio, $idProceso);
+
+            if ($cargo === null) {
+                throw new RuntimeException("No se encontró cargo para el rut {$rut}");
+            }
+
+            $cfg = ceoGetLleeConfig();
+            $teorica = obtenerUltimaNotaTeoricaPorAgrupacion($pdo, $rut, $idServicio, $idProceso, (int)$cfg['theory_group_id'], (float)$cfg['theory_min_pct']);
+            $hotline = obtenerUltimaNotaTeoricaPorAgrupacion($pdo, $rut, $idServicio, $idProceso, (int)$cfg['hotline_group_id'], (float)$cfg['hotline_min_pct']);
+            $terreno = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
+
+            $notaPrueba = isset($teorica['nota']) ? (float)$teorica['nota'] : null;
+            $porcentajePrueba = isset($teorica['porcentaje']) ? (float)$teorica['porcentaje'] : null;
+            $notaTerreno = isset($terreno['nota']) ? (float)$terreno['nota'] : null;
+            $porcentajeTerreno = isset($terreno['porcentaje']) ? (float)$terreno['porcentaje'] : null;
+            $porcentajeHotline = isset($hotline['porcentaje']) ? (float)$hotline['porcentaje'] : null;
+
+            $notaFinal = null;
+            if ($notaPrueba !== null && $notaTerreno !== null) {
+                $notaFinal = round(($notaPrueba + $notaTerreno) / 2, 2);
+            }
+
+            $base = [
+                'rut' => $rut,
+                'id_servicio' => $idServicio,
+                'id_proceso' => $idProceso,
+                'id_proceso_habilitacion' => $idProcesoHabilitacion,
+                'cargo' => $cargo,
+                'segmento' => $segmento,
+                'nota_prueba' => $notaPrueba,
+                'nota_terreno' => $notaTerreno,
+                'porcentaje_prueba' => $porcentajePrueba,
+                'porcentaje_terreno' => $porcentajeTerreno,
+                'ponderacion_prueba' => 0.5,
+                'ponderacion_terreno' => 0.5,
+                'nota_final' => $notaFinal,
+                'resultado_final' => 'PENDIENTE',
+                'observacion' => null,
+            ];
+
+            if ($porcentajePrueba === null) {
+                $base['observacion'] = 'Falta resultado de prueba LLEE';
+                return $base;
+            }
+            if ($porcentajeHotline === null) {
+                $base['observacion'] = 'Falta resultado de prueba Hotline';
+                return $base;
+            }
+            if ($porcentajeTerreno === null) {
+                $base['observacion'] = 'Falta resultado de terreno';
+                return $base;
+            }
+
+            if ($porcentajePrueba < (float)$cfg['theory_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba prueba LLEE';
+                return $base;
+            }
+            if ($porcentajeHotline < (float)$cfg['hotline_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba Hotline';
+                return $base;
+            }
+            if ($porcentajeTerreno < (float)$cfg['terrain_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba terreno';
+                return $base;
+            }
+
+            $base['resultado_final'] = 'APROBADO';
+            $base['observacion'] = 'OK LLEE';
+            return $base;
+        }
+
+        if (ceoIsPodasService($idServicio)) {
+            $cargo = obtenerCargoTrabajador($pdo, $rut, $idServicio, $idProceso);
+
+            if ($cargo === null) {
+                throw new RuntimeException("No se encontró cargo para el rut {$rut}");
+            }
+
+            $cfg = ceoGetPodasConfig();
+            $teorica = obtenerUltimaNotaTeorica($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
+            $terreno = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
+            $resultado3d = obtenerResultadoPodas3d($pdo, $rut);
+
+            $notaPrueba = isset($teorica['nota']) ? (float)$teorica['nota'] : null;
+            $porcentajePrueba = isset($teorica['porcentaje']) ? (float)$teorica['porcentaje'] : null;
+            $notaTerreno = isset($terreno['nota']) ? (float)$terreno['nota'] : null;
+            $porcentajeTerreno = isset($terreno['porcentaje']) ? (float)$terreno['porcentaje'] : null;
+            $puntaje3d = isset($resultado3d['puntaje']) ? (float)$resultado3d['puntaje'] : null;
+
+            $notaFinal = null;
+            if ($notaPrueba !== null && $notaTerreno !== null) {
+                $notaFinal = round(($notaPrueba + $notaTerreno) / 2, 2);
+            }
+
+            $base = [
+                'rut' => $rut,
+                'id_servicio' => $idServicio,
+                'id_proceso' => $idProceso,
+                'id_proceso_habilitacion' => $idProcesoHabilitacion,
+                'cargo' => $cargo,
+                'segmento' => $segmento,
+                'nota_prueba' => $notaPrueba,
+                'nota_terreno' => $notaTerreno,
+                'porcentaje_prueba' => $porcentajePrueba,
+                'porcentaje_terreno' => $porcentajeTerreno,
+                'ponderacion_prueba' => 0.5,
+                'ponderacion_terreno' => 0.5,
+                'nota_final' => $notaFinal,
+                'resultado_final' => 'PENDIENTE',
+                'observacion' => null,
+            ];
+
+            if ($porcentajePrueba === null) {
+                $base['observacion'] = 'Falta resultado de prueba teórica';
+                return $base;
+            }
+            if ($porcentajeTerreno === null) {
+                $base['observacion'] = 'Falta resultado de terreno';
+                return $base;
+            }
+            if ($puntaje3d === null) {
+                $base['observacion'] = 'Falta resultado 3D';
+                return $base;
+            }
+
+            if ($porcentajePrueba < (float)$cfg['theory_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba prueba teórica';
+                return $base;
+            }
+            if ($porcentajeTerreno < (float)$cfg['terrain_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba terreno';
+                return $base;
+            }
+            if ($puntaje3d < (float)$cfg['three_d_min_pct']) {
+                $base['resultado_final'] = 'REPROBADO';
+                $base['observacion'] = 'No aprueba 3D';
+                return $base;
+            }
+
+            $base['resultado_final'] = 'APROBADO';
+            $base['observacion'] = 'OK PODAS';
+            return $base;
+        }
+
         $cargo = obtenerCargoTrabajador($pdo, $rut, $idServicio, $idProceso);
 
         if ($cargo === null) {
@@ -1268,9 +1765,6 @@ if (!function_exists('recalcularResultadoServicio')) {
 
         $pesoPrueba  = round((float)($regla['ponderacion_prueba'] ?? 0), 4);
         $pesoTerreno = round((float)($regla['ponderacion_terreno'] ?? 0), 4);
-
-        $exigePruebaAprobada  = strtoupper(trim((string)($regla['exige_prueba_aprobada'] ?? 'S'))) === 'S';
-        $exigeTerrenoAprobado = strtoupper(trim((string)($regla['exige_terreno_aprobado'] ?? 'S'))) === 'S';
 
         $teorica = obtenerUltimaNotaTeorica($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
         $terreno = obtenerUltimaNotaTerreno($pdo, $rut, $idServicio, $idProceso, $idProcesoHabilitacion);
@@ -1363,31 +1857,97 @@ if (!function_exists('recalcularResultadoServicio')) {
         }
 
         /* -------------------------------------------------------
-           3. EVALUAR APROBACIÓN DE CADA COMPONENTE
-           - La exigencia mínima se valida por porcentaje
+           3. DEFINIR ESTADO FINAL DESDE LA NOTA FINAL
            ------------------------------------------------------- */
-        $apruebaPrueba  = ($porcentajePrueba !== null && $porcentajePrueba >= $porcentajeMinimoAprobacion);
-        $apruebaTerreno = ($porcentajeTerreno !== null && $porcentajeTerreno >= $porcentajeMinimoAprobacion);
-
-        if ($exigePruebaAprobada && !$apruebaPrueba) {
-            $base['resultado_final'] = 'REPROBADO';
-            $base['observacion']     = 'No aprueba prueba teórica';
-            return $base;
-        }
-
-        if ($pesoTerreno > 0 && $exigeTerrenoAprobado && !$apruebaTerreno) {
-            $base['resultado_final'] = 'REPROBADO';
-            $base['observacion']     = 'No aprueba terreno';
-            return $base;
-        }
-
-        /* -------------------------------------------------------
-           4. APROBADO
-           ------------------------------------------------------- */
-        $base['resultado_final'] = 'APROBADO';
+        $base['resultado_final'] = $notaFinal >= 4.0 ? 'APROBADO' : 'REPROBADO';
         $base['observacion']     = 'OK';
 
         return $base;
+    }
+}
+
+if (!function_exists('sincronizarVigenciaDetalleHabilitacion')) {
+    function sincronizarVigenciaDetalleHabilitacion(\PDO $pdo, array $resultado): void
+    {
+        $rut = trim((string)($resultado['rut'] ?? ''));
+        $idServicio = (int)($resultado['id_servicio'] ?? 0);
+        $idProceso = (int)($resultado['id_proceso'] ?? 0);
+        $idProcesoHabilitacion = (int)($resultado['id_proceso_habilitacion'] ?? 0);
+
+        if ($rut === '' || $idServicio <= 0 || $idProceso <= 0) {
+            return;
+        }
+
+        $stmtDelete = $pdo->prepare('
+            DELETE FROM ceo_vigencia_detalle
+            WHERE rut = :rut
+              AND id_servicio = :id_servicio
+              AND id_proceso = :id_proceso
+        ');
+        $stmtDelete->execute([
+            ':rut' => $rut,
+            ':id_servicio' => $idServicio,
+            ':id_proceso' => $idProceso,
+        ]);
+
+        if (strtoupper(trim((string)($resultado['resultado_final'] ?? ''))) !== 'APROBADO') {
+            return;
+        }
+
+        $tiposRequeridos = [];
+        if ((float)($resultado['ponderacion_prueba'] ?? 0) > 0) {
+            $tiposRequeridos[] = 'PRUEBA';
+        }
+        if ((float)($resultado['ponderacion_terreno'] ?? 0) > 0) {
+            $tiposRequeridos[] = 'TERRENO';
+        }
+
+        if (empty($tiposRequeridos)) {
+            return;
+        }
+
+        $stmtProg = $pdo->prepare('
+            SELECT id_proceso_habilitacion
+            FROM ceo_evaluaciones_programadas
+            WHERE rut = :rut
+              AND id_servicio = :id_servicio
+              AND cuadrilla = :cuadrilla
+              AND tipo = :tipo
+              AND estado = "EJECUTADA"
+              AND resultado = "APROBADO"
+            ORDER BY id DESC
+            LIMIT 1
+        ');
+
+        $stmtInsert = $pdo->prepare('
+            INSERT INTO ceo_vigencia_detalle
+                (rut, id_servicio, fechavig_ini, fechavig_fin, id_proceso, id_proceso_habilitacion, tipo)
+            VALUES
+                (:rut, :id_servicio, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 3 YEAR), :id_proceso, :id_proceso_habilitacion, :tipo)
+        ');
+
+        foreach ($tiposRequeridos as $tipo) {
+            $stmtProg->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $idServicio,
+                ':cuadrilla' => $idProceso,
+                ':tipo' => $tipo,
+            ]);
+            $programada = $stmtProg->fetch(\PDO::FETCH_ASSOC) ?: null;
+            if (!$programada) {
+                continue;
+            }
+
+            $stmtInsert->execute([
+                ':rut' => $rut,
+                ':id_servicio' => $idServicio,
+                ':id_proceso' => $idProceso,
+                ':id_proceso_habilitacion' => (int)($programada['id_proceso_habilitacion'] ?? $idProcesoHabilitacion) ?: null,
+                ':tipo' => $tipo,
+            ]);
+        }
+
+        recalcularVigenciaGeneral($pdo, $rut, $idProceso);
     }
 }
 
@@ -1469,6 +2029,8 @@ if (!function_exists('guardarResultadoFinalServicio')) {
             ':resultado_final'     => $resultado['resultado_final'],
             ':observacion'         => $resultado['observacion']
         ]);
+
+        sincronizarVigenciaDetalleHabilitacion($pdo, $resultado);
 
         if (($resultado['resultado_final'] ?? '') === 'APROBADO' && !empty($resultado['id_proceso_habilitacion'])) {
             cerrarProcesoHabilitacion($pdo, (int)$resultado['id_proceso_habilitacion']);

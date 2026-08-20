@@ -30,6 +30,7 @@ try {
     }
 
     $nsolicitud = (int)($data['nsolicitud'] ?? 0);
+    $fecha = trim((string)($data['fecha'] ?? ''));
     $proceso = (int)($data['proceso'] ?? 0);
     $patio = (int)($data['patio'] ?? 0);
     $uo = (int)($data['uo'] ?? 0);
@@ -37,8 +38,13 @@ try {
     $habilitacionCeo = (int)($data['habilitacionceo'] ?? 0);
     $tipoHabilitacion = trim((string)($data['tipohabilitacion'] ?? ''));
 
-    if ($nsolicitud <= 0 || $proceso <= 0 || $patio <= 0 || $uo <= 0 || $servicio <= 0 || $habilitacionCeo <= 0 || $tipoHabilitacion === '') {
+    if ($nsolicitud <= 0 || $fecha === '' || $proceso <= 0 || $patio <= 0 || $uo <= 0 || $servicio <= 0 || $habilitacionCeo <= 0 || $tipoHabilitacion === '') {
         throw new Exception('Datos incompletos.');
+    }
+
+    $fechaDt = DateTimeImmutable::createFromFormat('Y-m-d', $fecha);
+    if (!$fechaDt || $fechaDt->format('Y-m-d') !== $fecha) {
+        throw new Exception('Fecha inválida.');
     }
 
     $tiposPermitidos = ['Seguridad', 'Técnica', 'Ambos'];
@@ -80,7 +86,8 @@ try {
 
     $stmtUpdate = $pdo->prepare('
         UPDATE ceo_solicitudes
-        SET proceso = :proceso,
+        SET fecha = :fecha,
+            proceso = :proceso,
             patio = :patio,
             uo = :uo,
             servicio = :servicio,
@@ -90,6 +97,7 @@ try {
         LIMIT 1
     ');
     $stmtUpdate->execute([
+        ':fecha' => $fecha,
         ':proceso' => $proceso,
         ':patio' => $patio,
         ':uo' => $uo,

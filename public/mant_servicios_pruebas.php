@@ -26,29 +26,50 @@ function esc($v): string {
    CRUD
 ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        $accion = $_POST['accion'] ?? '';
+        $id     = (int)($_POST['id'] ?? 0);
 
-    $accion = $_POST['accion'] ?? '';
-    $id     = (int)($_POST['id'] ?? 0);
+        $servicio    = trim($_POST['servicio'] ?? '');
+        $descripcion = trim($_POST['descripcion'] ?? '');
 
-    $servicio    = trim($_POST['servicio'] ?? '');
-    $descripcion = trim($_POST['descripcion'] ?? '');
+        if ($accion === 'crear' && $servicio) {
+            $pdo->beginTransaction();
 
-    if ($accion === 'crear' && $servicio) {
-        $sql = "INSERT INTO ceo_servicios_pruebas (servicio, descripcion)
-                VALUES (:servicio, :descripcion)";
-        $pdo->prepare($sql)->execute(compact('servicio','descripcion'));
-        $msg = "✔ Servicio ingresado correctamente.";
+            $sql = "INSERT INTO ceo_servicios_pruebas (servicio, descripcion)
+                    VALUES (:servicio, :descripcion)";
+            $pdo->prepare($sql)->execute(compact('servicio','descripcion'));
 
-    } elseif ($accion === 'editar' && $id > 0) {
-        $sql = "UPDATE ceo_servicios_pruebas
-                SET servicio=:servicio, descripcion=:descripcion
-                WHERE id=:id";
-        $pdo->prepare($sql)->execute(compact('servicio','descripcion','id'));
-        $msg = "✏ Registro actualizado.";
+            $idServicioNuevo = (int)$pdo->lastInsertId();
+            if ($idServicioNuevo > 0) {
+                $stmtTempExiste = $pdo->prepare('SELECT 1 FROM temp_servicio_cargados_habilitacion WHERE id_servicio = :id_servicio LIMIT 1');
+                $stmtTempExiste->execute([':id_servicio' => $idServicioNuevo]);
 
-    } elseif ($accion === 'eliminar' && $id > 0) {
-        $pdo->prepare("DELETE FROM ceo_servicios_pruebas WHERE id=?")->execute([$id]);
-        $msg = "🗑 Registro eliminado.";
+                if (!$stmtTempExiste->fetchColumn()) {
+                    $stmtTempIns = $pdo->prepare('INSERT INTO temp_servicio_cargados_habilitacion (id_servicio) VALUES (:id_servicio)');
+                    $stmtTempIns->execute([':id_servicio' => $idServicioNuevo]);
+                }
+            }
+
+            $pdo->commit();
+            $msg = "✔ Servicio ingresado correctamente.";
+
+        } elseif ($accion === 'editar' && $id > 0) {
+            $sql = "UPDATE ceo_servicios_pruebas
+                    SET servicio=:servicio, descripcion=:descripcion
+                    WHERE id=:id";
+            $pdo->prepare($sql)->execute(compact('servicio','descripcion','id'));
+            $msg = "✏ Registro actualizado.";
+
+        } elseif ($accion === 'eliminar' && $id > 0) {
+            $pdo->prepare("DELETE FROM ceo_servicios_pruebas WHERE id=?")->execute([$id]);
+            $msg = "🗑 Registro eliminado.";
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
 }
 

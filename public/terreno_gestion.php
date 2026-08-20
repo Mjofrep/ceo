@@ -79,6 +79,10 @@ body {background:#f7f9fc; font-size:0.9rem;}
     <!-- ******************************************************** -->
     <?php if ($modo === 'agrupaciones'): ?>
 
+        <?php if (isset($_GET['dup'])): ?>
+            <div class="alert alert-warning">Ya existe una agrupación con el mismo nombre y servicio.</div>
+        <?php endif; ?>
+
         <div class="card shadow-sm mb-4">
             <div class="card-header bg-primary text-white">
                 Crear Agrupación de Terreno

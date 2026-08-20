@@ -12,7 +12,7 @@ require_once '../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
 
 if (empty($_SESSION['auth'])) {
-    header('Location: /ceo/public/index.php');
+    header('Location: ' . app_url('/public/index.php'));
     exit;
 }
 
@@ -23,6 +23,12 @@ $esAdmin       = ($rolUsuario === 'administrador');
 $esContratista = ($rolUsuario === 'contratista');
 
 $pdo = db();
+
+$offsetDias = (int)($_GET['offset'] ?? 0);
+$hoy = new DateTimeImmutable('today');
+$fechaBase = $hoy->modify(($offsetDias >= 0 ? '+' : '') . $offsetDias . ' days');
+$fechaInicioAgenda = $fechaBase->format('Y-m-d');
+$fechaFinAgenda = $fechaBase->modify('+14 days')->format('Y-m-d');
 
 /* ========================================================
    1) PARTICIPANTES POR CUADRILLA
@@ -123,9 +129,21 @@ SELECT
     ce.nombre AS nombre_empresa
 FROM ceo_habilitacion h
 LEFT JOIN ceo_empresas ce ON h.empresa = ce.id
+WHERE h.fecha BETWEEN :fecha_inicio AND :fecha_fin
 ";
 
+if ($esContratista) {
+    $sqlCuad .= " AND h.empresa = :empresa ";
+}
+
 $stmtCuad = $pdo->prepare($sqlCuad);
+
+$stmtCuad->bindValue(':fecha_inicio', $fechaInicioAgenda);
+$stmtCuad->bindValue(':fecha_fin', $fechaFinAgenda);
+
+if ($esContratista) {
+    $stmtCuad->bindValue(':empresa', $idEmpresaUser, PDO::PARAM_INT);
+}
 
 $stmtCuad->execute();
 $cuadrillas = $stmtCuad->fetchAll(PDO::FETCH_ASSOC);
@@ -153,11 +171,11 @@ foreach ($cuadrillas as $c) {
 
 
 /* ========================================================
-   4) GENERAR CALENDARIO (15 días)
+   4) GENERAR CALENDARIO (15 días visibles, avance de 7)
    ======================================================== */
 $fechas = [];
 for ($i=0; $i<15; $i++){
-    $fechas[] = date("Y-m-d", strtotime("+$i day"));
+    $fechas[] = $fechaBase->modify('+' . $i . ' days')->format('Y-m-d');
 }
 ?>
 <!doctype html>
@@ -179,6 +197,30 @@ body {background:#f7f9fc;}
 .tab-pane {border:1px solid #dee2e6; border-top:0; padding:15px;}
 .table thead {position:sticky; top:0; z-index:2;}
 .table th {background:#eaf2fb;}
+
+.sticky-col-fecha,
+.sticky-col-jornada {
+    position: sticky;
+    background: inherit;
+}
+
+.sticky-col-fecha {
+    left: 0;
+    min-width: 118px;
+    z-index: 3;
+}
+
+.sticky-col-jornada {
+    left: 118px;
+    min-width: 88px;
+    z-index: 3;
+}
+
+.table thead .sticky-col-fecha,
+.table thead .sticky-col-jornada {
+    background:#eaf2fb;
+    z-index: 5;
+}
 
 .blocked {background:#ffcccc !important;}
 .ok {background:#e6ffe6;}
@@ -215,6 +257,22 @@ body {background:#f7f9fc;}
 #plan .btn {
     font-size: 0.70rem;
     padding: 2px 4px;
+}
+
+.servicios-visibles-panel {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.servicios-visibles-list {
+    max-height: 120px;
+    overflow: auto;
+}
+
+.servicios-visibles-list .form-check-label {
+    font-size: 0.82rem;
 }
 
 /* =========================
@@ -285,7 +343,7 @@ function filtrarParticipantes() {
         <small class="text-secondary"><?= APP_SUBTITLE ?></small>
       </div>
     </div>
-    <a href="/ceo.noetica.cl/public/general.php" class="btn btn-outline-primary btn-sm">← Volver</a>
+    <a href="<?= APP_BASE ?>/public/general.php" class="btn btn-outline-primary btn-sm">← Volver</a>
   </div>
 </header>
 
@@ -373,15 +431,54 @@ function filtrarParticipantes() {
       ============================================================ -->
       <div class="tab-pane fade" id="plan" role="tabpanel">
 
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <div class="fw-semibold text-primary">Periodo visible</div>
+            <small class="text-muted"><?= esc($fechaInicioAgenda) ?> al <?= esc($fechaFinAgenda) ?> (15 dias)</small>
+          </div>
+          <div class="btn-group" role="group" aria-label="Navegacion de periodo">
+            <a href="?offset=<?= $offsetDias - 7 ?>#plan" class="btn btn-outline-primary btn-sm">&larr; 7 dias</a>
+            <a href="?offset=0#plan" class="btn btn-outline-secondary btn-sm">Hoy</a>
+            <a href="?offset=<?= $offsetDias + 7 ?>#plan" class="btn btn-outline-primary btn-sm">7 dias &rarr;</a>
+          </div>
+        </div>
+
+        <div class="servicios-visibles-panel mb-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+              <div class="fw-semibold text-primary">Servicios visibles</div>
+              <small class="text-muted">Selecciona que servicios mostrar como columnas en la planificacion.</small>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="badge text-bg-light" id="serviciosVisiblesContador"></span>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="btnServiciosMostrarTodos">Mostrar todos</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="btnServiciosOcultarTodos">Ocultar todos</button>
+            </div>
+          </div>
+
+          <div class="row g-2 servicios-visibles-list" id="serviciosVisiblesList">
+            <?php foreach($servicios as $s): ?>
+              <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2">
+                <div class="form-check">
+                  <input class="form-check-input chk-servicio-plan" type="checkbox" value="<?= (int)$s['id'] ?>" id="chkServicioPlan<?= (int)$s['id'] ?>" checked>
+                  <label class="form-check-label" for="chkServicioPlan<?= (int)$s['id'] ?>">
+                    <?= esc($s['servicio']) ?>
+                  </label>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+
         <div class="scroll-box">
 
  <table class="table table-sm table-bordered align-middle">
     <thead class="text-center">
       <tr>
-        <th>Fecha</th>
-        <th>Jornada</th>
+        <th class="sticky-col-fecha">Fecha</th>
+        <th class="sticky-col-jornada">Jornada</th>
         <?php foreach($servicios as $s): ?>
-            <th><?= esc($s['servicio']) ?></th>
+            <th data-servicio-col="<?= (int)$s['id'] ?>"><?= esc($s['servicio']) ?></th>
         <?php endforeach; ?>
       </tr>
     </thead>
@@ -396,12 +493,12 @@ function filtrarParticipantes() {
       <tr title="<?= esc($motivo) ?>">
 
         <!-- FECHA OCUPA 2 FILAS -->
-        <td class="<?= $isBlocked ? 'blocked':'ok' ?>" rowspan="2">
+        <td class="<?= $isBlocked ? 'blocked':'ok' ?> sticky-col-fecha" rowspan="2">
             <?= $f ?>
         </td>
 
         <!-- Jornada mañana -->
-        <td class="<?= $isBlocked ? 'blocked':'ok' ?>">Mañana</td>
+        <td class="<?= $isBlocked ? 'blocked':'ok' ?> sticky-col-jornada">Mañana</td>
 
  <!-- Celdas por servicio (Mañana) -->
 <?php foreach($servicios as $s): ?>
@@ -410,7 +507,7 @@ function filtrarParticipantes() {
         $arr  = $mapCuadrillas[$key] ?? [];
         $cant = count($arr);
     ?>
-    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>">
+    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>" data-servicio-col="<?= (int)$s['id'] ?>">
         <?php if(!$isBlocked): ?>
             <button 
                 type="button"
@@ -422,18 +519,22 @@ function filtrarParticipantes() {
                 <div class="fw-semibold">
                     <?= $cant ?> cuadrilla<?= $cant === 1 ? '' : 's' ?>
                 </div>
-                <?php if ($cant > 0): ?>
-                    <div class="small mt-1 text-wrap">
-                        <?php foreach ($arr as $c): ?>
-                                 <?php
-                                  $bg = ($c['estado'] === 'Cerrado') ? 'bg-danger' : 'bg-success';
-                                ?>
+        <?php if ($cant > 0): ?>
+            <div class="small mt-1 text-wrap">
+                <?php foreach ($arr as $c): ?>
+                         <?php
+                                  $estadoCuadrilla = trim((string)($c['estado'] ?? 'Pendiente'));
+                                  if ($estadoCuadrilla === 'Cerrado') {
+                                      $bg = 'bg-danger';
+                                  } elseif ($estadoCuadrilla === 'Anulada') {
+                                      $bg = 'bg-secondary';
+                                  } else {
+                                      $bg = 'bg-success';
+                                  }
+                                 ?>
                                 <span class="badge <?= $bg ?> me-1 mb-1">
-                                    C<?= (int)$c['cuadrilla'] ?> (<?= esc($c['empresa']) ?>)
+                                    C<?= (int)$c['cuadrilla'] ?><?= $estadoCuadrilla === 'Anulada' ? ' Anulada' : '' ?> (<?= esc($c['empresa']) ?>)
                                 </span>
-
-
-                            </span>
                         <?php endforeach; ?>
                     </div>
                 <?php else: ?>
@@ -450,14 +551,14 @@ function filtrarParticipantes() {
       <!-- SEGUNDA FILA: TARDE (sin celda Fecha) -->
       <tr title="<?= esc($motivo) ?>">
 
-        <td class="<?= $isBlocked ? 'blocked':'ok' ?>">Tarde</td>
+        <td class="<?= $isBlocked ? 'blocked':'ok' ?> sticky-col-jornada">Tarde</td>
 <?php foreach($servicios as $s): ?>
     <?php
         $key  = $f . '_Tarde_' . $s['id'];
         $arr  = $mapCuadrillas[$key] ?? [];
         $cant = count($arr);
     ?>
-    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>">
+    <td class="text-center <?= $isBlocked ? 'blocked':'' ?>" data-servicio-col="<?= (int)$s['id'] ?>">
         <?php if(!$isBlocked): ?>
             <button 
                 type="button"
@@ -472,8 +573,18 @@ function filtrarParticipantes() {
                 <?php if ($cant > 0): ?>
                     <div class="small mt-1 text-wrap">
                         <?php foreach ($arr as $c): ?>
-                            <span class="badge bg-success me-1 mb-1">
-                                C<?= (int)$c['cuadrilla'] ?> (<?= esc($c['empresa']) ?>)
+                            <?php
+                            $estadoCuadrilla = trim((string)($c['estado'] ?? 'Pendiente'));
+                            if ($estadoCuadrilla === 'Cerrado') {
+                                $bg = 'bg-danger';
+                            } elseif ($estadoCuadrilla === 'Anulada') {
+                                $bg = 'bg-secondary';
+                            } else {
+                                $bg = 'bg-success';
+                            }
+                            ?>
+                            <span class="badge <?= $bg ?> me-1 mb-1">
+                                C<?= (int)$c['cuadrilla'] ?><?= $estadoCuadrilla === 'Anulada' ? ' Anulada' : '' ?> (<?= esc($c['empresa']) ?>)
                             </span>
                         <?php endforeach; ?>
                     </div>
@@ -936,6 +1047,11 @@ document.addEventListener('click', function (e) {
 
                 data.cuadrillas.forEach(c => {
                     const tr = document.createElement('tr');
+                    const estado = String(c.estado || 'Pendiente').trim();
+                    const badgeClass = estado === 'Cerrado'
+                        ? 'bg-danger'
+                        : (estado === 'Anulada' ? 'bg-secondary' : 'bg-success');
+                    const badgeText = `C${c.cuadrilla}${estado === 'Anulada' ? ' Anulada' : ''}`;
                     const accion = c.editable
                         ? `<button class="btn btn-sm btn-outline-primary me-1 btnEditarCuadrilla"
                                     data-cuadrilla="${c.cuadrilla}">
@@ -945,7 +1061,7 @@ document.addEventListener('click', function (e) {
                                 Ver / Editar
                            </button>`;
                     tr.innerHTML = `
-                        <td><span class="badge bg-success">C${c.cuadrilla}</span></td>
+                        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
                         <td>${c.numeros_proceso || 'Sin proceso'}</td>
                         <td>${c.nombre_empresa || '—'}</td>
                         <td>${c.total_participantes || 0}</td>
@@ -1193,6 +1309,85 @@ document.addEventListener("DOMContentLoaded", function () {
     tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+    if (window.location.hash === "#plan") {
+        const trigger = document.querySelector('#plan-tab');
+        if (trigger) {
+            bootstrap.Tab.getOrCreateInstance(trigger).show();
+        }
+    }
+});
+
+// Mostrar/ocultar columnas de servicios en planificación, persistiendo preferencia local.
+document.addEventListener("DOMContentLoaded", function () {
+    const storageKey = "ceonext_agenda_habilitaciones_servicios_visibles";
+    const checks = Array.from(document.querySelectorAll(".chk-servicio-plan"));
+    const contador = document.getElementById("serviciosVisiblesContador");
+    const btnMostrarTodos = document.getElementById("btnServiciosMostrarTodos");
+    const btnOcultarTodos = document.getElementById("btnServiciosOcultarTodos");
+
+    if (checks.length === 0) return;
+
+    function leerPreferencia() {
+        try {
+            const raw = localStorage.getItem(storageKey);
+            const parsed = raw ? JSON.parse(raw) : null;
+            return Array.isArray(parsed) ? parsed.map(String) : null;
+        } catch (e) {
+            localStorage.removeItem(storageKey);
+            return null;
+        }
+    }
+
+    function guardarPreferencia() {
+        const visibles = checks.filter(chk => chk.checked).map(chk => String(chk.value));
+        localStorage.setItem(storageKey, JSON.stringify(visibles));
+    }
+
+    function aplicarVisibilidad(guardar = true) {
+        let visibles = 0;
+
+        checks.forEach(chk => {
+            const servicioId = String(chk.value);
+            const visible = chk.checked;
+            if (visible) visibles++;
+
+            document.querySelectorAll(`[data-servicio-col="${CSS.escape(servicioId)}"]`).forEach(el => {
+                el.style.display = visible ? "" : "none";
+            });
+        });
+
+        if (contador) {
+            contador.textContent = `${visibles} de ${checks.length} servicios visibles`;
+        }
+
+        if (guardar) guardarPreferencia();
+    }
+
+    const preferencia = leerPreferencia();
+    if (preferencia !== null) {
+        checks.forEach(chk => {
+            chk.checked = preferencia.includes(String(chk.value));
+        });
+    }
+
+    checks.forEach(chk => {
+        chk.addEventListener("change", () => aplicarVisibilidad(true));
+    });
+
+    btnMostrarTodos?.addEventListener("click", () => {
+        checks.forEach(chk => { chk.checked = true; });
+        aplicarVisibilidad(true);
+    });
+
+    btnOcultarTodos?.addEventListener("click", () => {
+        checks.forEach(chk => { chk.checked = false; });
+        aplicarVisibilidad(true);
+    });
+
+    aplicarVisibilidad(preferencia !== null);
 });
 
 </script>

@@ -1,0 +1,806 @@
+<?php
+declare(strict_types=1);
+
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/terreno_borrador.php';
+
+/* ============================================================
+   1. VALIDAR ACCESO + SOLICITUD
+   ============================================================ */
+if (empty($_SESSION['auth']) || !in_array((int)$_SESSION['auth']['id_rol'], [4, 5], true)
+) {
+    header("Location: login_evaluador_terreno.php");
+    exit;
+}
+
+$idEvaluaciones = $_GET['id_evaluacion'] ?? [];
+
+if (!is_array($idEvaluaciones) || empty($idEvaluaciones)) {
+    die('Debe seleccionar al menos una evaluación.');
+}
+
+$idEvaluaciones = array_map('intval', $idEvaluaciones);
+$idEvaluaciones = array_values(array_filter($idEvaluaciones, fn($v) => $v > 0));
+
+if (empty($idEvaluaciones)) {
+    die('Selección inválida.');
+}
+
+$db = db();
+
+/* ============================================================
+   2. OBTENER SOLICITUD REAL
+   ============================================================ */
+$placeholders = implode(',', array_fill(0, count($idEvaluaciones), '?'));
+
+$stmt = $db->prepare("
+    SELECT
+        A.id,
+        A.cuadrilla AS nsolicitud,
+        ph.numero_proceso,
+        A.id_servicio AS servicio,
+        DATE(A.fecha_programacion) AS fecha,
+        '00:00' AS horainicio,
+        '23:59' AS horatermino
+    FROM ceo_evaluaciones_programadas A
+    LEFT JOIN ceo_proceso_habilitacion ph
+        ON ph.id = A.id_proceso_habilitacion
+    WHERE A.id IN ($placeholders)
+      AND A.tipo = 'TERRENO'
+      AND A.estado = 'PENDIENTE'
+    ORDER BY A.id
+");
+
+$stmt->execute($idEvaluaciones);
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (empty($rows)) {
+    die('No hay evaluaciones válidas.');
+}
+
+$cuadrillas = array_values(array_unique(array_column($rows, 'nsolicitud')));
+$procesos = array_values(array_unique(array_filter(array_map(static fn($r) => $r['numero_proceso'] ?? null, $rows), static fn($v) => $v !== null && $v !== '')));
+$servicios  = array_values(array_unique(array_map('intval', array_column($rows, 'servicio'))));
+
+if (count($servicios) !== 1) {
+    die('Debe seleccionar evaluaciones del mismo servicio para generar esta prueba.');
+}
+
+$sol = $rows[0];
+
+$idServicio  = (int)$sol['servicio'];
+$fechaPrueba = $sol['fecha'];
+$horaInicio  = $sol['horainicio'];
+$horaTermino = $sol['horatermino'];
+$draftData = terrenoBorradorObtener($db, $idServicio, $idEvaluaciones) ?? ['participantes' => [], 'respuestas' => []];
+
+/* ============================================================
+   3. OBTENER PARTICIPANTES AUTORIZADOS
+   ============================================================ */
+$placeholders = implode(',', array_fill(0, count($idEvaluaciones), '?'));
+
+$stmt = $db->prepare("
+    SELECT DISTINCT
+        c.rut,
+        c.nombre,
+        c.apellidos AS apellidop,
+        '' AS apellidom,
+        c.cargo,
+        ep.cuadrilla
+    FROM ceo_evaluaciones_programadas ep
+    INNER JOIN ceo_habilitacion_participantes c
+        ON c.rut COLLATE utf8mb4_unicode_ci = ep.rut COLLATE utf8mb4_unicode_ci
+       AND c.id_cuadrilla = ep.cuadrilla
+    WHERE ep.id IN ($placeholders)
+      AND ep.tipo = 'TERRENO'
+      AND ep.estado = 'PENDIENTE'
+    ORDER BY c.nombre
+");
+
+$stmt->execute($idEvaluaciones);
+$participantes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ============================================================
+   4. CONSULTA MAESTRA AGRUPACIÓN → SECCIÓN → PREGUNTAS
+   ============================================================ */
+$stmt = $db->prepare("
+    SELECT 
+        a.id AS id_grupo,
+        a.grupo,
+        s.id AS id_seccion,
+        s.nombre AS nombre_seccion,
+        s.orden AS orden_seccion,
+        p.id AS id_pregunta,
+        p.pregunta,
+        p.ponderacion,
+        IFNULL(p.practico,'') AS practico,
+        IFNULL(p.referente,'') AS referente
+    FROM ceo_agrupacion_terreno a
+    LEFT JOIN ceo_seccion_terreno s ON s.id_grupo = a.id AND s.orden > 1
+    LEFT JOIN ceo_preguntas_seccion_terreno p ON p.id_seccion = s.id
+    WHERE a.id_servicio = ?
+    ORDER BY a.id, s.orden, p.orden
+");
+$stmt->execute([$idServicio]);
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ============================================================
+   5. ARMAR ESTRUCTURA COMPLETA
+   ============================================================ */
+$estructura = [];
+
+foreach ($rows as $r) {
+
+    $grupoID = $r['id_grupo'];
+    $secID   = $r['id_seccion'];
+
+    if (!isset($estructura[$grupoID])) {
+        $estructura[$grupoID] = [
+            'grupo'     => $r['grupo'],
+            'secciones' => []
+        ];
+    }
+
+    if (!isset($estructura[$grupoID]['secciones'][$secID])) {
+        $estructura[$grupoID]['secciones'][$secID] = [
+            'nombre_seccion' => $r['nombre_seccion'],
+            'preguntas'      => []
+        ];
+    }
+
+    if ($r['id_pregunta']) {
+        $estructura[$grupoID]['secciones'][$secID]['preguntas'][] = [
+            'id_pregunta' => $r['id_pregunta'],
+            'pregunta'    => $r['pregunta'],
+            'ponderacion' => $r['ponderacion'],
+            'practico'    => $r['practico'],
+            'referente'   => $r['referente']
+        ];
+    }
+}
+
+
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<?php $labelCuadrilla = implode(', ', $cuadrillas); ?>
+<?php $labelProceso = !empty($procesos) ? implode(', ', $procesos) : 'Sin proceso'; ?>
+<title>Evaluación Terreno — Proceso <?= htmlspecialchars($labelProceso) ?></title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+body { background:#f7f9fc; }
+
+/* HEADER */
+.topbar {
+    background:white;
+    padding:12px 20px;
+    border-bottom:1px solid #d6d6d6;
+    display:flex;
+    align-items:center;
+    gap:15px;
+}
+.topbar img { height:60px; }
+.topbar-title { font-size:1.4rem;font-weight:600;color:#0065a4; }
+.topbar-sub { color:#666;font-size:0.9rem;margin-top:-6px; }
+
+/* TABLAS DE EVALUACIÓN */
+.section-green {background:#d9ead3; padding:8px; font-weight:bold;}
+.section-orange {background:#fce4d6; padding:8px; font-weight:bold;}
+.row-green td {background:#f3f8f0 !important;}
+.row-orange td {background:#fef5ef !important;}
+.section-box {margin-bottom:25px;}
+.tab-pane {padding:20px;}
+
+/* BOTONES */
+.btn-top { margin-bottom:15px; }
+
+/* Estilo de pestañas tipo "solapa" */
+.nav-tabs .nav-link {
+    border: 1px solid #d0d0d0;
+    border-bottom: 2px solid transparent;
+    margin-right: 4px;
+    padding: 8px 15px;
+    background: #f8f9fa;
+    color: #0065a4;
+    font-weight: 500;
+    border-radius: 8px 8px 0 0;
+}
+.nav-tabs .nav-link:hover {
+    background: #e2e6ea;
+    color: #004b7a;
+}
+.nav-tabs .nav-link.active {
+    background: #0065a4 !important;
+    color: white !important;
+    border-color: #0065a4 #0065a4 transparent #0065a4 !important;
+    border-bottom: 2px solid white !important;
+}
+
+/* Hace sticky todo lo superior */
+.sticky-top-tabs {
+    position: sticky;
+    top: 0;
+    background: #f7f9fc;
+    z-index: 1000;
+    padding-bottom: 10px;
+}
+
+/* Evita que el scroll afecte la cabecera */
+.sticky-header {
+    position: sticky;
+    top: 0;
+    z-index: 1100;
+}
+
+.participante-inactivo {
+    opacity: .55;
+}
+
+.participante-inactivo .participante-preguntas {
+    pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<!-- ======================
+        HEADER CEO
+======================= -->
+<header class="topbar sticky-header">
+    <img src="<?= APP_LOGO ?>">
+    <div>
+        <div class="topbar-title"><?= APP_NAME ?></div>
+        <div class="topbar-sub"><?= APP_SUBTITLE ?></div>
+    </div>
+</header>
+
+<div class="container mt-4 sticky-top-tabs">
+
+<h3 class="text-center mb-4">
+    Evaluación de Prueba de Terreno — Proceso <?= htmlspecialchars($labelProceso) ?>
+    <div class="small text-muted mt-1">Cuadrilla <?= htmlspecialchars($labelCuadrilla) ?></div>
+</h3>
+
+<div class="d-flex justify-content-between btn-top">
+    <a href="evaluador_home_terreno.php" class="btn btn-secondary">← Volver</a>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-primary" id="btnGuardarTemporal">Guardar temporal</button>
+        <button type="button" class="btn btn-success" id="btnGuardar">💾 Guardar Evaluación</button>
+    </div>
+</div>
+
+<!-- SOLAPAS -->
+<ul class="nav nav-tabs">
+<?php foreach ($participantes as $i => $p): ?>
+    <li class="nav-item">
+        <button class="nav-link <?= $i==0 ? 'active':'' ?>"
+                data-bs-toggle="tab"
+                data-bs-target="#alumno<?= $i ?>">
+            <?= $p['nombre']." ".$p['apellidop']." ".$p['apellidom'] ?>
+        </button>
+    </li>
+<?php endforeach; ?>
+</ul>
+
+</div>
+
+<!-- FORMULARIO SOLO ENVUELVE LAS PREGUNTAS -->
+<form id="formTerreno">
+<div class="tab-content">
+
+<?php foreach ($participantes as $i => $p): ?>
+
+<div id="alumno<?= $i ?>" class="tab-pane fade <?= $i==0?'show active':'' ?>"
+     data-participante-nombre="<?= htmlspecialchars(trim($p['nombre']." ".$p['apellidop']." ".$p['apellidom'])) ?>"
+     data-participante-rut="<?= htmlspecialchars((string)$p['rut']) ?>">
+
+    <h5 class="mt-3">Datos del Participante</h5>
+
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input chk-rinde" type="checkbox" id="rinde_<?= $i ?>" data-rut="<?= htmlspecialchars((string)$p['rut']) ?>" checked>
+        <label class="form-check-label fw-semibold" for="rinde_<?= $i ?>">Rinde evaluación</label>
+    </div>
+
+<p>
+    <strong>RUT:</strong> <?= $p['rut'] ?><br>
+    <strong>Nombre:</strong> <?= $p['nombre']." ".$p['apellidop']." ".$p['apellidom'] ?><br>
+    <strong>Cargo:</strong> <?= $p['cargo'] ?><br>
+    <strong>Fecha:</strong> <?= $fechaPrueba ?><br>
+    <strong>Horario:</strong> <?= $horaInicio ?> a <?= $horaTermino ?><br>    
+    <strong>Referente:</strong> <?= $_SESSION['auth']['nombre'] ?><br>
+</p>
+
+
+    <hr>
+
+    <div class="participante-preguntas">
+
+    <?php $colorIndex=0; ?>
+    <?php foreach ($estructura as $grupo): ?>
+
+        <h4 class="mt-4"><?= htmlspecialchars($grupo['grupo']) ?></h4>
+
+        <?php foreach ($grupo['secciones'] as $idSec => $sec): ?>
+
+            <div class="section-box">
+
+                <div class="<?= ($colorIndex%2==0?'section-green':'section-orange') ?>">
+                    <?= htmlspecialchars($sec['nombre_seccion']) ?>
+                </div>
+
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Pregunta</th>
+                            <th width="5%">SI</th>
+                            <th width="5%">NO</th>
+                            <th width="5%">NA</th>
+                            <th width="20%">Obs.</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                    <?php foreach ($sec['preguntas'] as $pre): ?>
+                        <?php $grp = $p['rut'].'_'.$pre['id_pregunta']; ?>
+
+                        <tr class="<?= ($colorIndex%2==0?'row-green':'row-orange') ?> pregunta-row"
+                            data-rut="<?= htmlspecialchars((string)$p['rut']) ?>"
+                            data-id-pregunta="<?= (int)$pre['id_pregunta'] ?>"
+                            data-id-seccion="<?= (int)$idSec ?>">
+
+                            <td>
+                                <?= $pre['pregunta'] ?>
+                                <!-- ID SECCIÓN SIEMPRE DENTRO DEL <td> -->
+                                <input type="hidden"
+                                       name="resp[<?= $p['rut'] ?>][<?= $pre['id_pregunta'] ?>][id_seccion]"
+                                       value="<?= $idSec ?>">
+                            </td>
+
+                            <!-- SI / NO / NA -->
+                            <td><input type="checkbox" class="chk" data-group="<?= $grp ?>" data-type="si"
+                                       name="resp[<?= $p['rut'] ?>][<?= $pre['id_pregunta'] ?>][si]"></td>
+                            <td><input type="checkbox" class="chk" data-group="<?= $grp ?>" data-type="no"
+                                       name="resp[<?= $p['rut'] ?>][<?= $pre['id_pregunta'] ?>][no]"></td>
+                            <td><input type="checkbox" class="chk" data-group="<?= $grp ?>" data-type="na"
+                                       name="resp[<?= $p['rut'] ?>][<?= $pre['id_pregunta'] ?>][na]"></td>
+
+                            <!-- Obs -->
+                            <td><textarea class="form-control form-control-sm"
+                                          name="resp[<?= $p['rut'] ?>][<?= $pre['id_pregunta'] ?>][obs]"
+                                          rows="2"></textarea></td>
+
+
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                    </tbody>
+                </table>
+
+            </div>
+
+        <?php $colorIndex++; endforeach; ?>
+
+    <?php endforeach; ?>
+
+    </div>
+
+</div>
+
+<?php endforeach; ?>
+
+</div>
+</form>
+
+<?php
+$jsCuadrillas = $cuadrillas; // array de cuadrillas válidas
+$jsIdsEvaluacion = $idEvaluaciones;
+$jsDraftData = $draftData;
+?>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const keepaliveUrl = '/ceo.noetica.cl/public/ajax_keepalive.php';
+const keepaliveIntervalMs = 5 * 60 * 1000;
+const draftData = <?= json_encode($jsDraftData, JSON_UNESCAPED_UNICODE) ?>;
+let keepaliveId = null;
+
+function startKeepalive() {
+    if (keepaliveId) return;
+    keepaliveId = setInterval(() => {
+        fetch(keepaliveUrl, { cache: 'no-store' }).catch(() => {});
+    }, keepaliveIntervalMs);
+}
+
+function stopKeepalive() {
+    if (keepaliveId) {
+        clearInterval(keepaliveId);
+        keepaliveId = null;
+    }
+}
+
+startKeepalive();
+window.addEventListener('beforeunload', stopKeepalive);
+
+function setExclusiveCheck(group, type, checked) {
+    const checks = document.querySelectorAll(`.chk[data-group="${group}"]`);
+    checks.forEach((check) => {
+        check.checked = checked && check.dataset.type === type;
+    });
+}
+
+function applyDraftData() {
+    if (!draftData || typeof draftData !== 'object') {
+        return;
+    }
+
+    const participantes = draftData.participantes || {};
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        const rut = String(chk.dataset.rut || '').trim();
+        if (!rut || !Object.prototype.hasOwnProperty.call(participantes, rut)) {
+            return;
+        }
+
+        chk.checked = !!participantes[rut].rinde;
+    });
+
+    const respuestas = draftData.respuestas || {};
+    Object.entries(respuestas).forEach(([rut, preguntas]) => {
+        if (!preguntas || typeof preguntas !== 'object') {
+            return;
+        }
+
+        Object.entries(preguntas).forEach(([idPregunta, respuesta]) => {
+            const group = `${rut}_${idPregunta}`;
+            if (respuesta.si) setExclusiveCheck(group, 'si', true);
+            else if (respuesta.no) setExclusiveCheck(group, 'no', true);
+            else if (respuesta.na) setExclusiveCheck(group, 'na', true);
+
+            const textarea = document.querySelector(`textarea[name="resp[${rut}][${idPregunta}][obs]"]`);
+            if (textarea) {
+                textarea.value = String(respuesta.obs || '');
+            }
+        });
+    });
+}
+
+function syncAllParticipantes() {
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        chk.dispatchEvent(new Event('change'));
+    });
+}
+
+function collectDraftPayload() {
+    const participantes = {};
+    document.querySelectorAll('.chk-rinde').forEach((chk) => {
+        const rut = String(chk.dataset.rut || '').trim();
+        if (!rut) return;
+
+        participantes[rut] = {
+            rinde: chk.checked
+        };
+    });
+
+    const respuestas = {};
+    document.querySelectorAll('.pregunta-row').forEach((row) => {
+        const rut = String(row.dataset.rut || '').trim();
+        const idPregunta = String(row.dataset.idPregunta || '').trim();
+        const idSeccion = parseInt(String(row.dataset.idSeccion || '0'), 10) || 0;
+        if (!rut || !idPregunta) return;
+
+        const group = `${rut}_${idPregunta}`;
+        const si = row.querySelector(`.chk[data-group="${group}"][data-type="si"]`);
+        const no = row.querySelector(`.chk[data-group="${group}"][data-type="no"]`);
+        const na = row.querySelector(`.chk[data-group="${group}"][data-type="na"]`);
+        const obs = row.querySelector('textarea');
+
+        if (!respuestas[rut]) respuestas[rut] = {};
+        respuestas[rut][idPregunta] = {
+            id_seccion: idSeccion,
+            si: !!si?.checked,
+            no: !!no?.checked,
+            na: !!na?.checked,
+            obs: String(obs?.value || '')
+        };
+    });
+
+    return {
+        id_evaluacion: <?= json_encode($idEvaluaciones) ?>,
+        nsolicitud: <?= json_encode($jsCuadrillas) ?>,
+        id_servicio: <?= $idServicio ?>,
+        id_empresa: <?= (int)$_SESSION['auth']['id_empresa'] ?>,
+        participantes,
+        respuestas
+    };
+}
+
+function activateTabForPanel(panel) {
+    if (!panel || !panel.id) {
+        return;
+    }
+
+    const tabButton = document.querySelector(`[data-bs-target="#${panel.id}"]`);
+    if (!tabButton) {
+        return;
+    }
+
+    const tab = bootstrap.Tab.getOrCreateInstance(tabButton);
+    tab.show();
+}
+
+function getPreguntaLabel(row) {
+    const cell = row.querySelector('td');
+    if (!cell) {
+        return 'Pregunta sin identificar';
+    }
+
+    const text = Array.from(cell.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent || '')
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return text || 'Pregunta sin identificar';
+}
+
+function clearPreguntaValidationState() {
+    document.querySelectorAll('.pregunta-row').forEach((row) => {
+        row.classList.remove('table-danger');
+        row.querySelectorAll('.chk').forEach((chk) => chk.classList.remove('is-invalid'));
+    });
+}
+
+function validatePreguntasCompletas(rutsRinden) {
+    clearPreguntaValidationState();
+
+    const faltantesPorParticipante = new Map();
+    let primerFaltante = null;
+
+    for (const row of document.querySelectorAll('.pregunta-row')) {
+        const rut = String(row.dataset.rut || '').trim();
+        if (!rutsRinden.includes(rut)) {
+            continue;
+        }
+
+        const checks = row.querySelectorAll('.chk');
+        const hasChecked = Array.from(checks).some((chk) => chk.checked);
+        if (hasChecked) {
+            continue;
+        }
+
+        row.classList.add('table-danger');
+        checks.forEach((chk) => chk.classList.add('is-invalid'));
+
+        const panel = row.closest('.tab-pane');
+        const nombre = String(panel?.dataset.participanteNombre || '').trim() || 'Participante sin identificar';
+        const rutLabel = String(panel?.dataset.participanteRut || rut).trim();
+        const pregunta = getPreguntaLabel(row);
+
+        if (!faltantesPorParticipante.has(rut)) {
+            faltantesPorParticipante.set(rut, {
+                nombre,
+                rut: rutLabel,
+                cantidad: 0
+            });
+        }
+
+        const participante = faltantesPorParticipante.get(rut);
+        participante.cantidad += 1;
+
+        if (!primerFaltante) {
+            primerFaltante = { panel, row, pregunta };
+        }
+    }
+
+    if (faltantesPorParticipante.size > 0) {
+        if (primerFaltante) {
+            activateTabForPanel(primerFaltante.panel);
+            primerFaltante.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const firstCheck = primerFaltante.row.querySelector('.chk');
+            if (firstCheck) {
+                firstCheck.focus();
+            }
+        }
+
+        const resumen = Array.from(faltantesPorParticipante.values())
+            .map((participante) => `- ${participante.nombre} (${participante.rut}): ${participante.cantidad} ítem(s) pendiente(s)`)
+            .join('\n');
+
+        alert(
+            '⚠️ Validación incompleta\n\n' +
+            'Faltan respuestas en los siguientes participantes:\n\n' +
+            resumen +
+            (primerFaltante ? `\n\nPrimer ítem detectado: ${primerFaltante.pregunta}` : '')
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+applyDraftData();
+
+// Exclusividad SI/NO/NA
+document.querySelectorAll('.chk').forEach(chk => {
+    chk.addEventListener('change', () => {
+        let group = chk.dataset.group;
+        let type  = chk.dataset.type;
+        const row = chk.closest('.pregunta-row');
+
+        if (chk.checked) {
+            document.querySelectorAll(".chk[data-group='"+group+"']")
+                .forEach(c => { if (c.dataset.type !== type) c.checked = false; });
+        }
+
+        if (row) {
+            const groupChecks = row.querySelectorAll(`.chk[data-group="${group}"]`);
+            const hasChecked = Array.from(groupChecks).some((check) => check.checked);
+            if (hasChecked) {
+                row.classList.remove('table-danger');
+                groupChecks.forEach((check) => check.classList.remove('is-invalid'));
+            }
+        }
+    });
+});
+
+// Guardado
+document.getElementById('btnGuardar').addEventListener('click', () => {
+    const participantesActivos = Array.from(document.querySelectorAll('.chk-rinde:checked'));
+    const rutsRinden = participantesActivos
+        .map((chk) => String(chk.dataset.rut || '').trim())
+        .filter((rut) => rut !== '');
+
+    if (rutsRinden.length > 0 && !validatePreguntasCompletas(rutsRinden)) {
+        return;
+    }
+
+    // ===============================
+    // VALIDACIÓN OBS OBLIGATORIA SI = NO
+    // ===============================
+    let error = false;
+    let primerError = null;
+
+    document.querySelectorAll('.chk[data-type="no"]').forEach(chkNo => {
+        const panel = chkNo.closest('.tab-pane');
+        const chkRinde = panel ? panel.querySelector('.chk-rinde') : null;
+
+        if (chkRinde && !chkRinde.checked) return;
+
+        if (!chkNo.checked) return;
+
+        const group = chkNo.dataset.group;
+
+        // Buscar textarea de observación del mismo grupo
+        const textarea = document.querySelector(
+            `textarea[name^="resp"][name*="[obs]"][name*="${group.split('_')[1]}"]`
+        );
+
+        if (!textarea || textarea.value.trim() === "") {
+            error = true;
+            textarea?.classList.add('is-invalid');
+
+            if (!primerError && textarea) {
+                primerError = textarea;
+            }
+        } else {
+            textarea.classList.remove('is-invalid');
+        }
+    });
+
+    if (error) {
+        alert(
+            "⚠️ Validación incompleta\n\n" +
+            "Debes ingresar una OBSERVACIÓN en todas las preguntas marcadas como NO."
+        );
+
+        if (primerError) {
+            primerError.focus();
+        }
+        return; // ⛔ NO guarda
+    }
+
+    // ===============================
+    // ARMAR Y ENVIAR RESPUESTAS
+    // ===============================
+    let fd = new FormData(document.getElementById('formTerreno'));
+    let respuestas = {};
+
+    for (let [key,val] of fd.entries()) {
+
+        let m = key.match(/resp\[(.*)\]\[(.*)\]\[(.*)\]/);
+
+        if (m) {
+            let rut    = m[1];
+            let idpreg = m[2];
+            let campo  = m[3];
+
+            if (!rutsRinden.includes(rut)) {
+                continue;
+            }
+
+            if (!respuestas[rut]) respuestas[rut] = {};
+            if (!respuestas[rut][idpreg]) respuestas[rut][idpreg] = {};
+
+            respuestas[rut][idpreg][campo] = val;
+        }
+    }
+
+    stopKeepalive();
+
+    fetch("guardar_terreno.php", {
+        method: "POST",
+        body: JSON.stringify({
+    id_evaluacion: <?= json_encode($idEvaluaciones) ?>,
+    nsolicitud: <?= json_encode($jsCuadrillas) ?>,
+    id_servicio: <?= $idServicio ?>,
+    id_empresa: <?= (int)$_SESSION['auth']['id_empresa'] ?>,
+    ruts_rinden: rutsRinden,
+    respuestas: respuestas
+})
+    })
+    .then(r => r.json())
+.then(r => {
+     if (r.ok) {
+        alert("✔ Evaluación guardada correctamente.");
+        window.location.href = "evaluador_home_terreno.php";
+    } else {
+        alert("❌ Error: " + r.error);
+    }
+ }).catch(() => {
+     startKeepalive();
+ });
+
+
+});
+
+document.getElementById('btnGuardarTemporal').addEventListener('click', () => {
+    fetch('guardar_terreno_borrador.php', {
+        method: 'POST',
+        body: JSON.stringify(collectDraftPayload())
+    })
+    .then(r => r.json())
+    .then(r => {
+        if (r.ok) {
+            alert('✔ Guardado temporal realizado.');
+        } else {
+            alert('❌ Error: ' + r.error);
+        }
+    });
+});
+
+document.querySelectorAll('.chk-rinde').forEach((chk) => {
+    const panel = chk.closest('.tab-pane');
+    const preguntas = panel ? panel.querySelector('.participante-preguntas') : null;
+
+    const syncParticipante = () => {
+        if (!panel || !preguntas) return;
+
+        panel.classList.toggle('participante-inactivo', !chk.checked);
+
+        preguntas.querySelectorAll('input, textarea, select, button').forEach((field) => {
+            if (field === chk) return;
+            field.disabled = !chk.checked;
+        });
+    };
+
+    chk.addEventListener('change', syncParticipante);
+    syncParticipante();
+});
+
+syncAllParticipantes();
+
+</script>
+
+</body>
+</html>
