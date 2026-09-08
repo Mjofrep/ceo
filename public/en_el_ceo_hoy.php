@@ -67,7 +67,12 @@ function echFormatDateSpanish(string $date): string
 
 function echNormalizeText(string $value): string
 {
-    return strtoupper(trim($value));
+    $value = trim($value);
+    $value = strtr($value, [
+        'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N',
+        'á' => 'A', 'é' => 'E', 'í' => 'I', 'ó' => 'O', 'ú' => 'U', 'ñ' => 'N',
+    ]);
+    return strtoupper($value);
 }
 
 function echDetectSegment(array $row): string
@@ -145,6 +150,7 @@ function echSegmentLabel(string $segment): string
         'capacitaciones' => 'Capacitaciones',
         'visitas' => 'Visitas',
         'rdo' => 'RDO',
+        'validacion_contrato' => 'Validación de Contrato',
         default => 'Otras actividades',
     };
 }
@@ -157,6 +163,26 @@ function echFormatHour(?string $value): string
     }
 
     return substr($value, 0, 5);
+}
+
+function echNormalizeDisplayCompany(string $value): string
+{
+    return echNormalizeText($value) === 'ENEL X' ? 'E COMERCIAL' : $value;
+}
+
+function echNormalizeDisplayPlace(string $value): string
+{
+    $trimmed = trim($value);
+    if (stripos($trimmed, 'Casa Enel X') === 0) {
+        return 'Casa E Comercial' . substr($trimmed, strlen('Casa Enel X'));
+    }
+
+    return $value;
+}
+
+function echAdjustActivitySegment(string $activity, string $segment): string
+{
+    return echNormalizeText($activity) === 'VALIDACION DE CONTRATO' ? 'validacion_contrato' : $segment;
 }
 
 function echEnsureResponsableTable(PDO $pdo): void
@@ -231,18 +257,20 @@ foreach ($rows as $row) {
     $override = trim((string)($row['responsable_override'] ?? ''));
     $responsableBase = trim((string)($row['responsable_linea'] ?? ''));
     $responsable = $override !== '' ? $override : ($responsableBase !== '' ? $responsableBase : 'No aplica');
+    $activityName = echBuildActivityName($row, $segment);
+    $segment = echAdjustActivitySegment($activityName, $segment);
     $activities[] = [
         'nsolicitud' => (int)($row['nsolicitud'] ?? 0),
         'horario' => echFormatHour((string)($row['horainicio'] ?? '')) . ' - ' . echFormatHour((string)($row['horatermino'] ?? '')),
-        'actividad' => echBuildActivityName($row, $segment),
+        'actividad' => $activityName,
         'segmento' => $segment,
         'segmento_label' => echSegmentLabel($segment),
-        'lugar' => trim((string)($row['patio'] ?? '')) !== '' ? (string)$row['patio'] : 'Por definir',
+        'lugar' => trim((string)($row['patio'] ?? '')) !== '' ? echNormalizeDisplayPlace((string)$row['patio']) : 'Por definir',
         'responsable' => $responsable,
         'responsable_base' => $responsableBase !== '' ? $responsableBase : 'No aplica',
         'responsable_override' => $override,
         'responsable_is_override' => $override !== '',
-        'empresa' => trim((string)($row['empresa'] ?? '')) !== '' ? (string)$row['empresa'] : 'Sin empresa',
+        'empresa' => trim((string)($row['empresa'] ?? '')) !== '' ? echNormalizeDisplayCompany((string)$row['empresa']) : 'Sin empresa',
     ];
 }
 
@@ -259,6 +287,8 @@ $todayLabel = echFormatDateSpanish($today);
     :root {
       --blue-strong: #18304f;
       --blue-brand: #2f73bb;
+      --blue-chile: #0039a6;
+      --red-chile: #d52b1e;
       --page-bg: #eef0f5;
       --card-bg: #f6f7fb;
       --table-border: #d6dbe6;
@@ -277,6 +307,40 @@ $todayLabel = echFormatDateSpanish($today);
       font-family: Arial, Helvetica, sans-serif;
       background: var(--page-bg);
       color: var(--text-main);
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    .fiestas-frame {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .fiestas-frame::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url('<?= echEsc(APP_BASE) ?>/docs/imagen.png');
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: cover;
+      opacity: 0.2;
+    }
+
+    .fiesta-item {
+      position: absolute;
+      opacity: 0.98;
+      z-index: 1;
+    }
+
+    .fiesta-item svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      filter: drop-shadow(0 6px 12px rgba(24, 48, 79, 0.16));
     }
 
     .top-stripe {
@@ -288,6 +352,8 @@ $todayLabel = echFormatDateSpanish($today);
       max-width: 1160px;
       margin: 0 auto;
       padding: 18px 18px 22px;
+      position: relative;
+      z-index: 1;
     }
 
     .board {
@@ -308,6 +374,14 @@ $todayLabel = echFormatDateSpanish($today);
       top: 4px;
       left: 0;
       display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      max-width: 280px;
+    }
+
+    .brand-main {
+      display: flex;
       align-items: center;
       gap: 10px;
       max-width: 260px;
@@ -325,6 +399,61 @@ $todayLabel = echFormatDateSpanish($today);
       color: #4f5d73;
       text-transform: uppercase;
       font-weight: 700;
+    }
+
+    .flag-wave-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px 8px 10px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(242, 246, 255, 0.95) 100%);
+      border: 1px solid rgba(0, 57, 166, 0.2);
+      border-radius: 999px;
+      box-shadow: 0 10px 24px rgba(24, 48, 79, 0.12);
+    }
+
+    .flag-wave {
+      position: relative;
+      width: 112px;
+      height: 64px;
+      transform-origin: left center;
+      animation: flag-wave 2.8s ease-in-out infinite;
+      filter: drop-shadow(0 10px 14px rgba(24, 48, 79, 0.22));
+    }
+
+    .flag-wave::before {
+      content: '';
+      position: absolute;
+      left: -7px;
+      top: -2px;
+      width: 5px;
+      height: 72px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #c8d0da 0%, #8995a3 100%);
+      box-shadow: 0 0 0 1px rgba(24, 48, 79, 0.08);
+    }
+
+    .flag-wave svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .flag-wave-label {
+      color: var(--blue-strong);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.9px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    @keyframes flag-wave {
+      0% { transform: perspective(220px) rotateY(0deg) rotate(-1deg); }
+      25% { transform: perspective(220px) rotateY(-12deg) rotate(1deg) translateY(-1px); }
+      50% { transform: perspective(220px) rotateY(6deg) rotate(-1deg) translateY(1px); }
+      75% { transform: perspective(220px) rotateY(-10deg) rotate(1deg); }
+      100% { transform: perspective(220px) rotateY(0deg) rotate(-1deg); }
     }
 
     .hero {
@@ -425,6 +554,38 @@ $todayLabel = echFormatDateSpanish($today);
       gap: 10px;
     }
 
+    .feedback-qr {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(24, 48, 79, 0.12);
+      text-align: center;
+    }
+
+    .feedback-qr-title {
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--blue-strong);
+    }
+
+    .feedback-qr-caption {
+      margin: 10px 0 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--blue-strong);
+      text-align: center;
+    }
+
+    .feedback-qr img {
+      display: block;
+      width: 100%;
+      max-width: 150px;
+      height: auto;
+      margin: 0 auto;
+      border-radius: 10px;
+      background: #fff;
+    }
+
     .legend-item {
       display: flex;
       align-items: center;
@@ -450,6 +611,7 @@ $todayLabel = echFormatDateSpanish($today);
     .legend-swatch-capacitaciones { background: var(--cyan); }
     .legend-swatch-visitas { background: var(--orange); }
     .legend-swatch-rdo { background: var(--pink-strong); }
+    .legend-swatch-validacion-contrato { background: #f7ef9f; }
     .legend-swatch-otras { background: #c6d2e2; }
 
     .table-scroll {
@@ -487,6 +649,7 @@ $todayLabel = echFormatDateSpanish($today);
     tbody tr.segmento-capacitaciones td { background: var(--cyan); }
     tbody tr.segmento-visitas td { background: var(--orange); }
     tbody tr.segmento-rdo td { background: var(--pink-strong); color: #fff; }
+    tbody tr.segmento-validacion_contrato td { background: #f7ef9f; }
     tbody tr.segmento-otras td { background: #c6d2e2; }
 
     .col-horario {
@@ -691,6 +854,16 @@ $todayLabel = echFormatDateSpanish($today);
     }
 
     @media (max-width: 980px) {
+      .fiestas-frame::before {
+        background-size: contain;
+        opacity: 0.16;
+      }
+
+      .fiesta-top-left { top: 8px; left: 8px; }
+      .fiesta-top-right { top: 8px; right: 8px; }
+      .fiesta-bottom-left { bottom: 8px; left: 8px; }
+      .fiesta-bottom-right { bottom: 8px; right: 8px; }
+
       .content-layout {
         grid-template-columns: 1fr;
       }
@@ -709,6 +882,13 @@ $todayLabel = echFormatDateSpanish($today);
 
       .brand {
         align-self: flex-start;
+        position: static;
+        width: 100%;
+        align-items: center;
+      }
+
+      .brand-main {
+        max-width: none;
       }
 
       .lunch {
@@ -725,6 +905,15 @@ $todayLabel = echFormatDateSpanish($today);
 
       .hero-date {
         font-size: 22px;
+      }
+
+      .flag-wave-wrap {
+        align-self: center;
+      }
+
+      .flag-wave {
+        width: 96px;
+        height: 56px;
       }
 
       thead {
@@ -777,6 +966,10 @@ $todayLabel = echFormatDateSpanish($today);
     }
 
     @media print {
+      .fiestas-frame {
+        display: none;
+      }
+
       body {
         background: #fff;
       }
@@ -799,15 +992,39 @@ $todayLabel = echFormatDateSpanish($today);
   </style>
 </head>
 <body>
+  <div class="fiestas-frame" aria-hidden="true">
+  </div>
   <div class="top-stripe"></div>
   <div class="page">
     <section class="board">
       <header class="header">
         <div class="brand">
-          <img src="<?= echEsc(APP_LOGO) ?>" alt="Logo <?= echEsc(APP_NAME) ?>">
-          <div class="brand-copy">
-            <div>Centro de Excelencia</div>
-            <div>Operacional</div>
+          <div class="brand-main">
+            <img src="<?= echEsc(APP_LOGO) ?>" alt="Logo <?= echEsc(APP_NAME) ?>">
+            <div class="brand-copy">
+              <div>Centro de Excelencia</div>
+              <div>Operacional</div>
+            </div>
+          </div>
+          <div class="flag-wave-wrap" aria-label="Bandera de Chile decorativa">
+            <div class="flag-wave">
+              <svg viewBox="0 0 82 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+                <defs>
+                  <clipPath id="flagWaveClip">
+                    <path d="M3 4C16 0 27 9 40 5s25 4 39 0v34c-13 4-26-5-39-1s-24-5-37-1V4z"/>
+                  </clipPath>
+                </defs>
+                <g clip-path="url(#flagWaveClip)">
+                  <rect x="0" y="0" width="82" height="24" fill="#ffffff"/>
+                  <rect x="0" y="24" width="82" height="24" fill="#d52b1e"/>
+                  <rect x="0" y="0" width="28" height="24" fill="#0039a6"/>
+                  <polygon points="14,5 16.4,11.2 23,11.4 17.8,15.5 19.7,21.8 14,18.2 8.3,21.8 10.2,15.5 5,11.4 11.6,11.2" fill="#ffffff"/>
+                </g>
+                <path d="M3 4C16 0 27 9 40 5s25 4 39 0" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"/>
+                <path d="M3 38c13-4 24 5 37 1s26 5 39 1" fill="none" stroke="rgba(24,48,79,0.18)" stroke-width="1.2"/>
+              </svg>
+            </div>
+            <span class="flag-wave-label">Fiestas Patrias</span>
           </div>
         </div>
 
@@ -827,7 +1044,13 @@ $todayLabel = echFormatDateSpanish($today);
             <div class="legend-item"><span class="legend-swatch legend-swatch-capacitaciones"></span><span>Capacitaciones</span></div>
             <div class="legend-item"><span class="legend-swatch legend-swatch-visitas"></span><span>Visitas</span></div>
             <div class="legend-item"><span class="legend-swatch legend-swatch-rdo"></span><span>RDO</span></div>
+            <div class="legend-item"><span class="legend-swatch legend-swatch-validacion-contrato"></span><span>Validación de Contrato</span></div>
             <div class="legend-item"><span class="legend-swatch legend-swatch-otras"></span><span>Otras actividades</span></div>
+          </div>
+          <div class="feedback-qr">
+            <h3 class="feedback-qr-title">Tu Feedback</h3>
+            <div class="feedback-qr-caption">Aquí</div>
+            <img src="<?= echEsc(APP_BASE) ?>/docs/QR_feedback.jpg" alt="QR Tú Feedback">
           </div>
         </aside>
 

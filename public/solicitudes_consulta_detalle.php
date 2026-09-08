@@ -286,6 +286,624 @@ function scdFetchFormacionTotal(PDO $pdo, int $idServicio, array $filters): int
     ]);
 }
 
+function scdSummaryDateCondition(): string
+{
+    return "
+        s.fecha BETWEEN :fecha_desde AND :fecha_hasta
+    ";
+}
+
+function scdNormalizeRutSql(string $expression): string
+{
+    return "REPLACE(REPLACE(REPLACE(UPPER(COALESCE({$expression}, '')), '.', ''), '-', ''), ' ', '')";
+}
+
+function scdSummaryConditionApoyoHabilitaciones(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND s.habilitacionceo = 3
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
+        AND TRIM(COALESCE(cc.cargo, '')) <> ''
+        AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%SUPERVISOR%'
+        AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%OPERADOR%'
+    ";
+}
+
+function scdSummaryConditionHabilitacionesEcommercial(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND s.habilitacionceo = 8
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'ENEL X'
+    ";
+}
+
+function scdSummaryConditionRdo(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND s.proceso = 24
+        AND s.habilitacionceo = 6
+    ";
+}
+
+function scdSummaryConditionPracticaPatio(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VALIDACION DE CONTRATO'
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
+    ";
+}
+
+function scdSummaryConditionEnergiaFuturo(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('ENERGIA DEL FUTURO', 'ENERGÍA DEL FUTURO')
+    ";
+}
+
+function scdSummaryConditionVisitaAlumno(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+        AND (
+            (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
+                    'COLEGIO',
+                    'COLEGIOS',
+                    'LICEO',
+                    'LICEOS',
+                    'VISITAS DE LICEOS',
+                    'INSTITUTO PROFESIONAL',
+                    'INSTITUTOS PROFESIONALES',
+                    'UNIVERSIDAD',
+                    'UNIVERSIDADES'
+                )
+            )
+            OR (
+                UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'VISITA EMPRESAS'
+                AND UPPER(COALESCE(s.observacion, '')) LIKE '%UNIVERSIDAD%'
+            )
+        )
+    ";
+}
+
+function scdSummaryConditionFormacion(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND (
+            (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT LLEE', 'INFRAESTRUCTURA AÉREA MT LLEE')
+                AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'ZONA MT/BT'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'TRABAJOS CON LLEE'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'PODAS Y TALAS LLEE'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('PODAS DE LLEE 16 HRS', 'PODAS DE LLEE 16 HORAS')
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'HSE'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('TALLER TURN THE TIDE', 'TURN THE TIDE')
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INSPECCION TECNICA', 'INSPECCIÓN TÉCNICA', 'INSPECCION TÉCNICA', 'INSPECCIÓN TECNICA')
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'INSPECTORES DE HSA'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT', 'INFRAESTRUCTURA AÉREA MT')
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('OPERACION DE EQUIPOS AEREOS', 'OPERACIÓN DE EQUIPOS AÉREOS', 'OPERACION DE EQUIPOS AÉREOS', 'OPERACIÓN DE EQUIPOS AEREOS')
+            )
+            OR (
+                UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('OBRAS ELECTRICAS MT', 'OBRAS ELÉCTRICAS MT')
+                AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'EQUIPO RECONECTADOR'
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('INFRAESTRUCTURA AEREA', 'INFRAESTRUCTURA AÉREA')
+            )
+        )
+    ";
+}
+
+function scdSummaryConditionFormacionLlee60Horas(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT LLEE', 'INFRAESTRUCTURA AÉREA MT LLEE')
+        AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'ZONA MT/BT'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'TRABAJOS CON LLEE'
+    ";
+}
+
+function scdSummaryConditionFormacionPodas(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'PODAS Y TALAS LLEE'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('PODAS DE LLEE 16 HRS', 'PODAS DE LLEE 16 HORAS')
+    ";
+}
+
+function scdSummaryConditionFormacionTurnTheTide(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'HSE'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('TALLER TURN THE TIDE', 'TURN THE TIDE')
+    ";
+}
+
+function scdSummaryConditionFormacionInspectoresPowerSkill(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INSPECCION TECNICA', 'INSPECCIÓN TÉCNICA', 'INSPECCION TÉCNICA', 'INSPECCIÓN TECNICA')
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'INSPECTORES DE HSA'
+    ";
+}
+
+function scdSummaryConditionFormacionOperacionesEquiposAereos(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT', 'INFRAESTRUCTURA AÉREA MT')
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('OPERACION DE EQUIPOS AEREOS', 'OPERACIÓN DE EQUIPOS AÉREOS', 'OPERACION DE EQUIPOS AÉREOS', 'OPERACIÓN DE EQUIPOS AEREOS')
+    ";
+}
+
+function scdSummaryConditionFormacionEquipoReconectador(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('OBRAS ELECTRICAS MT', 'OBRAS ELÉCTRICAS MT')
+        AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'EQUIPO RECONECTADOR'
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('INFRAESTRUCTURA AEREA', 'INFRAESTRUCTURA AÉREA')
+    ";
+}
+
+function scdSummaryConditionCapacitaciones(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND (
+            (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('AMBIENTAL Y RIESGO ELECTRICO', 'AMBIENTAL Y RIESGO ELÉCTRICO')
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'CARABINEROS DE CHILE'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('RIESGOS ELECTRICOS Y TRABAJO EN ALTURA', 'RIESGOS ELÉCTRICOS Y TRABAJO EN ALTURA')
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'PDI'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'BOMBEROS'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'MUNICIPALIDADES'
+            )
+            OR (
+                UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+                AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'ADUANAS'
+            )
+        )
+    ";
+}
+
+function scdSummaryConditionCapacitacionesCarabineros(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('AMBIENTAL Y RIESGO ELECTRICO', 'AMBIENTAL Y RIESGO ELÉCTRICO')
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'CARABINEROS DE CHILE'
+    ";
+}
+
+function scdSummaryConditionCapacitacionesPdi(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+        AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('RIESGOS ELECTRICOS Y TRABAJO EN ALTURA', 'RIESGOS ELÉCTRICOS Y TRABAJO EN ALTURA')
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'PDI'
+    ";
+}
+
+function scdSummaryConditionCapacitacionesBomberos(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'BOMBEROS'
+    ";
+}
+
+function scdSummaryConditionCapacitacionesMunicipios(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'MUNICIPALIDADES'
+    ";
+}
+
+function scdSummaryConditionCapacitacionesAduanas(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+        AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+        AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'ADUANAS'
+    ";
+}
+
+function scdSummaryConditionOtrosClasificados(): string
+{
+    return "
+        (
+            s.habilitacionceo = 3
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
+            AND TRIM(COALESCE(cc.cargo, '')) <> ''
+            AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%SUPERVISOR%'
+            AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%OPERADOR%'
+        )
+        OR (
+            s.habilitacionceo = 8
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'ENEL X'
+        )
+        OR (
+            s.proceso = 24
+            AND s.habilitacionceo = 6
+        )
+        OR (
+            UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VALIDACION DE CONTRATO'
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('ENERGIA DEL FUTURO', 'ENERGÍA DEL FUTURO')
+        )
+        OR (
+            UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) IN (
+                'COLEGIO',
+                'COLEGIOS',
+                'LICEO',
+                'LICEOS',
+                'VISITAS DE LICEOS',
+                'INSTITUTO PROFESIONAL',
+                'INSTITUTOS PROFESIONALES',
+                'UNIVERSIDAD',
+                'UNIVERSIDADES'
+            )
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT LLEE', 'INFRAESTRUCTURA AÉREA MT LLEE')
+            AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'ZONA MT/BT'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'TRABAJOS CON LLEE'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'PODAS Y TALAS LLEE'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('PODAS DE LLEE 16 HRS', 'PODAS DE LLEE 16 HORAS')
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'HSE'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'TALLER TURN THE TIDE'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INSPECCION TECNICA', 'INSPECCIÓN TÉCNICA', 'INSPECCION TÉCNICA', 'INSPECCIÓN TECNICA')
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'INSPECTORES DE HSA'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) IN ('INFRAESTRUCTURA AEREA MT', 'INFRAESTRUCTURA AÉREA MT')
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('OPERACION DE EQUIPOS AEREOS', 'OPERACIÓN DE EQUIPOS AÉREOS', 'OPERACION DE EQUIPOS AÉREOS', 'OPERACIÓN DE EQUIPOS AEREOS')
+        )
+        OR (
+            UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('OBRAS ELECTRICAS MT', 'OBRAS ELÉCTRICAS MT')
+            AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'EQUIPO RECONECTADOR'
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('INFRAESTRUCTURA AEREA', 'INFRAESTRUCTURA AÉREA')
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('AMBIENTAL Y RIESGO ELECTRICO', 'AMBIENTAL Y RIESGO ELÉCTRICO')
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'CARABINEROS DE CHILE'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) IN ('CAPACITACION', 'CAPACITACIÓN')
+            AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) IN ('RIESGOS ELECTRICOS Y TRABAJO EN ALTURA', 'RIESGOS ELÉCTRICOS Y TRABAJO EN ALTURA')
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'PDI'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'BOMBEROS'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'MUNICIPALIDADES'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'VISITAS'
+            AND UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'VISITA'
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'ADUANAS'
+        )
+        OR (
+            UPPER(TRIM(COALESCE(ht.desc_tipo, ''))) = 'CONTROL DE INGRESO'
+            AND UPPER(TRIM(COALESCE(pa.desc_patios, ''))) = 'EDIFICIO'
+            AND UPPER(TRIM(COALESCE(uo.desc_uo, ''))) = 'CEO'
+            AND UPPER(TRIM(COALESCE(sv.servicio, ''))) = 'CONTROL DE INGRESO'
+            AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'VARIAS EMPRESAS'
+            AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'CONTROL DE INGRESO'
+        )
+    ";
+}
+
+function scdSummaryConditionOtrosRutExcluidos(): string
+{
+    $rutActual = scdNormalizeRutSql('ps.rut');
+    $rutResultadoFinal = scdNormalizeRutSql('rfs.rut');
+    $rutApoyo = scdNormalizeRutSql('ps2.rut');
+    $rutIrl = scdNormalizeRutSql('p2.rut');
+
+    return "
+        (
+            {$rutActual} <> ''
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM ceo_resultado_final_servicio rfs
+                    WHERE {$rutResultadoFinal} = {$rutActual}
+                      AND rfs.segmento = 'GENERAL'
+                      AND rfs.resultado_final IN ('APROBADO', 'REPROBADO')
+                      AND DATE(rfs.fecha_calculo) BETWEEN :fecha_desde AND :fecha_hasta
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM ceo_solicitudes s2
+                    INNER JOIN ceo_participantes_solicitud ps2 ON ps2.id_solicitud = s2.nsolicitud
+                    LEFT JOIN ceo_cargo_contratistas cc2
+                        ON cc2.id = CASE
+                            WHEN TRIM(COALESCE(ps2.id_cargo, '')) REGEXP '^[0-9]+$'
+                                THEN CAST(ps2.id_cargo AS UNSIGNED)
+                            ELSE NULL
+                        END
+                    LEFT JOIN ceo_empresas e2 ON e2.id = s2.contratista
+                    LEFT JOIN ceo_procesos pr2 ON pr2.id = s2.proceso
+                    WHERE {$rutApoyo} = {$rutActual}
+                      AND s2.estado IN ('A', 'F')
+                      AND COALESCE(NULLIF(TRIM(ps2.asistio), ''), '0') = '1'
+                      AND s2.fecha BETWEEN :fecha_desde AND :fecha_hasta
+                      AND s2.habilitacionceo = 3
+                      AND UPPER(TRIM(COALESCE(pr2.desc_proceso, ''))) <> 'ENEL X'
+                      AND UPPER(TRIM(COALESCE(e2.nombre, ''))) NOT LIKE '%ENEL X%'
+                      AND TRIM(COALESCE(cc2.cargo, '')) <> ''
+                      AND UPPER(TRIM(COALESCE(cc2.cargo, ''))) NOT LIKE '%SUPERVISOR%'
+                      AND UPPER(TRIM(COALESCE(cc2.cargo, ''))) NOT LIKE '%OPERADOR%'
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM ceo_formacion_participantes p2
+                    INNER JOIN ceo_formacion f2 ON f2.cuadrilla = p2.id_cuadrilla
+                    LEFT JOIN (
+                        SELECT fp1.*
+                        FROM ceo_formacion_programadas fp1
+                        INNER JOIN (
+                            SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+                            FROM ceo_formacion_programadas
+                            GROUP BY rut, id_servicio, cuadrilla
+                        ) fp2 ON fp1.id = fp2.max_id
+                    ) fp3 ON fp3.rut = p2.rut AND fp3.id_servicio = f2.id_servicio AND fp3.cuadrilla = p2.id_cuadrilla
+                    WHERE {$rutIrl} = {$rutActual}
+                      AND f2.id_servicio = 23
+                      AND f2.fecha BETWEEN :fecha_desde AND :fecha_hasta
+                      AND UPPER(TRIM(COALESCE(fp3.estado, ''))) <> 'ANULADA'
+                      AND UPPER(TRIM(COALESCE(fp3.resultado, 'PENDIENTE'))) IN ('APROBADO', 'REPROBADO', 'PENDIENTE')
+                )
+            )
+        )
+    ";
+}
+
+function scdBuildOtrosRutExclusion(array $filters): array
+{
+    $rutActual = scdNormalizeRutSql('ps.rut');
+    $rutResultadoFinal = scdNormalizeRutSql('rfs.rut');
+    $rutApoyo = scdNormalizeRutSql('ps2.rut');
+    $rutIrl = scdNormalizeRutSql('p2.rut');
+
+    return [
+        'sql' => "
+            (
+                {$rutActual} <> ''
+                AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM ceo_resultado_final_servicio rfs
+                        WHERE {$rutResultadoFinal} = {$rutActual}
+                          AND rfs.segmento = 'GENERAL'
+                          AND rfs.resultado_final IN ('APROBADO', 'REPROBADO')
+                          AND DATE(rfs.fecha_calculo) BETWEEN :otros_hab_desde AND :otros_hab_hasta
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM ceo_solicitudes s2
+                        INNER JOIN ceo_participantes_solicitud ps2 ON ps2.id_solicitud = s2.nsolicitud
+                        LEFT JOIN ceo_cargo_contratistas cc2
+                            ON cc2.id = CASE
+                                WHEN TRIM(COALESCE(ps2.id_cargo, '')) REGEXP '^[0-9]+$'
+                                    THEN CAST(ps2.id_cargo AS UNSIGNED)
+                                ELSE NULL
+                            END
+                        LEFT JOIN ceo_empresas e2 ON e2.id = s2.contratista
+                        LEFT JOIN ceo_procesos pr2 ON pr2.id = s2.proceso
+                        WHERE {$rutApoyo} = {$rutActual}
+                          AND s2.estado IN ('A', 'F')
+                          AND COALESCE(NULLIF(TRIM(ps2.asistio), ''), '0') = '1'
+                          AND s2.fecha BETWEEN :otros_apoyo_desde AND :otros_apoyo_hasta
+                          AND s2.habilitacionceo = 3
+                          AND UPPER(TRIM(COALESCE(pr2.desc_proceso, ''))) <> 'ENEL X'
+                          AND UPPER(TRIM(COALESCE(e2.nombre, ''))) NOT LIKE '%ENEL X%'
+                          AND TRIM(COALESCE(cc2.cargo, '')) <> ''
+                          AND UPPER(TRIM(COALESCE(cc2.cargo, ''))) NOT LIKE '%SUPERVISOR%'
+                          AND UPPER(TRIM(COALESCE(cc2.cargo, ''))) NOT LIKE '%OPERADOR%'
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM ceo_formacion_participantes p2
+                        INNER JOIN ceo_formacion f2 ON f2.cuadrilla = p2.id_cuadrilla
+                        LEFT JOIN (
+                            SELECT fp1.*
+                            FROM ceo_formacion_programadas fp1
+                            INNER JOIN (
+                                SELECT rut, id_servicio, cuadrilla, MAX(id) AS max_id
+                                FROM ceo_formacion_programadas
+                                GROUP BY rut, id_servicio, cuadrilla
+                            ) fp2 ON fp1.id = fp2.max_id
+                        ) fp3 ON fp3.rut = p2.rut AND fp3.id_servicio = f2.id_servicio AND fp3.cuadrilla = p2.id_cuadrilla
+                        WHERE {$rutIrl} = {$rutActual}
+                          AND f2.id_servicio = 23
+                          AND f2.fecha BETWEEN :otros_irl_desde AND :otros_irl_hasta
+                          AND UPPER(TRIM(COALESCE(fp3.estado, ''))) <> 'ANULADA'
+                          AND UPPER(TRIM(COALESCE(fp3.resultado, 'PENDIENTE'))) IN ('APROBADO', 'REPROBADO', 'PENDIENTE')
+                    )
+                )
+            )
+        ",
+        'params' => [
+            ':otros_hab_desde' => $filters['fecha_desde'],
+            ':otros_hab_hasta' => $filters['fecha_hasta'],
+            ':otros_apoyo_desde' => $filters['fecha_desde'],
+            ':otros_apoyo_hasta' => $filters['fecha_hasta'],
+            ':otros_irl_desde' => $filters['fecha_desde'],
+            ':otros_irl_hasta' => $filters['fecha_hasta'],
+        ],
+    ];
+}
+
+function scdSummaryConditionOtros(): string
+{
+    return "
+        s.estado IN ('A', 'F')
+        AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+        AND " . trim(scdSummaryDateCondition()) . "
+        AND NOT (
+            " . trim(scdSummaryConditionOtrosClasificados()) . "
+        )
+        AND NOT (
+            " . trim(scdSummaryConditionOtrosRutExcluidos()) . "
+        )
+    ";
+}
+
 function scdSummaryDefinitions(): array
 {
     return [
@@ -317,18 +935,7 @@ function scdSummaryDefinitions(): array
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 3
-                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) <> 'ENEL X'
-                AND UPPER(TRIM(COALESCE(e.nombre, ''))) NOT LIKE '%ENEL X%'
-                AND TRIM(COALESCE(cc.cargo, '')) <> ''
-                AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%SUPERVISOR%'
-                AND UPPER(TRIM(COALESCE(cc.cargo, ''))) NOT LIKE '%OPERADOR%'
-            ",
+            'condition' => scdSummaryConditionApoyoHabilitaciones(),
         ],
         [
             'key' => 'habilitaciones_ecommercial',
@@ -337,14 +944,7 @@ function scdSummaryDefinitions(): array
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 8
-                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'ENEL X'
-            ",
+            'condition' => scdSummaryConditionHabilitacionesEcommercial(),
         ],
         [
             'key' => 'charla_induccion_irl',
@@ -362,126 +962,173 @@ function scdSummaryDefinitions(): array
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.proceso = 24
-                AND s.habilitacionceo = 6
-            ",
+            'condition' => scdSummaryConditionRdo(),
         ],
         [
-            'key' => 'reunion_gerencial',
-            'titulo' => 'Reunión gerencial',
+            'key' => 'practica_en_patio',
+            'titulo' => 'Practica en Patio',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 5
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'VISITA EMPRESAS'
-                AND UPPER(COALESCE(s.observacion, '')) NOT LIKE '%WORKSHOP%'
-            ",
+            'condition' => scdSummaryConditionPracticaPatio(),
         ],
         [
-            'key' => 'visitas_municipios',
-            'titulo' => 'Visitas Municipios',
+            'key' => 'energia_del_futuro',
+            'titulo' => 'Energia del Futuro',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 5
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'MUNICIPIOS'
-            ",
+            'condition' => scdSummaryConditionEnergiaFuturo(),
         ],
         [
-            'key' => 'visitas_educacionales',
-            'titulo' => 'Visitas Colegios',
+            'key' => 'visita_alumno',
+            'titulo' => 'Visita Alumno',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND UPPER(TRIM(COALESCE(e.nombre, ''))) = 'VISITAS DE LICEOS'
-                AND UPPER(TRIM(COALESCE(pr.desc_proceso, ''))) = 'VISITA'
-            ",
+            'condition' => scdSummaryConditionVisitaAlumno(),
         ],
         [
-            'key' => 'workshop',
-            'titulo' => 'Workshop',
+            'key' => 'formacion_total',
+            'titulo' => 'Formación',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 5
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'VISITA EMPRESAS'
-                AND UPPER(COALESCE(s.observacion, '')) LIKE '%WORKSHOP%'
-            ",
+            'condition' => scdSummaryConditionFormacion(),
+            'is_group_total' => true,
         ],
         [
-            'key' => 'fundacion_colonias_urbanas_cruzando_fronteras_maipu',
-            'titulo' => 'FUNDACIÓN COLONIAS URBANAS CRUZANDO FRONTERAS DE MAIPÚ',
+            'key' => 'formacion_llee_60_horas',
+            'titulo' => 'LLEE 60 horas',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 5
-                AND UPPER(TRIM(COALESCE(s.tipo_visita, ''))) = 'FUNDACIÓN'
-            ",
+            'condition' => scdSummaryConditionFormacionLlee60Horas(),
+            'parent_key' => 'formacion_total',
         ],
         [
-            'key' => 'capacitacion_grupo_electrogeno',
-            'titulo' => 'CAPACITACIÓN DE GRUPO ELECTRÓGENO',
+            'key' => 'formacion_podas',
+            'titulo' => 'Podas',
             'origen' => 'SOLICITUDES',
             'origen_label' => 'Solicitudes',
             'reference_label' => 'Solicitud',
             'context_label' => 'Patio / Proceso',
-            'condition' => "
-                s.estado IN ('A', 'F')
-                AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
-                AND ps.fechaasistio >= :fecha_desde
-                AND ps.fechaasistio < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
-                AND s.habilitacionceo = 6
-                AND UPPER(TRIM(COALESCE(s.tipohabilitacion, ''))) = 'SEGURIDAD'
-                AND (
-                    UPPER(COALESCE(s.observacion, '')) LIKE '%ELECTRÓGENO%'
-                    OR UPPER(COALESCE(s.observacion, '')) LIKE '%ELECTROGENO%'
-                )
-                AND UPPER(TRIM(COALESCE(ch.desc_charlas, ''))) = 'OPERACIÓN DE GENERADOR'
-            ",
+            'condition' => scdSummaryConditionFormacionPodas(),
+            'parent_key' => 'formacion_total',
         ],
         [
-            'key' => 'turn_the_tide',
+            'key' => 'formacion_turn_the_tide',
             'titulo' => 'Turn the Tide',
-            'origen' => 'FORMACION',
-            'origen_label' => 'Formación',
-            'reference_label' => 'Cuadrilla',
-            'context_label' => 'Servicio / UO',
-            'service_id' => 22,
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionFormacionTurnTheTide(),
+            'parent_key' => 'formacion_total',
+        ],
+        [
+            'key' => 'formacion_inspectores_power_skill',
+            'titulo' => 'Inspectores Power Skill',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionFormacionInspectoresPowerSkill(),
+            'parent_key' => 'formacion_total',
+        ],
+        [
+            'key' => 'formacion_operaciones_equipos_aereos',
+            'titulo' => 'Operaciones de Equipos Aereos',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionFormacionOperacionesEquiposAereos(),
+            'parent_key' => 'formacion_total',
+        ],
+        [
+            'key' => 'formacion_equipo_reconectador',
+            'titulo' => 'Equipo Reconectador',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionFormacionEquipoReconectador(),
+            'parent_key' => 'formacion_total',
+        ],
+        [
+            'key' => 'capacitaciones_total',
+            'titulo' => 'Capacitaciones',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitaciones(),
+            'is_group_total' => true,
+        ],
+        [
+            'key' => 'capacitaciones_carabineros',
+            'titulo' => 'Carabineros',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitacionesCarabineros(),
+            'parent_key' => 'capacitaciones_total',
+        ],
+        [
+            'key' => 'capacitaciones_pdi',
+            'titulo' => 'PDI',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitacionesPdi(),
+            'parent_key' => 'capacitaciones_total',
+        ],
+        [
+            'key' => 'capacitaciones_bomberos',
+            'titulo' => 'Bomberos',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitacionesBomberos(),
+            'parent_key' => 'capacitaciones_total',
+        ],
+        [
+            'key' => 'capacitaciones_municipios',
+            'titulo' => 'Municipios',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitacionesMunicipios(),
+            'parent_key' => 'capacitaciones_total',
+        ],
+        [
+            'key' => 'capacitaciones_aduanas',
+            'titulo' => 'Aduanas',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionCapacitacionesAduanas(),
+            'parent_key' => 'capacitaciones_total',
+        ],
+        [
+            'key' => 'otros',
+            'titulo' => 'OTROS',
+            'origen' => 'SOLICITUDES',
+            'origen_label' => 'Solicitudes',
+            'reference_label' => 'Solicitud',
+            'context_label' => 'Patio / Proceso',
+            'condition' => scdSummaryConditionOtros(),
         ],
     ];
 }
@@ -509,6 +1156,8 @@ function scdSolicitudesSummaryFromSql(): string
                 ELSE NULL
             END
         LEFT JOIN ceo_empresas e ON e.id = s.contratista
+        LEFT JOIN ceo_servicios sv ON sv.id = s.servicio
+        LEFT JOIN ceo_uo uo ON uo.id = s.uo
         LEFT JOIN ceo_patios pa ON pa.id = s.patio
         LEFT JOIN ceo_procesos pr ON pr.id = s.proceso
         LEFT JOIN ceo_habilitaciontipo ht ON ht.id = s.habilitacionceo
@@ -719,6 +1368,67 @@ function scdFetchSolicitudesSummaryDetail(PDO $pdo, array $filters, string $cond
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
+function scdFetchOtrosSummaryTotal(PDO $pdo, array $filters): int
+{
+    [$scopeWhere] = scdBuildScope();
+    $rutExclusion = scdBuildOtrosRutExclusion($filters);
+    $sql = "
+        SELECT COUNT(*)
+        " . scdSolicitudesSummaryFromSql() . "
+        WHERE {$scopeWhere}
+          AND s.estado IN ('A', 'F')
+          AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+          AND " . trim(scdSummaryDateCondition()) . "
+          AND NOT (
+              " . trim(scdSummaryConditionOtrosClasificados()) . "
+          )
+          AND NOT (
+              " . trim((string)$rutExclusion['sql']) . "
+          )
+    ";
+
+    return scdFetchScalar($pdo, $sql, scdBuildSummaryBaseParams($filters) + (array)$rutExclusion['params']);
+}
+
+function scdFetchOtrosSummaryDetail(PDO $pdo, array $filters): array
+{
+    [$scopeWhere] = scdBuildScope();
+    $rutExclusion = scdBuildOtrosRutExclusion($filters);
+    $sql = "
+        SELECT
+            s.fecha AS fecha,
+            s.nsolicitud AS referencia,
+            COALESCE(e.nombre, '') AS empresa,
+            COALESCE(
+                CONCAT_WS(
+                    ' / ',
+                    NULLIF(TRIM(COALESCE(pa.desc_patios, '')), ''),
+                    NULLIF(TRIM(COALESCE(pr.desc_proceso, '')), '')
+                ),
+                ''
+            ) AS contexto,
+            COALESCE(ps.rut, '') AS rut,
+            TRIM(CONCAT(COALESCE(ps.nombre, ''), ' ', COALESCE(ps.apellidop, ''), ' ', COALESCE(ps.apellidom, ''))) AS persona,
+            COALESCE(cc.cargo, '') AS cargo
+        " . scdSolicitudesSummaryFromSql() . "
+        WHERE {$scopeWhere}
+          AND s.estado IN ('A', 'F')
+          AND COALESCE(NULLIF(TRIM(ps.asistio), ''), '0') = '1'
+          AND " . trim(scdSummaryDateCondition()) . "
+          AND NOT (
+              " . trim(scdSummaryConditionOtrosClasificados()) . "
+          )
+          AND NOT (
+              " . trim((string)$rutExclusion['sql']) . "
+          )
+        ORDER BY s.fecha ASC, s.nsolicitud ASC, ps.apellidop ASC, ps.apellidom ASC, ps.nombre ASC
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(scdBuildSummaryBaseParams($filters) + (array)$rutExclusion['params']);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 function scdFetchSolicitudesSummaryUniquePersonDetail(PDO $pdo, array $filters, string $condition): array
 {
     [$scopeWhere] = scdBuildScope();
@@ -821,6 +1531,8 @@ function scdFetchSolicitudesResumen(PDO $pdo, array $filters): array
         try {
             if ($key === 'habilitaciones') {
                 $total = scdFetchHabilitacionesSummaryTotal($pdo, $filters);
+            } elseif ($key === 'otros') {
+                $total = scdFetchOtrosSummaryTotal($pdo, $filters);
             } elseif ((string)$definition['origen'] === 'FORMACION') {
                 $total = scdFetchFormacionTotal($pdo, (int)($definition['service_id'] ?? 0), $filters);
             } elseif (in_array($key, ['habilitaciones', 'apoyo_habilitaciones'], true)) {
@@ -832,17 +1544,17 @@ function scdFetchSolicitudesResumen(PDO $pdo, array $filters): array
             $total = 0;
         }
 
-        if ($total > 0) {
-            $rows[] = [
-                'key' => (string)$definition['key'],
-                'titulo' => (string)$definition['titulo'],
-                'total' => $total,
-                'origen' => (string)$definition['origen'],
-                'origen_label' => (string)$definition['origen_label'],
-                'reference_label' => (string)$definition['reference_label'],
-                'context_label' => (string)$definition['context_label'],
-            ];
-        }
+        $rows[] = [
+            'key' => (string)$definition['key'],
+            'titulo' => (string)$definition['titulo'],
+            'total' => $total,
+            'origen' => (string)$definition['origen'],
+            'origen_label' => (string)$definition['origen_label'],
+            'reference_label' => (string)$definition['reference_label'],
+            'context_label' => (string)$definition['context_label'],
+            'parent_key' => (string)($definition['parent_key'] ?? ''),
+            'is_group_total' => !empty($definition['is_group_total']),
+        ];
     }
 
     return $rows;
@@ -890,11 +1602,13 @@ if ($summaryDetailKey !== '') {
 
         $detailRows = (string)$summaryDefinition['key'] === 'habilitaciones'
             ? scdFetchHabilitacionesSummaryDetail($pdo, $filters)
+            : ((string)$summaryDefinition['key'] === 'otros'
+                ? scdFetchOtrosSummaryDetail($pdo, $filters)
             : ((string)$summaryDefinition['origen'] === 'FORMACION'
                 ? scdFetchFormacionDetalle($pdo, (int)($summaryDefinition['service_id'] ?? 0), $filters)
                 : ((in_array((string)$summaryDefinition['key'], ['habilitaciones', 'apoyo_habilitaciones'], true))
                 ? scdFetchSolicitudesSummaryUniquePersonDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'))
-                : scdFetchSolicitudesSummaryDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0'))));
+                : scdFetchSolicitudesSummaryDetail($pdo, $filters, (string)($summaryDefinition['condition'] ?? '1=0')))));
 
         scdJsonResponse([
             'ok' => true,
@@ -961,7 +1675,13 @@ try {
 }
 
 $excelUrl = 'solicitudes_consulta_detalle_excel.php?' . http_build_query($filters);
-$summaryGrandTotal = array_sum(array_map(static fn(array $row): int => (int)($row['total'] ?? 0), $summaryRows));
+$summaryGrandTotal = array_sum(array_map(static function (array $row): int {
+    if (!empty($row['parent_key'])) {
+        return 0;
+    }
+
+    return (int)($row['total'] ?? 0);
+}, $summaryRows));
 $summaryJson = json_encode($summaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 $attendanceSummaryGrandTotal = array_sum(array_map(static fn(array $row): int => (int)($row['total'] ?? 0), $attendanceSummaryRows));
 $attendanceSummaryJson = json_encode($attendanceSummaryRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -987,6 +1707,8 @@ $attendanceSummaryJson = json_encode($attendanceSummaryRows, JSON_UNESCAPED_UNIC
     .summary-toolbar .btn { min-width:42px; }
     .summary-period { color:#d8ebff; }
     .summary-table thead th { background:#f2f7fc; color:#17324d; }
+    .summary-topic-group td { font-weight:600; background:#f8fbff; }
+    .summary-topic-subitem td:first-child { padding-left:2rem; }
     .summary-table td, .summary-table th { vertical-align:middle; }
     .summary-table tbody tr:nth-child(odd) { background:#fbfdff; }
     .summary-total { font-variant-numeric:tabular-nums; font-weight:700; color:#0b5a8f; }
@@ -1259,8 +1981,8 @@ $attendanceSummaryJson = json_encode($attendanceSummaryRows, JSON_UNESCAPED_UNIC
             <tbody>
             <?php if ($summaryRows): ?>
               <?php foreach ($summaryRows as $summaryRow): ?>
-                <tr>
-                  <td><?= scdEsc($summaryRow['titulo']) ?></td>
+                <tr class="<?= !empty($summaryRow['is_group_total']) ? 'summary-topic-group' : (!empty($summaryRow['parent_key']) ? 'summary-topic-subitem' : '') ?>">
+                  <td><?= !empty($summaryRow['parent_key']) ? '&ndash; ' : '' ?><?= scdEsc($summaryRow['titulo']) ?></td>
                   <td class="text-end summary-total">
                     <?php if ((int)$summaryRow['total'] > 0): ?>
                       <button

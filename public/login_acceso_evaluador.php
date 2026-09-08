@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (!$usr || (string)($usr['estado'] ?? '') !== 'A' || !password_verify($clave, (string)($usr['clave_hash'] ?? ''))) {
                     $err = 'Código o contraseña incorrectos.';
-                } elseif (!in_array((int)($usr['id_rol'] ?? 0), [4, 5], true)) {
+                } elseif (!in_array((int)($usr['id_rol'] ?? 0), [4, 5, 7], true)) {
                     $err = 'Usuario no autorizado para evaluación.';
                 } else {
                     session_regenerate_id(true);

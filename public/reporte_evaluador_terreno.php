@@ -118,12 +118,13 @@ body { background:#f7f9fc; }
               <th>Servicio</th>
               <th>RUT</th>
               <th>Nombre</th>
+              <th>Asistencia</th>
               <th>Empresa</th>
             </tr>
           </thead>
           <tbody>
             <?php if (empty($rows)): ?>
-              <tr><td colspan="9" class="text-center text-muted">No hay registros para los filtros seleccionados.</td></tr>
+              <tr><td colspan="10" class="text-center text-muted">No hay registros para los filtros seleccionados.</td></tr>
             <?php else: ?>
               <?php foreach ($rows as $row): ?>
                 <tr>
@@ -135,6 +136,7 @@ body { background:#f7f9fc; }
                   <td><?= retEsc((string)($row['servicio'] ?? '')) ?></td>
                   <td><?= retEsc((string)($row['rut'] ?? '')) ?></td>
                   <td><?= retEsc(trim((string)($row['nombre'] ?? '') . ' ' . (string)($row['apellidos'] ?? ''))) ?></td>
+                  <td class="text-center"><?= retEsc((string)($row['asistencia'] ?? 'ASISTIO')) ?></td>
                   <td><?= retEsc((string)($row['empresa'] ?? '')) ?></td>
                 </tr>
               <?php endforeach; ?>

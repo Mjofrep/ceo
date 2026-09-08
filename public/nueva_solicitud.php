@@ -35,153 +35,186 @@ $pdo = db();
 $idEmpresa = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 $idRol     = (int)($_SESSION['auth']['id_rol'] ?? 0);
 
+function nuevaSolicitudTiposVisitaPermitidos(): array {
+  return [
+    'Colegio',
+    'Institutos profesionales',
+    'Universidades',
+    'Visita Empresas',
+    'Municipios',
+    'Fundación',
+    'Carabineros',
+    'Bomberos',
+    'PDI',
+    'Aduana',
+  ];
+}
 
+function nuevaSolicitudColumnaTipoVisitaExiste(PDO $pdo): bool {
+  static $existe = null;
+  if ($existe !== null) {
+    return $existe;
+  }
 
-/* ===============================================================
-   BLOQUE: guardar solicitud y participantes (AJAX POST)
-   =============================================================== */
-if (isset($_POST['action']) && $_POST['action'] === 'guardar_solicitud') {
-  header('Content-Type: application/json; charset=utf-8');
   try {
-    $pdo->beginTransaction();
+    $stTipoVisita = $pdo->query("SHOW COLUMNS FROM ceo_solicitudes LIKE 'tipo_visita'");
+    $existe = (bool)$stTipoVisita->fetch(PDO::FETCH_ASSOC);
+  } catch (Throwable $e) {
+    $existe = false;
+  }
 
-	    $next = (int)$pdo->query("SELECT COALESCE(MAX(nsolicitud),0)+1 FROM ceo_solicitudes")->fetchColumn();
-	if ($next === 5030) {
-	    $next = 5528;
-	}
-	      
-	    $solicitante = $_SESSION['auth']['id'] ?? 'Desconocido';
-	    $tipoVisita = trim((string)($_POST['tipo_visita'] ?? ''));
-	    $tiposVisitaPermitidos = [
-	      'Colegio',
-	      'Institutos profesionales',
-	      'Universidades',
-	      'Visita Empresas',
-	      'Municipios',
-	      'Fundación',
-	      'Carabineros',
-	      'Bomberos',
-	      'PDI',
-	      'Aduana',
-	    ];
-	    if (!in_array($tipoVisita, $tiposVisitaPermitidos, true)) {
-	      $tipoVisita = null;
-	    }
+  return $existe;
+}
 
-	    $columnaTipoVisitaExiste = false;
-	    try {
-	      $stTipoVisita = $pdo->query("SHOW COLUMNS FROM ceo_solicitudes LIKE 'tipo_visita'");
-	      $columnaTipoVisitaExiste = (bool)$stTipoVisita->fetch(PDO::FETCH_ASSOC);
-	    } catch (Throwable $e) {
-	      $columnaTipoVisitaExiste = false;
-	    }
-	    $sqlColumnaTipoVisita = $columnaTipoVisitaExiste ? ', tipo_visita' : '';
-	    $sqlValorTipoVisita   = $columnaTipoVisitaExiste ? ', :tipo_visita' : '';
+function nuevaSolicitudSiguienteNumero(PDO $pdo): int {
+  $next = (int)$pdo->query("SELECT COALESCE(MAX(nsolicitud),0)+1 FROM ceo_solicitudes")->fetchColumn();
+  if ($next === 5030) {
+    $next = 5528;
+  }
+  return $next;
+}
 
-	    // Inserta la solicitud base
-	    $stmt = $pdo->prepare("
-	    INSERT INTO ceo_solicitudes
-	    (nsolicitud, fecha, horainicio, horatermino, contratista, proceso, habilitacionceo,
-	     tipohabilitacion, patio, resphse, resplinea, uo, servicio, responsable,
-	     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, fechacreacion, estado{$sqlColumnaTipoVisita})
-	      VALUES
-	    (:nsolicitud,:fecha,:hini,:hfin,:empresa,:proceso,:habceo,:tipohab,:patio,
-	     :rhse,:rlinea,:uo,:servicio,:ruo,:obs,:charla,:motivoreinduccion,
-	     :numerohallazgo,:solicitante,CURDATE(),'I'{$sqlValorTipoVisita})
-	    ");
-	    $paramsSolicitud = [
-	      ':nsolicitud' => $next,
-	      ':fecha'      => $_POST['fecha'] ?? null,
-	      ':hini'       => $_POST['hora_inicio'] ?? null,
-      ':hfin'       => $_POST['hora_termino'] ?? null,
-      ':empresa'    => $_POST['empresa'] ?? null,
-      ':proceso'    => $_POST['proceso'] ?? null,
-      ':habceo'     => $_POST['habilitacion_ceo'] ?? null,
-      ':tipohab'    => $_POST['tipo_habilitacion'] ?? null,
-      ':patio'      => $_POST['patio'] ?? null,
-      ':rhse'       => $_POST['resp_hse'] ?? null,
-      ':rlinea'     => $_POST['resp_linea'] ?? null,
-      ':uo'         => $_POST['uo'] ?? null,
-      ':servicio'   => $_POST['servicio'] ?? null,
-      ':ruo'        => $_POST['resp_uo'] ?? null,
-	      ':obs'        => $_POST['observacion'] ?? null,
-	      ':charla'     => $_POST['charla'] ?? null,
-	      ':motivoreinduccion' => $_POST['motivoreinduccion'] ?? null,
-	      ':numerohallazgo'    => $_POST['numerohallazgo'] ?? null,
-	      ':solicitante'=> $solicitante
-	    ];
-	    if ($columnaTipoVisitaExiste) {
-	      $paramsSolicitud[':tipo_visita'] = $tipoVisita;
-	    }
-	    $stmt->execute($paramsSolicitud);
+function nuevaSolicitudFechasDesdePost(array $post): array {
+  $usarRango = (int)($post['usar_rango'] ?? 0) === 1;
+  if (!$usarRango) {
+    $fecha = trim((string)($post['fecha'] ?? ''));
+    if ($fecha === '') {
+      throw new RuntimeException('Debes seleccionar una fecha.');
+    }
+    return [$fecha];
+  }
 
-    // Actualiza calendario a OCUPADO si aplica
-    $fecha = $_POST['fecha'] ?? null;
-    $patio = $_POST['patio'] ?? null;
-    $hIni  = $_POST['hora_inicio'] ?? null;
-    $hFin  = $_POST['hora_termino'] ?? null;
-    if ($fecha && $patio && $hIni && $hFin) {
-      try {
-        $upd = $pdo->prepare("
-          UPDATE ceo_calendario
-             SET estado = 'OCUPADO',
-                 nsolicitud = :nsolicitud
-           WHERE id_patio = :patio
-             AND fecha = :fecha
-             AND horainicio BETWEEN :hIni AND :hFin
-             AND estado = 'DISPONIBLE'
-        ");
-        $upd->execute([
-          ':nsolicitud' => $next,
-          ':patio'      => $patio,
-          ':fecha'      => $fecha,
-          ':hIni'       => $hIni,
-          ':hFin'       => $hFin,
-        ]);
-      } catch (Throwable $ex) {
-        error_log("⚠️ Error actualizando calendario: ".$ex->getMessage());
-      }
+  $desde = trim((string)($post['fecha_desde'] ?? ''));
+  $hasta = trim((string)($post['fecha_hasta'] ?? ''));
+  if ($desde === '' || $hasta === '') {
+    throw new RuntimeException('Debes seleccionar fecha desde y fecha hasta.');
+  }
+
+  $dtDesde = DateTimeImmutable::createFromFormat('Y-m-d', $desde);
+  $dtHasta = DateTimeImmutable::createFromFormat('Y-m-d', $hasta);
+  if (!$dtDesde || !$dtHasta) {
+    throw new RuntimeException('Rango de fechas inválido.');
+  }
+  if ($dtDesde > $dtHasta) {
+    throw new RuntimeException('La fecha desde no puede ser mayor que la fecha hasta.');
+  }
+
+  $fechas = [];
+  for ($cursor = $dtDesde; $cursor <= $dtHasta; $cursor = $cursor->modify('+1 day')) {
+    $fechas[] = $cursor->format('Y-m-d');
+  }
+
+  return $fechas;
+}
+
+function nuevaSolicitudValidarParticipantes(array $rows): void {
+  if (empty($rows) || !is_array($rows)) {
+    throw new RuntimeException('No se recibieron participantes para la solicitud.');
+  }
+
+  $validCount = 0;
+  foreach ($rows as $r) {
+    if (!empty(trim((string)($r['rut'] ?? '')))) {
+      $validCount++;
+    }
+  }
+
+  if ($validCount === 0) {
+    throw new RuntimeException('La solicitud debe tener al menos un participante válido.');
+  }
+
+  $rutsSinCargo = [];
+  foreach ($rows as $r) {
+    $rut = trim((string)($r['rut'] ?? ''));
+    if ($rut === '') {
+      continue;
     }
 
-    // Inserta participantes
-    $rows = json_decode($_POST['participantes'] ?? '[]', true);
-    // === VALIDACIÓN CRÍTICA: no permitir solicitud sin participantes ===
-        if (empty($rows) || !is_array($rows)) {
-            throw new RuntimeException('No se recibieron participantes para la solicitud.');
-        }
-        
-        // Contar participantes válidos (con RUT)
-        $validCount = 0;
-        foreach ($rows as $r) {
-            if (!empty(trim((string)($r['rut'] ?? '')))) {
-                $validCount++;
-            }
-        }
-        
-        if ($validCount === 0) {
-            throw new RuntimeException('La solicitud debe tener al menos un participante válido.');
-        }
+    $cargo = trim((string)($r['cargo'] ?? ''));
+    if ($cargo === '') {
+      $rutsSinCargo[] = $rut;
+    }
+  }
 
-        $rutsSinCargo = [];
-        foreach ($rows as $r) {
-            $rut = trim((string)($r['rut'] ?? ''));
-            if ($rut === '') {
-                continue;
-            }
+  if (!empty($rutsSinCargo)) {
+    throw new RuntimeException('No se puede registrar la solicitud. Participantes sin cargo: ' . implode(', ', $rutsSinCargo));
+  }
+}
 
-            $cargo = trim((string)($r['cargo'] ?? ''));
-            if ($cargo === '') {
-                $rutsSinCargo[] = $rut;
-            }
-        }
+function nuevaSolicitudCrear(PDO $pdo, array $post, array $rows, string $fecha, int $solicitante, bool $columnaTipoVisitaExiste): int {
+  $next = nuevaSolicitudSiguienteNumero($pdo);
 
-        if (!empty($rutsSinCargo)) {
-            throw new RuntimeException('No se puede registrar la solicitud. Participantes sin cargo: ' . implode(', ', $rutsSinCargo));
-        }
+  $tipoVisita = trim((string)($post['tipo_visita'] ?? ''));
+  if (!in_array($tipoVisita, nuevaSolicitudTiposVisitaPermitidos(), true)) {
+    $tipoVisita = null;
+  }
 
-if (!empty($rows)) {
+  $sqlColumnaTipoVisita = $columnaTipoVisitaExiste ? ', tipo_visita' : '';
+  $sqlValorTipoVisita   = $columnaTipoVisitaExiste ? ', :tipo_visita' : '';
 
-  // Buscar cargo
+  $stmt = $pdo->prepare("
+    INSERT INTO ceo_solicitudes
+    (nsolicitud, fecha, horainicio, horatermino, contratista, proceso, habilitacionceo,
+     tipohabilitacion, patio, resphse, resplinea, uo, servicio, responsable,
+     observacion, charla, motivoreinduccion, numerohallazgo, solicitante, fechacreacion, estado{$sqlColumnaTipoVisita})
+    VALUES
+    (:nsolicitud,:fecha,:hini,:hfin,:empresa,:proceso,:habceo,:tipohab,:patio,
+     :rhse,:rlinea,:uo,:servicio,:ruo,:obs,:charla,:motivoreinduccion,
+     :numerohallazgo,:solicitante,CURDATE(),'I'{$sqlValorTipoVisita})
+  ");
+
+  $paramsSolicitud = [
+    ':nsolicitud' => $next,
+    ':fecha' => $fecha,
+    ':hini' => $post['hora_inicio'] ?? null,
+    ':hfin' => $post['hora_termino'] ?? null,
+    ':empresa' => $post['empresa'] ?? null,
+    ':proceso' => $post['proceso'] ?? null,
+    ':habceo' => $post['habilitacion_ceo'] ?? null,
+    ':tipohab' => $post['tipo_habilitacion'] ?? null,
+    ':patio' => $post['patio'] ?? null,
+    ':rhse' => $post['resp_hse'] ?? null,
+    ':rlinea' => $post['resp_linea'] ?? null,
+    ':uo' => $post['uo'] ?? null,
+    ':servicio' => $post['servicio'] ?? null,
+    ':ruo' => $post['resp_uo'] ?? null,
+    ':obs' => $post['observacion'] ?? null,
+    ':charla' => $post['charla'] ?? null,
+    ':motivoreinduccion' => $post['motivoreinduccion'] ?? null,
+    ':numerohallazgo' => $post['numerohallazgo'] ?? null,
+    ':solicitante' => $solicitante,
+  ];
+  if ($columnaTipoVisitaExiste) {
+    $paramsSolicitud[':tipo_visita'] = $tipoVisita;
+  }
+  $stmt->execute($paramsSolicitud);
+
+  $patio = $post['patio'] ?? null;
+  $hIni = $post['hora_inicio'] ?? null;
+  $hFin = $post['hora_termino'] ?? null;
+  if ($patio && $hIni && $hFin) {
+    try {
+      $upd = $pdo->prepare("
+        UPDATE ceo_calendario
+           SET estado = 'OCUPADO',
+               nsolicitud = :nsolicitud
+         WHERE id_patio = :patio
+           AND fecha = :fecha
+           AND horainicio BETWEEN :hIni AND :hFin
+           AND estado = 'DISPONIBLE'
+      ");
+      $upd->execute([
+        ':nsolicitud' => $next,
+        ':patio' => $patio,
+        ':fecha' => $fecha,
+        ':hIni' => $hIni,
+        ':hFin' => $hFin,
+      ]);
+    } catch (Throwable $ex) {
+      error_log("⚠️ Error actualizando calendario: ".$ex->getMessage());
+    }
+  }
+
   $cargoSel = $pdo->prepare("
     SELECT id
     FROM ceo_cargo_contratistas
@@ -189,22 +222,19 @@ if (!empty($rows)) {
     LIMIT 1
   ");
 
-  // Insertar cargo si no existe
   $cargoIns = $pdo->prepare("
     INSERT INTO ceo_cargo_contratistas (cargo, estado)
     VALUES (:cargo, 'A')
   ");
 
-  // Insert participante
   $partStmt = $pdo->prepare("
     INSERT INTO ceo_participantes_solicitud
     (id_solicitud, rut, nombre, apellidop, apellidom, id_cargo)
     VALUES (:id, :rut, :n, :ap, :am, :cargo)
   ");
 
-  // WF (preparado una vez, optimización)
   $wfStmt = $pdo->prepare("
-    SELECT wf 
+    SELECT wf
     FROM ceo_reportewf
     WHERE rut_empleado = :rut
     LIMIT 1
@@ -218,15 +248,10 @@ if (!empty($rows)) {
   ");
 
   foreach ($rows as $r) {
-
     $rut = trim((string)($r['rut'] ?? ''));
     if ($rut === '') continue;
 
-    // ---------------------------
-    // Resolver cargo
-    // ---------------------------
     $cargoNombre = trim((string)($r['cargo'] ?? ''));
-
     if ($cargoNombre === '') {
       throw new RuntimeException('Participante sin cargo: ' . $rut);
     }
@@ -235,31 +260,23 @@ if (!empty($rows)) {
     $idCargo = $cargoSel->fetchColumn();
 
     if (!$idCargo) {
-      // Crear cargo
       $cargoIns->execute([':cargo' => $cargoNombre]);
       $idCargo = (int)$pdo->lastInsertId();
     } else {
       $idCargo = (int)$idCargo;
     }
 
-    // ---------------------------
-    // Insert participante
-    // ---------------------------
     $partStmt->execute([
-      ':id'    => $next,
-      ':rut'   => $rut,
-      ':n'     => trim((string)($r['nombre'] ?? '')),
-      ':ap'    => trim((string)($r['apellidop'] ?? '')),
-      ':am'    => trim((string)($r['apellidom'] ?? '')),
+      ':id' => $next,
+      ':rut' => $rut,
+      ':n' => trim((string)($r['nombre'] ?? '')),
+      ':ap' => trim((string)($r['apellidop'] ?? '')),
+      ':am' => trim((string)($r['apellidom'] ?? '')),
       ':cargo' => $idCargo
     ]);
 
-    // ---------------------------
-    // WF
-    // ---------------------------
     $wfStmt->execute([':rut' => $rut]);
     $wfVal = $wfStmt->fetchColumn();
-
     if ($wfVal === false || $wfVal === null || trim((string)$wfVal) === '') {
       $estadoWf = 'No Autorizado';
     } else {
@@ -274,16 +291,41 @@ if (!empty($rows)) {
     }
 
     $updWf->execute([
-      ':wf'  => $estadoWf,
-      ':id'  => $next,
+      ':wf' => $estadoWf,
+      ':id' => $next,
       ':rut' => $rut
     ]);
   }
+
+  return $next;
 }
 
 
+
+/* ===============================================================
+   BLOQUE: guardar solicitud y participantes (AJAX POST)
+   =============================================================== */
+if (isset($_POST['action']) && $_POST['action'] === 'guardar_solicitud') {
+  header('Content-Type: application/json; charset=utf-8');
+  try {
+    $pdo->beginTransaction();
+    $rows = json_decode($_POST['participantes'] ?? '[]', true);
+    nuevaSolicitudValidarParticipantes($rows);
+
+    $solicitante = (int)($_SESSION['auth']['id'] ?? 0);
+    $columnaTipoVisitaExiste = nuevaSolicitudColumnaTipoVisitaExiste($pdo);
+    $fechas = nuevaSolicitudFechasDesdePost($_POST);
+    $nsolicitudes = [];
+    foreach ($fechas as $fecha) {
+      $nsolicitudes[] = nuevaSolicitudCrear($pdo, $_POST, $rows, $fecha, $solicitante, $columnaTipoVisitaExiste);
+    }
+
     $pdo->commit();
-    echo json_encode(['ok'=>true,'nsolicitud'=>$next]);
+    if (count($nsolicitudes) === 1) {
+      echo json_encode(['ok'=>true,'nsolicitud'=>$nsolicitudes[0]]);
+    } else {
+      echo json_encode(['ok'=>true,'modo'=>'rango','nsolicitudes'=>$nsolicitudes]);
+    }
  
     exit;
   } catch(Throwable $e){
@@ -539,8 +581,23 @@ body{background:#f7f9fc}
         <div class="card-body">
           <h6 class="fw-bold mb-3 text-primary">Formulario de Nueva Solicitud</h6>
           <form id="formSolicitud" class="row g-3">
-            <div class="col-md-4"><label class="form-label">Fecha</label>
-              <input type="date" name="fecha" class="form-control form-control-sm" value="<?=$fechaDefault?>" required>
+            <div class="col-md-4">
+              <label class="form-label d-flex align-items-center justify-content-between gap-2">
+                <span>Fecha</span>
+                <span class="form-check form-switch mb-0 small">
+                  <input class="form-check-input" type="checkbox" id="chkUsarRango" name="usar_rango" value="1">
+                  <label class="form-check-label" for="chkUsarRango">Rango</label>
+                </span>
+              </label>
+              <input type="date" name="fecha" id="inputFecha" class="form-control form-control-sm" value="<?=$fechaDefault?>" required>
+            </div>
+            <div class="col-md-4 d-none" id="bloqueFechaDesde">
+              <label class="form-label">Fecha Desde</label>
+              <input type="date" name="fecha_desde" id="inputFechaDesde" class="form-control form-control-sm" value="<?=$fechaDefault?>">
+            </div>
+            <div class="col-md-4 d-none" id="bloqueFechaHasta">
+              <label class="form-label">Fecha Hasta</label>
+              <input type="date" name="fecha_hasta" id="inputFechaHasta" class="form-control form-control-sm" value="<?=$fechaDefault?>">
             </div>
             <div class="col-md-4"><label class="form-label">Inicio</label><input type="time" name="hora_inicio" class="form-control form-control-sm" required></div>
             <div class="col-md-4"><label class="form-label">Término</label><input type="time" name="hora_termino" class="form-control form-control-sm" required></div>
@@ -861,9 +918,56 @@ document.getElementById('btnNext').onclick = () => {
 
 // Render inicial
 renderAgenda();
-// ========================= Validar fecha bloqueada (al cambiar y al cargar) =========================
-const inputFecha = document.querySelector('input[name="fecha"]');
 
+const chkUsarRango = document.getElementById('chkUsarRango');
+const inputFecha = document.getElementById('inputFecha');
+const bloqueFechaDesde = document.getElementById('bloqueFechaDesde');
+const bloqueFechaHasta = document.getElementById('bloqueFechaHasta');
+const inputFechaDesde = document.getElementById('inputFechaDesde');
+const inputFechaHasta = document.getElementById('inputFechaHasta');
+
+function actualizarModoFechas() {
+  const usarRango = !!chkUsarRango?.checked;
+  if (!inputFecha || !bloqueFechaDesde || !bloqueFechaHasta || !inputFechaDesde || !inputFechaHasta) {
+    return;
+  }
+
+  inputFecha.required = !usarRango;
+  inputFecha.disabled = usarRango;
+  inputFecha.classList.toggle('d-none', usarRango);
+
+  bloqueFechaDesde.classList.toggle('d-none', !usarRango);
+  bloqueFechaHasta.classList.toggle('d-none', !usarRango);
+  inputFechaDesde.required = usarRango;
+  inputFechaHasta.required = usarRango;
+
+  if (usarRango) {
+    if (!inputFechaDesde.value) inputFechaDesde.value = inputFecha.value || '<?=$fechaDefault?>';
+    if (!inputFechaHasta.value) inputFechaHasta.value = inputFecha.value || inputFechaDesde.value || '<?=$fechaDefault?>';
+  } else if (inputFechaDesde.value) {
+    inputFecha.value = inputFechaDesde.value;
+  }
+}
+
+function generarFechasRango(fechaDesde, fechaHasta) {
+  const fechas = [];
+  if (!fechaDesde || !fechaHasta) return fechas;
+
+  const desde = new Date(fechaDesde + 'T00:00:00');
+  const hasta = new Date(fechaHasta + 'T00:00:00');
+  if (Number.isNaN(desde.getTime()) || Number.isNaN(hasta.getTime()) || desde > hasta) {
+    return fechas;
+  }
+
+  const cursor = new Date(desde);
+  while (cursor <= hasta) {
+    fechas.push(cursor.toISOString().split('T')[0]);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return fechas;
+}
+
+// ========================= Validar fecha bloqueada (al cambiar y al cargar) =========================
 async function validarFechaBloqueada(el) {
   const fecha = el.value;
   if (!fecha) return;
@@ -882,8 +986,42 @@ async function validarFechaBloqueada(el) {
   }
 }
 
+async function validarRangoBloqueado() {
+  if (!chkUsarRango?.checked || !inputFechaDesde || !inputFechaHasta) {
+    return true;
+  }
+
+  const fechaDesde = inputFechaDesde.value;
+  const fechaHasta = inputFechaHasta.value;
+  if (!fechaDesde || !fechaHasta) {
+    return true;
+  }
+  if (fechaDesde > fechaHasta) {
+    alert('La fecha desde no puede ser mayor que la fecha hasta.');
+    inputFechaHasta.classList.add('border-danger');
+    setTimeout(() => inputFechaHasta.classList.remove('border-danger'), 2000);
+    return false;
+  }
+
+  const fechas = generarFechasRango(fechaDesde, fechaHasta);
+  for (const fecha of fechas) {
+    try {
+      const r = await fetch(`nueva_solicitud.php?action=validar_fecha_bloqueo&fecha=${encodeURIComponent(fecha)}`);
+      const data = await r.json();
+      if (data.ok && data.bloqueado) {
+        alert(`⚠️ La fecha ${fecha} no puede seleccionarse.\nMotivo: ${data.motivo}`);
+        return false;
+      }
+    } catch (e) {
+      console.error('Error validando rango:', e);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 if (inputFecha) {
-  // Validar cuando el usuario cambia la fecha
   inputFecha.addEventListener('change', function() {
     validarFechaBloqueada(this);
   });
@@ -892,6 +1030,27 @@ if (inputFecha) {
   if (inputFecha.value) {
     validarFechaBloqueada(inputFecha);
   }
+}
+
+if (chkUsarRango) {
+  chkUsarRango.addEventListener('change', actualizarModoFechas);
+  actualizarModoFechas();
+}
+
+if (inputFechaDesde) {
+  inputFechaDesde.addEventListener('change', async function () {
+    if (chkUsarRango?.checked) {
+      await validarRangoBloqueado();
+    }
+  });
+}
+
+if (inputFechaHasta) {
+  inputFechaHasta.addEventListener('change', async function () {
+    if (chkUsarRango?.checked) {
+      await validarRangoBloqueado();
+    }
+  });
 }
 
 
@@ -1375,6 +1534,12 @@ document.getElementById('btnGuardar').onclick = async () => {
     alert('Completa todos los campos obligatorios.');
     return;
   }
+  if (chkUsarRango?.checked) {
+    const rangoValido = await validarRangoBloqueado();
+    if (!rangoValido) {
+      return;
+    }
+  }
   if (modoParticipantes === 'excel' && _rutError) {
     alert('Archivo con RUT inválidos. Corrige antes de guardar.');
     return;
@@ -1467,9 +1632,48 @@ document.getElementById('btnGuardar').onclick = async () => {
         sessionStorage.removeItem(manualStorageKey);
         participantesManual = [];
       }
+      if (Array.isArray(data.nsolicitudes) && data.nsolicitudes.length > 1) {
+        const enviadosOk = [];
+        const enviadosError = [];
+
+        Working.show('Enviando correos de las solicitudes generadas...');
+        for (const nsolicitud of data.nsolicitudes) {
+          try {
+            const fdCorreo = new FormData();
+            fdCorreo.append('nsolicitud', String(nsolicitud));
+
+            const respCorreo = await fetch('ajax_enviar_correo_solicitud.php', {
+              method: 'POST',
+              body: fdCorreo,
+            });
+            const dataCorreo = await respCorreo.json();
+
+            if (dataCorreo.ok) {
+              enviadosOk.push(nsolicitud);
+            } else {
+              enviadosError.push(`${nsolicitud}: ${dataCorreo.error || 'Error desconocido'}`);
+            }
+          } catch (e) {
+            enviadosError.push(`${nsolicitud}: error de conexión`);
+          }
+        }
+
+        let mensaje = '✅ Solicitudes creadas: ' + data.nsolicitudes.join(', ');
+        if (enviadosOk.length > 0) {
+          mensaje += '\n\nCorreos enviados: ' + enviadosOk.join(', ');
+        }
+        if (enviadosError.length > 0) {
+          mensaje += '\n\nCorreos con error:\n- ' + enviadosError.join('\n- ');
+        }
+
+        alert(mensaje);
+        window.location.href = 'solicitudes.php';
+        return;
+      }
+
       alert('✅ Solicitud guardada N° ' + data.nsolicitud);
       window.location.href = 'enviar_correo.php?nsolicitud=' + data.nsolicitud;
-      return; // dejamos el overlay, la página cambia
+      return;
     } else {
       alert('⚠️ Error al guardar: ' + (data.error || 'Error desconocido'));
     }

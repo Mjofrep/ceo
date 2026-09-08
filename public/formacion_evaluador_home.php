@@ -11,7 +11,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 // Debe estar autenticado y ser rol Evaluador (id_rol = 4)
 if (
     empty($_SESSION['auth']) ||
-    !in_array((int)$_SESSION['auth']['id_rol'], [4, 5], true)
+    !in_array((int)$_SESSION['auth']['id_rol'], [4, 5, 7], true)
 ) {
     header('Location: login_formacion_evaluador.php');
     exit;

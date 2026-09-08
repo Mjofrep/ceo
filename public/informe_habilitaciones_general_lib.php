@@ -219,6 +219,34 @@ if (!function_exists('ihgNormalizeThreshold')) {
     }
 }
 
+if (!function_exists('ihgLoadTheoryThreshold')) {
+    function ihgLoadTheoryThreshold(PDO $pdo, int $idServicio): float
+    {
+        $stmt = $pdo->prepare(" 
+            SELECT p.porcentaje
+            FROM ceo_agrupacion a
+            INNER JOIN ceo_porcentaje_agrupacion p ON p.id_agrupacion = a.id
+            WHERE a.id_servicio = :id_servicio
+              AND p.activo = 'S'
+            ORDER BY p.fechadesde DESC, a.id ASC
+            LIMIT 1
+        ");
+        $stmt->execute([':id_servicio' => $idServicio]);
+        return ihgNormalizeThreshold((float)($stmt->fetchColumn() ?: 80.0));
+    }
+}
+
+if (!function_exists('ihgIsCeonextTheoryDate')) {
+    function ihgIsCeonextTheoryDate(?DateTimeImmutable $date): bool
+    {
+        if (!$date instanceof DateTimeImmutable) {
+            return false;
+        }
+
+        return $date >= new DateTimeImmutable('2026-06-16 00:00:00');
+    }
+}
+
 if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
     function ihgLoadLatestTheoryAreasByRut(PDO $pdo, int $idServicio, array $theoryRows): array
     {
@@ -244,12 +272,15 @@ if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
                 'proceso' => isset($theoryRow['id_proceso_habilitacion']) ? (int)$theoryRow['id_proceso_habilitacion'] : 0,
                 'fecha' => $fecha,
                 'hora' => $hora,
+                'es_ceonext' => ihgIsCeonextTheoryDate($theoryRow['fecha'] ?? null),
             ];
         }
 
         if (empty($targetsByRut)) {
             return [];
         }
+
+        $theoryThreshold = ihgLoadTheoryThreshold($pdo, $idServicio);
 
         $stmtAreas = $pdo->prepare(" 
             SELECT
@@ -259,9 +290,8 @@ if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
                 rpt.fecha_rendicion,
                 rpt.hora_rendicion,
                 COALESCE(ac.descripcion, 'Sin area de competencia') AS area,
-                cfg.porcentaje AS objetivo,
                 SUM(CASE WHEN rpt.validacion = 1 THEN 1 ELSE 0 END) AS correctas,
-                COUNT(*) AS total
+                SUM(CASE WHEN rpt.validacion = -1 THEN 1 ELSE 0 END) AS errores
             FROM ceo_resultado_pruebat rpt
             INNER JOIN ceo_preguntas_servicios ps
                 ON ps.id = rpt.id_pregunta
@@ -269,10 +299,7 @@ if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
             LEFT JOIN ceo_areacompetencias ac
                 ON ac.id = ps.areacomp
                AND ac.id_servicio = ps.id_servicio
-            LEFT JOIN ceo_habilitacion_areascompetencias_pct cfg
-                ON cfg.id_servicio = ps.id_servicio
-               AND cfg.id_area = ps.areacomp
-            GROUP BY rpt.rut, rpt.proceso, rpt.intento, rpt.fecha_rendicion, rpt.hora_rendicion, COALESCE(ac.descripcion, 'Sin area de competencia'), cfg.porcentaje
+            GROUP BY rpt.rut, rpt.proceso, rpt.intento, rpt.fecha_rendicion, rpt.hora_rendicion, COALESCE(ac.descripcion, 'Sin area de competencia')
             ORDER BY area ASC
         ");
         $stmtAreas->execute([':id_servicio' => $idServicio]);
@@ -286,11 +313,11 @@ if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
 
             $target = $targetsByRut[$rutKey];
             $rowProceso = isset($row['proceso']) ? (int)$row['proceso'] : 0;
-            if (($target['proceso'] ?? 0) > 0) {
-                if ($rowProceso !== (int)$target['proceso']) {
-                    continue;
-                }
-            } elseif (
+            if (!($target['es_ceonext'] ?? false) && ($target['proceso'] ?? 0) > 0 && $rowProceso !== (int)$target['proceso']) {
+                continue;
+            }
+
+            if (
                 ($target['fecha'] ?? null) === null
                 || ($target['hora'] ?? null) === null
                 || (string)($row['fecha_rendicion'] ?? '') !== (string)$target['fecha']
@@ -299,15 +326,15 @@ if (!function_exists('ihgLoadLatestTheoryAreasByRut')) {
                 continue;
             }
 
-            $total = (int)($row['total'] ?? 0);
-            if ($total <= 0) {
+            $correctas = (int)($row['correctas'] ?? 0);
+            $errores = (int)($row['errores'] ?? 0);
+            $totalEvaluable = $correctas + $errores;
+            if ($totalEvaluable <= 0) {
                 continue;
             }
 
-            $correctas = (int)($row['correctas'] ?? 0);
-            $porcentaje = round(($correctas / $total) * 100, 2);
-            $threshold = ihgNormalizeThreshold($row['objetivo'] !== null ? (float)$row['objetivo'] : 80.0);
-            $note = calcularNotaFinalDesdePorcentaje($porcentaje, $threshold);
+            $porcentaje = round(($correctas / $totalEvaluable) * 100, 2);
+            $note = calcularNotaFinalDesdePorcentaje($porcentaje, $theoryThreshold);
             $result[$rutKey][iheNormalizeText((string)$row['area'])] = round($note, 2);
         }
 
@@ -502,19 +529,14 @@ if (!function_exists('ihgBuildData1Rows')) {
     }
 }
 
-if (!function_exists('ihgFormatTruncatedDecimal')) {
-    function ihgFormatTruncatedDecimal(?float $value, int $decimals = 1): string
+if (!function_exists('ihgFormatRoundedDecimal')) {
+    function ihgFormatRoundedDecimal(?float $value, int $decimals = 1): string
     {
         if ($value === null) {
             return '';
         }
 
-        $factor = 10 ** max(0, $decimals);
-        $truncated = $value >= 0
-            ? floor($value * $factor) / $factor
-            : ceil($value * $factor) / $factor;
-
-        return rtrim(rtrim(number_format($truncated, $decimals, '.', ''), '0'), '.');
+        return rtrim(rtrim(number_format($value, $decimals, '.', ''), '0'), '.');
     }
 }
 
@@ -615,7 +637,7 @@ if (!function_exists('ihgBuildData3Rows')) {
                 if ($column === '' || !array_key_exists($column, $exportRow)) {
                     continue;
                 }
-                $exportRow[$column] = iheTrimmedNumber((float)$areaValue, 1);
+                $exportRow[$column] = ihgFormatRoundedDecimal((float)$areaValue, 1);
             }
 
             $rows[] = $exportRow;

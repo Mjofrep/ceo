@@ -22,7 +22,7 @@ $sheet = $excel->getActiveSheet();
 $sheet->setTitle('Eval Terreno');
 
 $sheet->setCellValue('A1', 'Reporte Evaluaciones de Terreno por Evaluador');
-$sheet->mergeCells('A1:I1');
+$sheet->mergeCells('A1:J1');
 $sheet->setCellValue('A2', 'Fecha desde');
 $sheet->setCellValue('B2', $filters['fecha_desde']);
 $sheet->setCellValue('C2', 'Fecha hasta');
@@ -32,7 +32,7 @@ $sheet->setCellValue('F2', !empty($filters['es_admin']) ? ((int)$filters['id_eva
 $sheet->setCellValue('G2', 'RUT');
 $sheet->setCellValue('H2', $filters['rut'] !== '' ? $filters['rut'] : 'Todos');
 
-$headers = ['Fecha', 'Hora', 'Evaluador', 'Cuadrilla', 'Proceso', 'Servicio', 'RUT', 'Nombre', 'Empresa'];
+$headers = ['Fecha', 'Hora', 'Evaluador', 'Cuadrilla', 'Proceso', 'Servicio', 'RUT', 'Nombre', 'Asistencia', 'Empresa'];
 $rowExcel = 4;
 $col = 'A';
 foreach ($headers as $header) {
@@ -40,10 +40,10 @@ foreach ($headers as $header) {
     $col++;
 }
 
-$sheet->getStyle('A1:I1')->getFont()->setBold(true)->setSize(14);
-$sheet->getStyle('A4:I4')->getFont()->setBold(true);
-$sheet->getStyle('A4:I4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('EAF2FB');
-$sheet->getStyle('A4:I4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+$sheet->getStyle('A1:J1')->getFont()->setBold(true)->setSize(14);
+$sheet->getStyle('A4:J4')->getFont()->setBold(true);
+$sheet->getStyle('A4:J4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('EAF2FB');
+$sheet->getStyle('A4:J4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
 $rowExcel = 5;
 foreach ($rows as $row) {
@@ -55,14 +55,15 @@ foreach ($rows as $row) {
     $sheet->setCellValue('F' . $rowExcel, (string)($row['servicio'] ?? ''));
     $sheet->setCellValue('G' . $rowExcel, (string)($row['rut'] ?? ''));
     $sheet->setCellValue('H' . $rowExcel, trim((string)($row['nombre'] ?? '') . ' ' . (string)($row['apellidos'] ?? '')));
-    $sheet->setCellValue('I' . $rowExcel, (string)($row['empresa'] ?? ''));
+    $sheet->setCellValue('I' . $rowExcel, (string)($row['asistencia'] ?? 'ASISTIO'));
+    $sheet->setCellValue('J' . $rowExcel, (string)($row['empresa'] ?? ''));
     $rowExcel++;
 }
 
 $lastRow = max(4, $rowExcel - 1);
-$sheet->getStyle('A4:I' . $lastRow)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+$sheet->getStyle('A4:J' . $lastRow)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
 
-foreach (range('A', 'I') as $column) {
+foreach (range('A', 'J') as $column) {
     $sheet->getColumnDimension($column)->setAutoSize(true);
 }
 

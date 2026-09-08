@@ -18,7 +18,7 @@ if (isset($_GET['logout']) && $_GET['logout'] === '1') {
     exit;
 }
 
-if (empty($_SESSION['auth']) || !in_array((int)($_SESSION['auth']['id_rol'] ?? 0), [4, 5], true)) {
+if (empty($_SESSION['auth']) || !in_array((int)($_SESSION['auth']['id_rol'] ?? 0), [4, 5, 7], true)) {
     header('Location: /ceo.noetica.cl/public/login_acceso_evaluador.php');
     exit;
 }

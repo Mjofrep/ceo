@@ -111,11 +111,12 @@ function hxBuildSummaryByRutService(array $rows, array $terrainNotesByRutService
         $rut = hxNormalizeRut((string)($row['rut'] ?? ''));
         $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
         $serviceName = trim((string)($row['servicio'] ?? ''));
-        if ($rut === '' || $serviceId <= 0 || $serviceName === '') {
+        $processId = (int)($row['id_proceso_habilitacion'] ?? 0);
+        if ($rut === '' || $serviceId <= 0 || $serviceName === '' || $processId <= 0) {
             continue;
         }
 
-        $key = $rut . '|' . $serviceId;
+        $key = $rut . '|' . $serviceId . '|' . $processId;
         if (!isset($summary[$key])) {
             $summary[$key] = [
                 'rut' => $rut,
@@ -213,11 +214,27 @@ $sqlParticipants = "
         p.rut,
         TRIM(CONCAT(COALESCE(c.nombre, p.nombre, ''), ' ', COALESCE(c.apellidos, p.apellidos, ''))) AS nombre_apellido,
         COALESCE(NULLIF(TRIM(et_ult.cargo), ''), cc.cargo, p.cargo, '') AS cargo,
-        c.id_cargo
+        c.id_cargo,
+        ph_actual.id AS id_proceso_habilitacion,
+        ph_actual.numero_proceso
     FROM ceo_habilitacion_participantes p
     INNER JOIN ceo_habilitacion h ON h.cuadrilla = p.id_cuadrilla
     INNER JOIN ceo_servicios_pruebas sp ON sp.id = h.id_servicio
     INNER JOIN ceo_empresas e ON e.id = h.empresa
+    LEFT JOIN ceo_proceso_habilitacion ph_actual
+      ON ph_actual.id = (
+          SELECT ep.id_proceso_habilitacion
+          FROM ceo_evaluaciones_programadas ep
+          WHERE ep.cuadrilla = h.cuadrilla
+            AND ep.id_servicio = h.id_servicio
+            AND REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(p.rut), '.', ''), '-', ''), ' ', '')
+            AND ep.estado IN ('PENDIENTE', 'EJECUTADA')
+          ORDER BY ep.fecha_programacion DESC, ep.id DESC
+          LIMIT 1
+      )
+      AND ph_actual.id_servicio = h.id_servicio
+      AND REPLACE(REPLACE(REPLACE(UPPER(ph_actual.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(p.rut), '.', ''), '-', ''), ' ', '')
+      AND ph_actual.estado <> 'ANULADO'
     LEFT JOIN ceo_contratistas c
       ON REPLACE(REPLACE(REPLACE(UPPER(c.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(p.rut), '.', ''), '-', ''), ' ', '')
     LEFT JOIN ceo_cargo_contratistas cc ON cc.id = c.id_cargo
@@ -250,6 +267,7 @@ if ($participants === []) {
 
 $rutMap = [];
 $serviceIds = [];
+$selectedProcessKeys = [];
 foreach ($participants as $participant) {
     $rut = hxNormalizeRut((string)($participant['rut'] ?? ''));
     $serviceId = (int)($participant['id_servicio'] ?? 0);
@@ -258,6 +276,10 @@ foreach ($participants as $participant) {
     }
     $rutMap[$rut] = true;
     $serviceIds[$serviceId] = true;
+    $processId = (int)($participant['id_proceso_habilitacion'] ?? 0);
+    if ($processId > 0) {
+        $selectedProcessKeys[$rut . '|' . $serviceId . '|' . $processId] = true;
+    }
 }
 
 $ruts = array_keys($rutMap);
@@ -327,10 +349,15 @@ if ($ruts !== [] && $serviceIds !== []) {
     ");
     $stmtHistory->execute($historyParams);
     $historyRows = $stmtHistory->fetchAll(PDO::FETCH_ASSOC);
+    // Una evaluación pendiente nunca se completa con resultados de otro proceso.
+    $historyRows = array_values(array_filter($historyRows, static function (array $row) use ($selectedProcessKeys): bool {
+        $key = hxNormalizeRut((string)$row['rut']) . '|' . (int)$row['id_servicio'] . '|' . (int)($row['id_proceso_habilitacion'] ?? 0);
+        return isset($selectedProcessKeys[$key]);
+    }));
 
     $notesParams = array_merge($ruts, $serviceIds);
     $stmtTerrainNotes = $pdo->prepare(" 
-        SELECT rut, id_servicio, fecha_rendicion, hora_rendicion, notafinal
+        SELECT rut, id_servicio, id_proceso_habilitacion, fecha_rendicion, hora_rendicion, notafinal
         FROM ceo_resultado_terreno_intento
         WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') IN ($rutPlaceholders)
           AND id_servicio IN ($servicePlaceholders)
@@ -338,7 +365,10 @@ if ($ruts !== [] && $serviceIds !== []) {
     ");
     $stmtTerrainNotes->execute($notesParams);
     foreach ($stmtTerrainNotes->fetchAll(PDO::FETCH_ASSOC) as $terrainRow) {
-        $key = hxNormalizeRut((string)$terrainRow['rut']) . '|' . (int)$terrainRow['id_servicio'];
+        $key = hxNormalizeRut((string)$terrainRow['rut']) . '|' . (int)$terrainRow['id_servicio'] . '|' . (int)($terrainRow['id_proceso_habilitacion'] ?? 0);
+        if (!isset($selectedProcessKeys[$key])) {
+            continue;
+        }
         if (isset($terrainNotesByRutService[$key])) {
             continue;
         }
@@ -400,7 +430,7 @@ echo '</tr>';
 foreach ($participants as $participant) {
     $rut = hxNormalizeRut((string)($participant['rut'] ?? ''));
     $serviceId = (int)($participant['id_servicio'] ?? 0);
-    $key = $rut . '|' . $serviceId;
+    $key = $rut . '|' . $serviceId . '|' . (int)($participant['id_proceso_habilitacion'] ?? 0);
     $summary = $summaryByRutService[$key] ?? null;
 
     echo '<tr>';
@@ -410,7 +440,7 @@ foreach ($participants as $participant) {
     echo '<td>' . htmlspecialchars((string)($participant['rut'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($participant['cargo'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($participant['servicio'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
-    echo '<td>' . htmlspecialchars($summary !== null && $summary['numero_proceso'] !== null ? (string)$summary['numero_proceso'] : '', ENT_QUOTES, 'UTF-8') . '</td>';
+    echo '<td>' . htmlspecialchars((string)($participant['numero_proceso'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars(hxFormatNote($summary['ultima_teorica_nota'] ?? null), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars(hxFormatDateTime($summary['ultima_teorica_fecha'] ?? null, true), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($summary['ultima_teorica_resultado'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';

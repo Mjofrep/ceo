@@ -20,6 +20,7 @@ function retBuildFilters(): array
     $rut = trim((string)($_GET['rut'] ?? ''));
     $idRol = (int)($_SESSION['auth']['id_rol'] ?? 0);
     $idSesion = (int)($_SESSION['auth']['id'] ?? 0);
+    $idEvaluadorSesion = (int)($_SESSION['auth']['id_evaluador'] ?? 0);
     $correoSesion = trim((string)($_SESSION['auth']['correo'] ?? ''));
     $esAdmin = ($idRol === 1);
 
@@ -41,7 +42,7 @@ function retBuildFilters(): array
     }
 
     if (!$esAdmin) {
-        $idEvaluador = $idSesion > 0 ? $idSesion : 0;
+        $idEvaluador = $idEvaluadorSesion > 0 ? $idEvaluadorSesion : ($idSesion > 0 ? $idSesion : 0);
     }
 
     return [
@@ -52,6 +53,7 @@ function retBuildFilters(): array
         'id_evaluador' => $idEvaluador,
         'rut' => $rut,
         'es_admin' => $esAdmin,
+        'id_evaluador_sesion' => $idEvaluadorSesion,
         'correo_evaluador' => $correoSesion,
     ];
 }
@@ -83,9 +85,13 @@ function retFetchRows(PDO $pdo, array $filters): array
         $where[] = 'rti.id_evaluador = :id_evaluador';
         $params[':id_evaluador'] = (int)$filters['id_evaluador'];
     } elseif (empty($filters['es_admin'])) {
+        $idEvaluadorSesion = (int)($filters['id_evaluador_sesion'] ?? 0);
         $correoEvaluador = trim((string)($filters['correo_evaluador'] ?? ''));
-        if ($correoEvaluador !== '') {
-            $where[] = 'LOWER(TRIM(COALESCE(ev.correo, ""))) = LOWER(TRIM(:correo_evaluador))';
+        if ($idEvaluadorSesion > 0) {
+            $where[] = 'rti.id_evaluador = :id_evaluador_sesion';
+            $params[':id_evaluador_sesion'] = $idEvaluadorSesion;
+        } elseif ($correoEvaluador !== '') {
+            $where[] = 'LOWER(TRIM(CONVERT(COALESCE(ev.correo, "") USING utf8mb4))) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(CAST(:correo_evaluador AS CHAR CHARACTER SET utf8mb4))) COLLATE utf8mb4_unicode_ci';
             $params[':correo_evaluador'] = $correoEvaluador;
         } elseif ((int)($filters['id_evaluador'] ?? 0) > 0) {
             $where[] = 'rti.id_evaluador = :id_evaluador';
@@ -110,6 +116,10 @@ function retFetchRows(PDO $pdo, array $filters): array
             sp.servicio,
             ph.numero_proceso,
             COALESCE(ep.cuadrilla, CAST(et.codigo_evaluacion AS UNSIGNED), 0) AS cuadrilla,
+            CASE
+                WHEN UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'NO ASISTIO' THEN 'NO ASISTIO'
+                ELSE 'ASISTIO'
+            END AS asistencia,
             COALESCE(hp.nombre, ct.nombre, '') AS nombre,
             COALESCE(hp.apellidos, ct.apellidos, '') AS apellidos,
             COALESCE(

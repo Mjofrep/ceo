@@ -273,6 +273,15 @@ CASE
           AND ep.cuadrilla = cs.cuadrilla
           AND ep.tipo = 'TERRENO'
           AND ep.estado = 'PENDIENTE'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM ceo_evaluaciones_programadas ep
+        WHERE ep.rut COLLATE utf8mb4_unicode_ci = p.rut COLLATE utf8mb4_unicode_ci
+          AND ep.id_servicio = cs.id_servicio
+          AND ep.cuadrilla = cs.cuadrilla
+          AND ep.tipo = 'TERRENO'
+          AND ep.estado = 'EJECUTADA'
+          AND UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'NO ASISTIO'
     ) THEN 1 ELSE 0
 END AS eva_terreno
 

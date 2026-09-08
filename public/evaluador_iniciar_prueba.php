@@ -150,6 +150,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $err = "Faltan datos obligatorios para guardar respuestas.";
         } else {
             try {
+                if (function_exists('ensureAuditPruebaTable')) {
+                    ensureAuditPruebaTable($pdo);
+                }
+
                 $pdo->beginTransaction();
 
                 // =====================================================
@@ -417,7 +421,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
 
             } catch (Throwable $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
                 $err = "Error al guardar: " . $e->getMessage();
             }
         }
