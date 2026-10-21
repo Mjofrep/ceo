@@ -3,6 +3,7 @@ declare(strict_types=1);
 session_start();
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/revision_cuadrilla_cargo_lib.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -23,6 +24,7 @@ try {
     }
 
     $rut   = trim((string)($data['rut'] ?? ''));
+    $cuadrilla = (int)($data['cuadrilla'] ?? 0);
     $items = $data['items'] ?? [];
 
     if ($rut === '') {
@@ -34,6 +36,7 @@ try {
     }
 
     $pdo = db();
+    $cargoCuadrilla = $cuadrilla > 0 ? revisionCargoHabilitacionCuadrilla($pdo, $rut, $cuadrilla) : null;
     $pdo->beginTransaction();
 
     $sqlExiste = "
@@ -71,6 +74,9 @@ try {
         if ($idCargo <= 0 || $idServicio <= 0) {
             $omitidos++;
             continue;
+        }
+        if ($cargoCuadrilla !== null && $idCargo !== (int)$cargoCuadrilla['id_cargo']) {
+            throw new Exception('El cargo seleccionado no coincide con el cargo del participante en la cuadrilla.');
         }
 
         $stmtCargo->execute(['id' => $idCargo]);

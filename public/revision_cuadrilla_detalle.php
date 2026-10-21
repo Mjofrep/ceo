@@ -9,6 +9,7 @@ require_once '../config/db.php';
 require_once '../config/functions.php';
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/historico_procesos_habilitacion_lib.php';
+require_once __DIR__ . '/revision_cuadrilla_cargo_lib.php';
 
 if (empty($_SESSION['auth'])) {
     header("Location: /ceo/public/index.php");
@@ -211,6 +212,8 @@ $analisisAreasTerrenoMeta = [
     'fecha_hora' => null,
 ];
 $idProcesoHabActual = 0;
+$cargoHabilitacionCuadrilla = null;
+$cargoHabilitacionCuadrillaError = null;
 $historialCargaError = null;
 
 if ($rut) {
@@ -279,6 +282,13 @@ if ($rut) {
         }
 
         $idProcesoHabActual = (int)($trabajador['id_proceso_habilitacion'] ?? 0);
+        if ((int)($trabajador['cuadrilla'] ?? 0) > 0) {
+            try {
+                $cargoHabilitacionCuadrilla = revisionCargoHabilitacionCuadrilla($pdo, $rut, (int)$trabajador['cuadrilla']);
+            } catch (Throwable $e) {
+                $cargoHabilitacionCuadrillaError = $e->getMessage();
+            }
+        }
 
         // ============================================================
         // CONSULTA WF DEL TRABAJADOR
@@ -1782,7 +1792,7 @@ body {background:#f7f9fc;}
             <select id="mp_cargo" class="form-select">
               <option value="">-- Seleccionar --</option>
               <?php foreach ($cargos as $c): ?>
-                <option value="<?= (int)$c['id'] ?>" <?= ((int)($trabajador['id_cargo'] ?? 0) === (int)$c['id']) ? 'selected' : '' ?>>
+                <option value="<?= (int)$c['id'] ?>" <?= ((int)($cargoHabilitacionCuadrilla['id_cargo'] ?? 0) === (int)$c['id']) ? 'selected' : '' ?>>
                   <?= esc($c['cargo']) ?>
                 </option>
               <?php endforeach; ?>
@@ -1870,6 +1880,8 @@ body {background:#f7f9fc;}
 
   const rut       = document.getElementById('mp_rut')?.value || '';
   const cuadrilla = parseInt(document.getElementById('mp_cuadrilla')?.value || '0', 10);
+  const cargoCuadrilla = <?= json_encode((int)($cargoHabilitacionCuadrilla['id_cargo'] ?? 0)) ?>;
+  const errorCargoCuadrilla = <?= json_encode($cargoHabilitacionCuadrillaError, JSON_UNESCAPED_UNICODE) ?>;
 
   const btnAgregar = document.getElementById('mp_btnAgregar');
   const btnGrabar  = document.getElementById('mp_btnGrabar');
@@ -2096,8 +2108,10 @@ body {background:#f7f9fc;}
     const otro = (inpOtro.value || '').trim();
     const editId = inpEditId.value || '';
 
+    if (cuadrilla > 0 && errorCargoCuadrilla) return setMsg(errorCargoCuadrilla, 'danger');
     if (!id_cargo) return setMsg('Selecciona un cargo.', 'warning');
     if (!id_servicio) return setMsg('Selecciona un servicio.', 'warning');
+    if (cuadrilla > 0 && id_cargo !== cargoCuadrilla) return setMsg('El cargo seleccionado no coincide con el cargo del participante en la cuadrilla.', 'danger');
 
     if (editId.startsWith('new:')) {
       const idx = parseInt(editId.split(':')[1], 10);
@@ -2126,6 +2140,7 @@ body {background:#f7f9fc;}
           body: JSON.stringify({
             id,
             rut,
+            cuadrilla,
             id_cargo,
             id_servicio,
             otro

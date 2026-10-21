@@ -138,6 +138,9 @@ $empresas = $stmtEmp->fetchAll(PDO::FETCH_ASSOC);
 $stmtUO = $pdo->query("SELECT id, desc_uo FROM ceo_uo ORDER BY desc_uo");
 $uos = $stmtUO->fetchAll(PDO::FETCH_ASSOC);
 
+$stmtCargos = $pdo->query("SELECT id, cargo FROM ceo_cargo_contratistas ORDER BY cargo");
+$cargos = $stmtCargos->fetchAll(PDO::FETCH_ASSOC);
+
 // PROGRAMAS / CUADRILLAS
 $stmtProg = $pdo->query("
     SELECT id, cuadrilla
@@ -606,6 +609,12 @@ td input[type=checkbox]{
 
             <?php if (!empty($data)): ?>
 
+            <div class="text-end mb-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btnAgregarParticipante">
+                    <i class="bi bi-person-plus"></i> Agregar participante
+                </button>
+            </div>
+
             <div class="scroll-box">
                 <table class="table table-hover table-sm table-bordered align-middle">
                     <thead>
@@ -719,6 +728,17 @@ foreach ($cols as $c):
     <td class="text-center">
         <button
             type="button"
+            class="btn btn-sm btn-outline-primary btn-editar-participante"
+            data-rut="<?= esc($d['rut']) ?>"
+            data-nombre="<?= esc($d['nombre']) ?>"
+            data-apellidos="<?= esc($d['apellido']) ?>"
+            data-cargo="<?= esc($d['cargo']) ?>"
+            title="Editar participante"
+            onclick="event.stopPropagation();">
+            <i class="bi bi-pencil"></i>
+        </button>
+        <button
+            type="button"
             class="btn btn-sm btn-outline-danger btn-eliminar"
             data-rut="<?= esc($d['rut']) ?>"
             data-cuadrilla="<?= (int)$d['n_cuadrilla'] ?>"
@@ -762,7 +782,112 @@ foreach ($cols as $c):
 
 </div>
 
+<div class="modal fade" id="modalParticipante" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form class="modal-content" id="formParticipante">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalParticipante">Participante</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="accionParticipante">
+                <div class="mb-3">
+                    <label for="rutParticipante" class="form-label">RUT</label>
+                    <input type="text" class="form-control" id="rutParticipante" required>
+                </div>
+                <div class="mb-3">
+                    <label for="nombreParticipante" class="form-label">Nombre</label>
+                    <input type="text" class="form-control" id="nombreParticipante" required>
+                </div>
+                <div class="mb-3">
+                    <label for="apellidosParticipante" class="form-label">Apellidos</label>
+                    <input type="text" class="form-control" id="apellidosParticipante" required>
+                </div>
+                <div>
+                    <label for="cargoParticipante" class="form-label">Cargo</label>
+                    <select class="form-select" id="cargoParticipante" required>
+                        <option value="">Seleccione...</option>
+                        <?php foreach ($cargos as $cargo): ?>
+                            <option value="<?= (int)$cargo['id'] ?>" data-cargo="<?= esc($cargo['cargo']) ?>"><?= esc($cargo['cargo']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+    const modalElement = document.getElementById('modalParticipante');
+    const form = document.getElementById('formParticipante');
+    const addButton = document.getElementById('btnAgregarParticipante');
+    if (!modalElement || !form || !addButton) return;
+
+    const modal = new bootstrap.Modal(modalElement);
+    const action = document.getElementById('accionParticipante');
+    const title = document.getElementById('tituloModalParticipante');
+    const rut = document.getElementById('rutParticipante');
+    const nombre = document.getElementById('nombreParticipante');
+    const apellidos = document.getElementById('apellidosParticipante');
+    const cargo = document.getElementById('cargoParticipante');
+    const programa = <?= (int)($_GET['programa'] ?? 0) ?>;
+
+    function seleccionarCargo(nombreCargo) {
+        const option = [...cargo.options].find(item => item.dataset.cargo === nombreCargo);
+        cargo.value = option ? option.value : '';
+    }
+
+    addButton.addEventListener('click', () => {
+        form.reset();
+        action.value = 'agregar';
+        title.textContent = 'Agregar participante';
+        rut.readOnly = false;
+        modal.show();
+    });
+
+    document.querySelectorAll('.btn-editar-participante').forEach(button => {
+        button.addEventListener('click', () => {
+            form.reset();
+            action.value = 'editar';
+            title.textContent = 'Editar participante';
+            rut.value = button.dataset.rut || '';
+            rut.readOnly = true;
+            nombre.value = button.dataset.nombre || '';
+            apellidos.value = button.dataset.apellidos || '';
+            seleccionarCargo(button.dataset.cargo || '');
+            modal.show();
+        });
+    });
+
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const response = await fetch('ajax_revision_cuadrilla_participante_guardar.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                accion: action.value,
+                programa,
+                rut: rut.value,
+                nombre: nombre.value,
+                apellidos: apellidos.value,
+                id_cargo: Number(cargo.value || 0)
+            })
+        });
+        const result = await response.json();
+        if (!result.ok) {
+            alert(result.msg || 'No fue posible guardar el participante.');
+            return;
+        }
+        window.location.reload();
+    });
+})();
+</script>
 <script>
 document.querySelectorAll(".fila-detalle").forEach(fila => {
 
