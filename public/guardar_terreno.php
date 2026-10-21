@@ -39,6 +39,7 @@ try {
     $id_servicio    = (int)($data['id_servicio'] ?? 0);
     $id_empresa     = (int)($data['id_empresa'] ?? 0);
     $rutsRinden     = $data['ruts_rinden'] ?? [];
+    $rutsNoAsisten  = $data['ruts_no_asisten'] ?? [];
     $respuestas     = $data['respuestas'] ?? [];
 
     if (!is_array($idEvaluaciones) || empty($idEvaluaciones)) {
@@ -60,8 +61,8 @@ try {
         throw new Exception('Datos de cabecera incompletos');
     }
 
-    if (!is_array($rutsRinden) || empty($rutsRinden)) {
-        throw new Exception('Debe seleccionar al menos un participante para rendir la evaluación.');
+    if (!is_array($rutsRinden)) {
+        throw new Exception('Formato inválido de asistentes.');
     }
 
     $rutsRinden = array_values(array_unique(array_filter(array_map(
@@ -69,11 +70,29 @@ try {
         $rutsRinden
     ), static fn($rut) => $rut !== '')));
 
-    if (empty($rutsRinden)) {
-        throw new Exception('Debe seleccionar al menos un participante para rendir la evaluación.');
+    if (!is_array($rutsNoAsisten)) {
+        throw new Exception('Formato inválido de no asistentes.');
     }
 
-    if (empty($respuestas) || !is_array($respuestas)) {
+    $rutsNoAsisten = array_values(array_unique(array_filter(array_map(
+        static fn($rut) => trim((string)$rut),
+        $rutsNoAsisten
+    ), static fn($rut) => $rut !== '')));
+
+    if (empty($rutsRinden) && empty($rutsNoAsisten)) {
+        throw new Exception('Debe indicar al menos un participante asistente o no asistente.');
+    }
+
+    if (array_intersect($rutsRinden, $rutsNoAsisten)) {
+        throw new Exception('Un participante no puede estar marcado a la vez como asistente y no asistente.');
+    }
+
+    $usuarioPrograma = (int)($_SESSION['auth']['id'] ?? 0);
+    if (!empty($rutsNoAsisten) && $usuarioPrograma <= 0) {
+        throw new Exception('No se pudo identificar al usuario que registra la inasistencia. Vuelve a iniciar sesión.');
+    }
+
+    if (!is_array($respuestas)) {
         throw new Exception('No se recibieron respuestas');
     }
 
@@ -86,37 +105,39 @@ try {
        - Debe venir SOLO una marca por pregunta: si / no / na
        - Si marca NO o NA => observación obligatoria
        ============================================================ */
-    foreach ($rutsRinden as $rutRinde) {
-        if (!isset($respuestas[$rutRinde]) || !is_array($respuestas[$rutRinde]) || empty($respuestas[$rutRinde])) {
-            throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
-        }
-    }
-
-    foreach ($rutsRinden as $rutRinde) {
-        $preguntas = $respuestas[$rutRinde] ?? null;
-
-        if (!is_array($preguntas) || empty($preguntas)) {
-            throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
+    if (!empty($rutsRinden)) {
+        foreach ($rutsRinden as $rutRinde) {
+            if (!isset($respuestas[$rutRinde]) || !is_array($respuestas[$rutRinde]) || empty($respuestas[$rutRinde])) {
+                throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
+            }
         }
 
-        foreach ($preguntas as $id_pregunta => $r) {
-            if (!is_array($r)) {
-                throw new Exception("Formato inválido en respuesta de la pregunta $id_pregunta para RUT $rutRinde.");
+        foreach ($rutsRinden as $rutRinde) {
+            $preguntas = $respuestas[$rutRinde] ?? null;
+
+            if (!is_array($preguntas) || empty($preguntas)) {
+                throw new Exception("No hay preguntas válidas para el RUT $rutRinde.");
             }
 
-            $si  = !empty($r['si']);
-            $no  = !empty($r['no']);
-            $na  = !empty($r['na']);
-            $obs = trim((string)($r['obs'] ?? ''));
+            foreach ($preguntas as $id_pregunta => $r) {
+                if (!is_array($r)) {
+                    throw new Exception("Formato inválido en respuesta de la pregunta $id_pregunta para RUT $rutRinde.");
+                }
 
-            $marcadas = ($si ? 1 : 0) + ($no ? 1 : 0) + ($na ? 1 : 0);
+                $si  = !empty($r['si']);
+                $no  = !empty($r['no']);
+                $na  = !empty($r['na']);
+                $obs = trim((string)($r['obs'] ?? ''));
 
-            if ($marcadas !== 1) {
-                throw new Exception("Debe seleccionar exactamente una opción (SI / NO / NA) en la pregunta $id_pregunta del RUT $rutRinde.");
-            }
+                $marcadas = ($si ? 1 : 0) + ($no ? 1 : 0) + ($na ? 1 : 0);
 
-            if (($no || $na) && $obs === '') {
-                throw new Exception("Debe ingresar observación en la pregunta $id_pregunta del RUT $rutRinde cuando marca NO o NA.");
+                if ($marcadas !== 1) {
+                    throw new Exception("Debe seleccionar exactamente una opción (SI / NO / NA) en la pregunta $id_pregunta del RUT $rutRinde.");
+                }
+
+                if (($no || $na) && $obs === '') {
+                    throw new Exception("Debe ingresar observación en la pregunta $id_pregunta del RUT $rutRinde cuando marca NO o NA.");
+                }
             }
         }
     }
@@ -197,6 +218,12 @@ try {
     foreach ($rutsRinden as $rutRinde) {
         if (!isset($mapRutCuadrilla[$rutRinde])) {
             throw new Exception("El RUT $rutRinde no forma parte de las evaluaciones seleccionadas.");
+        }
+    }
+
+    foreach ($rutsNoAsisten as $rutNoAsiste) {
+        if (!isset($mapRutCuadrilla[$rutNoAsiste])) {
+            throw new Exception("El RUT $rutNoAsiste no forma parte de las evaluaciones seleccionadas.");
         }
     }
 
@@ -302,18 +329,20 @@ try {
        ============================================================ */
     $resultados = []; // cuadrilla => id_resultado
 
-    foreach ($cuadrillasSel as $cuadrilla) {
-        $empresaCabecera = (int)($mapCuadrillaEmpresa[(int)$cuadrilla] ?? 0);
+    if (!empty($rutsRinden)) {
+        foreach ($cuadrillasSel as $cuadrilla) {
+            $empresaCabecera = (int)($mapCuadrillaEmpresa[(int)$cuadrilla] ?? 0);
 
-        $stmtCab->execute([
-            $empresaCabecera,
-            $fecha,
-            $hora,
-            $id_servicio,
-            $cuadrilla
-        ]);
+            $stmtCab->execute([
+                $empresaCabecera,
+                $fecha,
+                $hora,
+                $id_servicio,
+                $cuadrilla
+            ]);
 
-        $resultados[$cuadrilla] = (int)$db->lastInsertId();
+            $resultados[$cuadrilla] = (int)$db->lastInsertId();
+        }
     }
 
     /* ============================================================
@@ -388,7 +417,20 @@ try {
         LIMIT 1
     ");
 
+    $stmtNoAsistio = $db->prepare("
+        UPDATE ceo_evaluaciones_programadas
+        SET estado = 'EJECUTADA',
+            resultado = 'NO ASISTIO',
+            fecha_resultado = NOW(),
+            usuario_programa = :usuario_programa
+        WHERE id = :id
+          AND rut = :rut
+          AND tipo = 'TERRENO'
+          AND estado = 'PENDIENTE'
+    ");
+
     // 6.1 Insertar detalle por rut
+    if (!empty($rutsRinden)) {
     foreach ($respuestas as $rut => $preguntas) {
 
         if (!isset($mapRutCuadrilla[$rut])) {
@@ -419,10 +461,12 @@ try {
             ]);
         }
     }
+    }
 
     /* ============================================================
        7. CALCULAR PORCENTAJES / CERRAR POR RUT
        ============================================================ */
+    if (!empty($rutsRinden)) {
     $stmtPorcMin->execute([$id_servicio]);
     $rowPorc = $stmtPorcMin->fetch(PDO::FETCH_ASSOC);
 
@@ -584,6 +628,19 @@ try {
 
             guardarResultadoFinalServicio($db, $resultadoFinalServicio);
         }
+    }
+    }
+
+    foreach ($rutsNoAsisten as $rutNoAsiste) {
+        if (!isset($mapRutEvalId[$rutNoAsiste])) {
+            throw new Exception("No se encontró evaluación seleccionada para RUT $rutNoAsiste");
+        }
+
+        $stmtNoAsistio->execute([
+            ':usuario_programa' => $usuarioPrograma,
+            ':id' => (int)$mapRutEvalId[$rutNoAsiste],
+            ':rut' => $rutNoAsiste,
+        ]);
     }
 
     /* ============================================================

@@ -42,6 +42,8 @@ if ($idServicio <= 0) {
     exit;
 }
 
+$validarCargoAgenda = ($_POST['origen'] ?? '') === 'agenda';
+
 $tmpPath = $_FILES['excel']['tmp_name'];
 
 // =========================================================
@@ -60,6 +62,7 @@ try {
 
     $participantes = [];
     $errores = [];
+    $advertencias = [];
 
     for ($i = $inicioFila; $i <= $finFila; $i++) {
         $rut   = trim((string)$sheet->getCell("B{$i}")->getValue());
@@ -82,12 +85,21 @@ try {
             continue;
         }
 
+        if ($validarCargoAgenda) {
+            $cargoNormalizado = strtr(strtoupper($cargo), ['ñ' => 'Ñ']);
+            $cargosPermitidos = ['SUPERVISOR', 'OPERADOR', 'AYUDANTE', 'ACOMPAÑANTE'];
+
+            if (!in_array($cargoNormalizado, $cargosPermitidos, true)) {
+                $errores[] = "Fila {$i}: Cargo inválido ({$cargo}). Debe ser Supervisor, Operador, Ayudante o Acompañante";
+                continue;
+            }
+        }
+
         // Validar estado del RUT para el servicio
         $estado = obtenerEstadoHabilitacionServicio($pdo, $rut, $idServicio);
 
-        if (!empty($estado['bloquear'])) {
-            $errores[] = "Fila {$i}: {$estado['mensaje']}";
-            continue;
+        if ($estado['estado'] === 'habilitado') {
+            $advertencias[] = "Fila {$i}: {$estado['mensaje']}";
         }
 
         // Participante válido
@@ -113,7 +125,8 @@ try {
     // Todo correcto
     echo json_encode([
         'ok'            => true,
-        'participantes' => $participantes
+        'participantes' => $participantes,
+        'advertencias'  => $advertencias
     ], JSON_UNESCAPED_UNICODE);
     exit;
 
@@ -169,6 +182,7 @@ function validar_rut_backend(string $rut): bool
  * 1) HABILITADO
  *    Si el rut + servicio tiene vigencia activa en ceo_vigencia_detalle
  *    y existe respaldo del mismo proceso en ceo_vigencia_general.
+ *    Se informa como advertencia, sin impedir su incorporación.
  *
  * 2) LIBRE
  *    Si no cae en ninguna de las anteriores.
@@ -214,7 +228,7 @@ function obtenerEstadoHabilitacionServicio(PDO $pdo, string $rut, int $idServici
 
     if ($habilitado) {
         return [
-            'bloquear' => true,
+            'bloquear' => false,
             'estado'   => 'habilitado',
             'mensaje'  => "el RUT {$rut} ya se encuentra habilitado para este servicio hasta {$habilitado['fechavig_fin']}"
         ];

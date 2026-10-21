@@ -807,6 +807,40 @@ const excelLoadingAgendaMsg = document.getElementById("excelLoadingAgendaMsg");
 const btnCargarExcel = document.getElementById("btnCargarExcel");
 const fileExcel = document.getElementById("fileExcel");
 
+function agregarFilaParticipante(participante) {
+    const tbody = document.querySelector("#tablaTemp tbody");
+    const tr = document.createElement('tr');
+    const campos = [
+        ['rut', participante.rut ?? ''],
+        ['nombre', participante.nombre ?? ''],
+        ['app', participante.app ?? ''],
+        ['apm', participante.apm ?? ''],
+        ['cargo', participante.cargo ?? '']
+    ];
+
+    campos.forEach(([nombre, valor]) => {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.name = nombre;
+        input.className = 'form-control form-control-sm';
+        input.value = valor;
+        td.appendChild(input);
+        tr.appendChild(td);
+    });
+
+    const tdAccion = document.createElement('td');
+    tdAccion.innerHTML = '<button type="button" class="btn btn-danger btn-sm btnEliminar">X</button>';
+    tr.appendChild(tdAccion);
+    tbody.appendChild(tr);
+}
+
+function establecerModoModalParticipantes(esEdicion) {
+    document.querySelector('#modalParticipantes .modal-title').innerHTML = esEdicion
+        ? '<i class="bi bi-person-gear me-2"></i>Editar participantes'
+        : '<i class="bi bi-person-add me-2"></i>Agregar participantes';
+}
+
 function mostrarCargaExcelAgenda(msg = "Procesando archivo Excel…") {
     if (excelLoadingAgendaMsg) {
         excelLoadingAgendaMsg.textContent = msg;
@@ -933,6 +967,7 @@ document.getElementById('btnNuevaCuadrilla').addEventListener('click', function 
     const uo = document.getElementById("uoSeleccionada");
     uo.value = "";
     uo.classList.remove("is-invalid");
+    establecerModoModalParticipantes(false);
 
     // Cerrar modal de cuadrillas → abrir modal participantes
     bootstrap.Modal.getInstance(document.getElementById('modalCuadrillasCelda')).hide();
@@ -975,26 +1010,19 @@ fetch("../public/get_participantes_cuadrilla.php?cuadrilla=" + cuadrilla)
             uoSel.classList.remove("is-invalid");
         }
 
-        const tbody = document.querySelector("#tablaTemp tbody");
         data.participantes.forEach(p => {
             let ap = (p.apellidos || '').split(" ");
-
-            let fila = `
-                <tr>
-                    <td>${p.rut}</td>
-                    <td>${p.nombre}</td>
-                    <td>${ap[0] ?? ''}</td>
-                    <td>${ap[1] ?? ''}</td>
-                    <td>${p.cargo}</td>
-                    <td>
-                        <button class="btn btn-danger btn-sm btnEliminar">X</button>
-                    </td>
-                </tr>`;
-            tbody.insertAdjacentHTML("beforeend", fila);
+            agregarFilaParticipante({
+                rut: p.rut,
+                nombre: p.nombre,
+                app: ap[0] ?? '',
+                apm: ap.slice(1).join(' '),
+                cargo: p.cargo
+            });
         });
     });
 
-
+    establecerModoModalParticipantes(true);
     bootstrap.Modal.getInstance(document.getElementById('modalCuadrillasCelda')).hide();
     new bootstrap.Modal(document.getElementById('modalParticipantes')).show();
 });
@@ -1095,17 +1123,13 @@ document.getElementById("btnAgregarManual").addEventListener("click", () => {
         return;
     }
 
-    let fila = `
-      <tr>
-        <td>${rut}</td>
-        <td>${nombreManual.value}</td>
-        <td>${apellPatManual.value}</td>
-        <td>${apellMatManual.value}</td>
-        <td>${cargoManual.value}</td>
-        <td><button class="btn btn-danger btn-sm btnEliminar">X</button></td>
-      </tr>`;
-
-    document.querySelector("#tablaTemp tbody").insertAdjacentHTML("beforeend", fila);
+    agregarFilaParticipante({
+        rut,
+        nombre: nombreManual.value,
+        app: apellPatManual.value,
+        apm: apellMatManual.value,
+        cargo: cargoManual.value
+    });
 });
 
 // =========================================================
@@ -1148,13 +1172,12 @@ document.getElementById("btnGuardarModal").addEventListener("click", () => {
 
     let participantes = [];
     filas.forEach(tr => {
-        let tds = tr.querySelectorAll("td");
         participantes.push({
-            rut: tds[0].innerText.trim(),
-            nombre: tds[1].innerText.trim(),
-            app: tds[2].innerText.trim(),
-            apm: tds[3].innerText.trim(),
-            cargo: tds[4].innerText.trim()
+            rut: tr.querySelector('[name="rut"]').value.trim(),
+            nombre: tr.querySelector('[name="nombre"]').value.trim(),
+            app: tr.querySelector('[name="app"]').value.trim(),
+            apm: tr.querySelector('[name="apm"]').value.trim(),
+            cargo: tr.querySelector('[name="cargo"]').value.trim()
         });
     });
 
@@ -1247,6 +1270,7 @@ document.getElementById("btnCargarExcel").addEventListener("click", () => {
     const formData = new FormData();
     formData.append("excel", file);
     formData.append("id_servicio", info.servicio);
+    formData.append("origen", "agenda");
 
     mostrarCargaExcelAgenda("Leyendo y validando archivo Excel…");
 
@@ -1275,23 +1299,17 @@ document.getElementById("btnCargarExcel").addEventListener("click", () => {
             return;
         }
 
-        const tbody = document.querySelector("#tablaTemp tbody");
-        tbody.innerHTML = "";
-
+        document.querySelector("#tablaTemp tbody").innerHTML = "";
         data.participantes.forEach(p => {
-            const fila = `
-                <tr>
-                    <td>${p.rut}</td>
-                    <td>${p.nombre}</td>
-                    <td>${p.app}</td>
-                    <td>${p.apm}</td>
-                    <td>${p.cargo}</td>
-                    <td><button class="btn btn-danger btn-sm btnEliminar">X</button></td>
-                </tr>`;
-            tbody.insertAdjacentHTML("beforeend", fila);
+            agregarFilaParticipante(p);
         });
 
-        alert("Excel procesado correctamente.");
+        let mensaje = "Excel procesado correctamente.";
+        if (Array.isArray(data.advertencias) && data.advertencias.length > 0) {
+            mensaje += "\n\nAviso: las siguientes personas ya tienen una habilitación vigente para el servicio seleccionado. Se incorporaron igualmente a la lista de participantes.\n\n"
+                + data.advertencias.join("\n");
+        }
+        alert(mensaje);
     })
     .catch(err => {
         console.error(err);

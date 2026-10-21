@@ -97,9 +97,18 @@ try {
                               AND ep.id_servicio = :id_servicio_3
                               AND ep.cuadrilla = :cuadrilla_3
                               AND ep.tipo = 'PRUEBA'
-                              AND ep.asistio_sala = 1
+                               AND ep.asistio_sala = 1
                         ) THEN 1 ELSE 0
                     END AS asistio_sala,
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM ceo_participantes_solicitud ps
+                            WHERE ps.id_solicitud = h.nsolicitud
+                              AND " . salaRutComparable('ps.rut') . " = {$rutP}
+                              AND ps.asistio = 1
+                        ) THEN 1 ELSE 0
+                    END AS asistio_solicitud,
                     CASE
                         WHEN EXISTS (
                             SELECT 1
@@ -196,9 +205,18 @@ try {
                               AND fp.id_servicio = :id_servicio_3
                               AND fp.cuadrilla = :cuadrilla_3
                               AND fp.tipo = 'PRUEBA'
-                              AND fp.asistio_sala = 1
+                               AND fp.asistio_sala = 1
                         ) THEN 1 ELSE 0
                     END AS asistio_sala,
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM ceo_formacion_participantes_solicitud ps
+                            WHERE ps.id_solicitud = f.nsolicitud
+                              AND " . salaRutComparable('ps.rut') . " = {$rutP}
+                              AND ps.asistio = 1
+                        ) THEN 1 ELSE 0
+                    END AS asistio_solicitud,
                     CASE
                         WHEN EXISTS (
                             SELECT 1
@@ -255,6 +273,8 @@ body {background:#f7f9fc;}
 .table th {background:#eaf2fb; white-space:nowrap; text-align:center;}
 .table td {vertical-align:middle;}
 td input[type=checkbox]{transform:scale(1.15);}
+.execution-led {display:inline-block; width:12px; height:12px; border-radius:50%; background:#dc3545; box-shadow:0 0 0 2px rgba(220,53,69,.15);}
+.execution-led.is-executed {background:#198754; box-shadow:0 0 0 2px rgba(25,135,84,.15);}
 </style>
 </head>
 <body>
@@ -310,9 +330,11 @@ td input[type=checkbox]{transform:scale(1.15);}
                                 <th>UO</th>
                                 <th>Cargo</th>
                                 <th>Empresa</th>
-                                <th>Prueba que debe rendir</th>
-                                <th>Planificado prueba</th>
-                                <th>Asiste a darla</th>
+                                 <th>Prueba que debe rendir</th>
+                                 <th>Planificado prueba</th>
+                                 <th>Asistió en solicitud</th>
+                                 <th>Asiste a darla</th>
+                                 <th>Prueba dada</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -325,10 +347,13 @@ td input[type=checkbox]{transform:scale(1.15);}
                                 <td><?= esc((string)($row['cargo'] ?? '')) ?></td>
                                 <td><?= esc((string)($row['empresa'] ?? '')) ?></td>
                                 <td><?= esc((string)($row['prueba_a_rendir'] ?? '')) ?></td>
-                                <td class="text-center">
-                                    <input type="checkbox" disabled <?= (int)($row['planificado_prueba'] ?? 0) === 1 ? 'checked' : '' ?>>
-                                </td>
-                                <td class="text-center">
+                                 <td class="text-center">
+                                     <input type="checkbox" disabled <?= (int)($row['planificado_prueba'] ?? 0) === 1 ? 'checked' : '' ?>>
+                                 </td>
+                                 <td class="text-center">
+                                     <input type="checkbox" disabled <?= (int)($row['asistio_solicitud'] ?? 0) === 1 ? 'checked' : '' ?>>
+                                 </td>
+                                 <td class="text-center">
                                     <input
                                         type="checkbox"
                                         class="chk-asistencia-sala"
@@ -337,8 +362,11 @@ td input[type=checkbox]{transform:scale(1.15);}
                                         data-rut="<?= esc((string)$row['rut']) ?>"
                                         <?= (int)($row['tiene_programacion'] ?? 0) === 0 ? 'disabled' : '' ?>
                                         <?= (int)($row['asistio_sala'] ?? 0) === 1 ? 'checked' : '' ?>
-                                    >
-                                </td>
+                                     >
+                                 </td>
+                                 <td class="text-center">
+                                     <span class="execution-led" data-execution-led data-rut="<?= esc((string)$row['rut']) ?>" title="Prueba no dada" aria-label="Prueba no dada"></span>
+                                 </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -379,6 +407,28 @@ document.querySelectorAll('.chk-asistencia-sala').forEach((chk) => {
         });
     });
 });
+
+function normalizarRut(rut) {
+    return String(rut || '').toUpperCase().replace(/[.\-\s]/g, '');
+}
+
+function actualizarLedsEjecucion() {
+    fetch('ajax_sala_pruebas_ejecucion_estado.php?tipo=<?= urlencode($tipo) ?>&id=<?= (int)$id ?>', {cache: 'no-store'})
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.ok) return;
+            document.querySelectorAll('[data-execution-led]').forEach((led) => {
+                const ejecutada = Number(resp.estados?.[normalizarRut(led.dataset.rut)]) === 1;
+                led.classList.toggle('is-executed', ejecutada);
+                led.title = ejecutada ? 'Prueba dada' : 'Prueba no dada';
+                led.setAttribute('aria-label', led.title);
+            });
+        })
+        .catch(() => {});
+}
+
+actualizarLedsEjecucion();
+window.setInterval(actualizarLedsEjecucion, 5000);
 </script>
 </body>
 </html>

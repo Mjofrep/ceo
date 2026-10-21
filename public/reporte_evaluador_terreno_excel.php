@@ -32,7 +32,7 @@ $sheet->setCellValue('F2', !empty($filters['es_admin']) ? ((int)$filters['id_eva
 $sheet->setCellValue('G2', 'RUT');
 $sheet->setCellValue('H2', $filters['rut'] !== '' ? $filters['rut'] : 'Todos');
 
-$headers = ['Fecha', 'Hora', 'Evaluador', 'Cuadrilla', 'Proceso', 'Servicio', 'RUT', 'Nombre', 'Asistencia', 'Empresa'];
+$headers = ['Fecha', 'Hora', 'Evaluador', 'Cuadrilla', 'Proceso', 'Servicio', 'RUT', 'Nombre', 'Asistencia', 'Empresa', 'Solicitud'];
 $rowExcel = 4;
 $col = 'A';
 foreach ($headers as $header) {
@@ -40,10 +40,10 @@ foreach ($headers as $header) {
     $col++;
 }
 
-$sheet->getStyle('A1:J1')->getFont()->setBold(true)->setSize(14);
-$sheet->getStyle('A4:J4')->getFont()->setBold(true);
-$sheet->getStyle('A4:J4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('EAF2FB');
-$sheet->getStyle('A4:J4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+$sheet->getStyle('A1:K1')->getFont()->setBold(true)->setSize(14);
+$sheet->getStyle('A4:K4')->getFont()->setBold(true);
+$sheet->getStyle('A4:K4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('EAF2FB');
+$sheet->getStyle('A4:K4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
 $rowExcel = 5;
 foreach ($rows as $row) {
@@ -57,13 +57,14 @@ foreach ($rows as $row) {
     $sheet->setCellValue('H' . $rowExcel, trim((string)($row['nombre'] ?? '') . ' ' . (string)($row['apellidos'] ?? '')));
     $sheet->setCellValue('I' . $rowExcel, (string)($row['asistencia'] ?? 'ASISTIO'));
     $sheet->setCellValue('J' . $rowExcel, (string)($row['empresa'] ?? ''));
+    $sheet->setCellValue('K' . $rowExcel, (string)($row['nsolicitud'] ?? ''));
     $rowExcel++;
 }
 
 $lastRow = max(4, $rowExcel - 1);
-$sheet->getStyle('A4:J' . $lastRow)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+$sheet->getStyle('A4:K' . $lastRow)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
 
-foreach (range('A', 'J') as $column) {
+foreach (range('A', 'K') as $column) {
     $sheet->getColumnDimension($column)->setAutoSize(true);
 }
 

@@ -660,6 +660,9 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     const rutsRinden = participantesActivos
         .map((chk) => String(chk.dataset.rut || '').trim())
         .filter((rut) => rut !== '');
+    const rutsNoAsisten = Array.from(document.querySelectorAll('.chk-rinde:not(:checked)'))
+        .map((chk) => String(chk.dataset.rut || '').trim())
+        .filter((rut) => rut !== '');
 
     if (rutsRinden.length > 0 && !validatePreguntasCompletas(rutsRinden)) {
         return;
@@ -743,6 +746,7 @@ document.getElementById('btnGuardar').addEventListener('click', () => {
     id_servicio: <?= $idServicio ?>,
     id_empresa: <?= (int)$_SESSION['auth']['id_empresa'] ?>,
     ruts_rinden: rutsRinden,
+    ruts_no_asisten: rutsNoAsisten,
     respuestas: respuestas
 })
     })

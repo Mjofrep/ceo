@@ -51,8 +51,8 @@ if ($idRol === 1 || $idEmpresa === 38) {
 
 $empresaEnel = 39;
 
-// --- Caso 1: Admin o rol 5 y empresa ENEL ---
-if (($idRol == 1 || $idRol == 5) && $idEmpresa == $empresaEnel) {
+// --- Caso 1: Operador, Admin o rol 5 y empresa ENEL ---
+if ($idRol === 7 || (($idRol === 1 || $idRol === 5) && $idEmpresa === $empresaEnel)) {
 
     // Acceso total
     $where = "1=1";

@@ -63,15 +63,6 @@ function hxResolveWeights(?string $cargo, ?int $idCargo = null): ?array
     $operadorIds = [266, 268, 287];
     $supervisorIds = [294];
 
-    if ($idCargo !== null) {
-        if (in_array($idCargo, $supervisorIds, true)) {
-            return ['teorica' => 0.6, 'terreno' => 0.4];
-        }
-        if (in_array($idCargo, $operadorIds, true)) {
-            return ['teorica' => 0.4, 'terreno' => 0.6];
-        }
-    }
-
     $cargoNorm = strtoupper(trim((string)$cargo));
     $cargoNorm = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $cargoNorm);
     $cargoNorm = strtr($cargoNorm, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N']);
@@ -100,10 +91,19 @@ function hxResolveWeights(?string $cargo, ?int $idCargo = null): ?array
         return ['teorica' => 0.4, 'terreno' => 0.6];
     }
 
+    if ($idCargo !== null) {
+        if (in_array($idCargo, $supervisorIds, true)) {
+            return ['teorica' => 0.6, 'terreno' => 0.4];
+        }
+        if (in_array($idCargo, $operadorIds, true)) {
+            return ['teorica' => 0.4, 'terreno' => 0.6];
+        }
+    }
+
     return null;
 }
 
-function hxBuildSummaryByRutService(array $rows, array $terrainNotesByRutService, array $terrainThresholdsByService): array
+function hxBuildSummaryByRutService(array $rows, array $terrainThresholdsByService): array
 {
     $summary = [];
 
@@ -111,12 +111,11 @@ function hxBuildSummaryByRutService(array $rows, array $terrainNotesByRutService
         $rut = hxNormalizeRut((string)($row['rut'] ?? ''));
         $serviceId = isset($row['id_servicio']) ? (int)$row['id_servicio'] : 0;
         $serviceName = trim((string)($row['servicio'] ?? ''));
-        $processId = (int)($row['id_proceso_habilitacion'] ?? 0);
-        if ($rut === '' || $serviceId <= 0 || $serviceName === '' || $processId <= 0) {
+        if ($rut === '' || $serviceId <= 0 || $serviceName === '') {
             continue;
         }
 
-        $key = $rut . '|' . $serviceId . '|' . $processId;
+        $key = $rut . '|' . $serviceId;
         if (!isset($summary[$key])) {
             $summary[$key] = [
                 'rut' => $rut,
@@ -166,9 +165,7 @@ function hxBuildSummaryByRutService(array $rows, array $terrainNotesByRutService
         if ($tipo === 'PRACTICA') {
             if ($summary[$key]['ultima_practica_fecha'] === null || $dt > $summary[$key]['ultima_practica_fecha']) {
                 $terrainNote = null;
-                if (isset($terrainNotesByRutService[$key])) {
-                    $terrainNote = $terrainNotesByRutService[$key];
-                } elseif ($nota !== null) {
+                if ($nota !== null) {
                     $minimum = (float)($terrainThresholdsByService[$serviceId] ?? 80.0);
                     $terrainNote = calcularNotaFinalDesdePorcentaje($nota, $minimum);
                 }
@@ -177,6 +174,8 @@ function hxBuildSummaryByRutService(array $rows, array $terrainNotesByRutService
                 $summary[$key]['ultima_practica_resultado'] = $resultado;
                 $summary[$key]['ultima_practica_nota'] = $terrainNote;
                 $summary[$key]['ultima_practica_proceso'] = isset($row['numero_proceso']) ? (int)$row['numero_proceso'] : null;
+                $summary[$key]['cargo'] = trim((string)($row['cargo'] ?? ''));
+                $summary[$key]['id_cargo'] = isset($row['id_cargo']) ? (int)$row['id_cargo'] : null;
             }
         }
     }
@@ -243,6 +242,7 @@ $sqlParticipants = "
           SELECT et2.id
           FROM ceo_evaluacion_terreno et2
           WHERE et2.id_servicio = h.id_servicio
+            AND et2.id_proceso_habilitacion = ph_actual.id
             AND REPLACE(REPLACE(REPLACE(UPPER(et2.rut), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(UPPER(p.rut), '.', ''), '-', ''), ' ', '')
           ORDER BY et2.fecha_evaluacion DESC, et2.id DESC
           LIMIT 1
@@ -267,7 +267,7 @@ if ($participants === []) {
 
 $rutMap = [];
 $serviceIds = [];
-$selectedProcessKeys = [];
+$participantsByService = [];
 foreach ($participants as $participant) {
     $rut = hxNormalizeRut((string)($participant['rut'] ?? ''));
     $serviceId = (int)($participant['id_servicio'] ?? 0);
@@ -276,17 +276,15 @@ foreach ($participants as $participant) {
     }
     $rutMap[$rut] = true;
     $serviceIds[$serviceId] = true;
-    $processId = (int)($participant['id_proceso_habilitacion'] ?? 0);
-    if ($processId > 0) {
-        $selectedProcessKeys[$rut . '|' . $serviceId . '|' . $processId] = true;
-    }
+    $participantsByService[$rut . '|' . $serviceId] = $participant;
 }
 
 $ruts = array_keys($rutMap);
 $serviceIds = array_map('intval', array_keys($serviceIds));
 
 $historyRows = [];
-$terrainNotesByRutService = [];
+$terrainAttemptsByProcess = [];
+$finalResultsByProcess = [];
 $terrainThresholdsByService = [];
 
 if ($ruts !== [] && $serviceIds !== []) {
@@ -299,6 +297,7 @@ if ($ruts !== [] && $serviceIds !== []) {
         FROM (
             SELECT
                 'TEORICA' AS tipo_evaluacion,
+                rpi.id AS resultado_id,
                 rpi.rut,
                 sp.servicio AS servicio,
                 rpi.id_servicio AS id_servicio,
@@ -324,6 +323,7 @@ if ($ruts !== [] && $serviceIds !== []) {
 
             SELECT
                 'PRACTICA' AS tipo_evaluacion,
+                et.id AS resultado_id,
                 et.rut,
                 sp2.servicio AS servicio,
                 et.id_servicio AS id_servicio,
@@ -345,19 +345,14 @@ if ($ruts !== [] && $serviceIds !== []) {
             WHERE REPLACE(REPLACE(REPLACE(UPPER(et.rut), '.', ''), '-', ''), ' ', '') IN ($rutPlaceholders)
               AND et.id_servicio IN ($servicePlaceholders)
         ) historial
-        ORDER BY servicio ASC, fecha_hora DESC, tipo_evaluacion ASC
+        ORDER BY servicio ASC, fecha_hora DESC, tipo_evaluacion ASC, resultado_id DESC
     ");
     $stmtHistory->execute($historyParams);
     $historyRows = $stmtHistory->fetchAll(PDO::FETCH_ASSOC);
-    // Una evaluación pendiente nunca se completa con resultados de otro proceso.
-    $historyRows = array_values(array_filter($historyRows, static function (array $row) use ($selectedProcessKeys): bool {
-        $key = hxNormalizeRut((string)$row['rut']) . '|' . (int)$row['id_servicio'] . '|' . (int)($row['id_proceso_habilitacion'] ?? 0);
-        return isset($selectedProcessKeys[$key]);
-    }));
 
     $notesParams = array_merge($ruts, $serviceIds);
     $stmtTerrainNotes = $pdo->prepare(" 
-        SELECT rut, id_servicio, id_proceso_habilitacion, fecha_rendicion, hora_rendicion, notafinal
+        SELECT rut, id_servicio, id_proceso_habilitacion, fecha_rendicion, hora_rendicion, notafinal, puntaje_total
         FROM ceo_resultado_terreno_intento
         WHERE REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '') IN ($rutPlaceholders)
           AND id_servicio IN ($servicePlaceholders)
@@ -366,13 +361,29 @@ if ($ruts !== [] && $serviceIds !== []) {
     $stmtTerrainNotes->execute($notesParams);
     foreach ($stmtTerrainNotes->fetchAll(PDO::FETCH_ASSOC) as $terrainRow) {
         $key = hxNormalizeRut((string)$terrainRow['rut']) . '|' . (int)$terrainRow['id_servicio'] . '|' . (int)($terrainRow['id_proceso_habilitacion'] ?? 0);
-        if (!isset($selectedProcessKeys[$key])) {
+        if (isset($terrainAttemptsByProcess[$key])) {
             continue;
         }
-        if (isset($terrainNotesByRutService[$key])) {
-            continue;
+        $terrainAttemptsByProcess[$key] = $terrainRow;
+    }
+
+    // Como el historial: último GENERAL por persona y servicio, sin limitar por cuadrilla.
+    $stmtFinal = $pdo->prepare("
+        SELECT rfs.*, ch.cargo AS nombre_cargo, ph.numero_proceso
+        FROM ceo_resultado_final_servicio rfs
+        LEFT JOIN ceo_cargos_habilitacion ch ON ch.id = rfs.cargo
+        LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = rfs.id_proceso_habilitacion
+        WHERE REPLACE(REPLACE(REPLACE(UPPER(rfs.rut), '.', ''), '-', ''), ' ', '') IN ($rutPlaceholders)
+          AND rfs.id_servicio IN ($servicePlaceholders)
+          AND rfs.segmento = 'GENERAL'
+        ORDER BY rfs.fecha_calculo DESC, rfs.id DESC
+    ");
+    $stmtFinal->execute($notesParams);
+    foreach ($stmtFinal->fetchAll(PDO::FETCH_ASSOC) as $finalRow) {
+        $key = hxNormalizeRut((string)$finalRow['rut']) . '|' . (int)$finalRow['id_servicio'];
+        if (isset($participantsByService[$key]) && !isset($finalResultsByProcess[$key])) {
+            $finalResultsByProcess[$key] = $finalRow;
         }
-        $terrainNotesByRutService[$key] = isset($terrainRow['notafinal']) ? (float)$terrainRow['notafinal'] : null;
     }
 
     $stmtThresholds = $pdo->prepare(" 
@@ -392,7 +403,52 @@ if ($ruts !== [] && $serviceIds !== []) {
     }
 }
 
-$summaryByRutService = hxBuildSummaryByRutService($historyRows, $terrainNotesByRutService, $terrainThresholdsByService);
+// Si hay resultado final, las notas deben pertenecer al proceso de ese resultado.
+$historyRows = array_values(array_filter($historyRows, static function (array $row) use ($finalResultsByProcess, $participantsByService): bool {
+    $key = hxNormalizeRut((string)$row['rut']) . '|' . (int)$row['id_servicio'];
+    if (!isset($participantsByService[$key])) {
+        return false;
+    }
+    return !isset($finalResultsByProcess[$key])
+        || (int)($row['id_proceso_habilitacion'] ?? 0) === (int)($finalResultsByProcess[$key]['id_proceso_habilitacion'] ?? 0);
+}));
+$summaryByRutService = hxBuildSummaryByRutService($historyRows, $terrainThresholdsByService);
+
+foreach ($finalResultsByProcess as $key => $finalRow) {
+    $summary = $summaryByRutService[$key] ?? [];
+    $processKey = $key . '|' . (int)($finalRow['id_proceso_habilitacion'] ?? 0);
+    $terrainAttempt = $terrainAttemptsByProcess[$processKey] ?? null;
+    $terrainDate = null;
+    if ($terrainAttempt && !empty($terrainAttempt['fecha_rendicion'])) {
+        try {
+            $terrainDate = new DateTimeImmutable(trim((string)$terrainAttempt['fecha_rendicion']) . ' ' . trim((string)($terrainAttempt['hora_rendicion'] ?? '00:00:00')));
+        } catch (Throwable $e) {
+            $terrainDate = null;
+        }
+    }
+    if (!empty($finalRow['fecha_calculo'])) {
+        try {
+            $calculationDate = new DateTimeImmutable((string)$finalRow['fecha_calculo']);
+            if ($terrainDate === null || $calculationDate > $terrainDate) {
+                $terrainDate = $calculationDate;
+            }
+        } catch (Throwable $e) {
+            // Conservar la fecha del intento si la fecha de cálculo no es válida.
+        }
+    }
+    $finalNote = is_numeric((string)($finalRow['nota_final'] ?? '')) ? (float)$finalRow['nota_final'] : null;
+    $enabled = $finalNote !== null && $finalNote >= 4.0;
+    $summary['numero_proceso'] = $finalRow['numero_proceso'];
+    $summary['cargo'] = trim((string)($finalRow['nombre_cargo'] ?? ''));
+    $summary['ultima_practica_fecha'] = $terrainDate;
+    $summary['ultima_practica_nota'] = $terrainAttempt && isset($terrainAttempt['notafinal']) ? (float)$terrainAttempt['notafinal'] : null;
+    $summary['ultima_practica_resultado'] = $terrainAttempt ? ((float)($terrainAttempt['puntaje_total'] ?? 0) >= 80.0 ? 'APROBADO' : 'REPROBADO') : null;
+    $summary['nota_final_ponderada'] = $finalNote;
+    $summary['fecha_habilitacion'] = $enabled ? $terrainDate : null;
+    $summary['vigencia_hasta'] = $enabled && $terrainDate !== null ? $terrainDate->modify('+3 years') : null;
+    $summary['estado_inferido'] = $finalNote === null ? 'Pendiente' : ($enabled ? 'Habilitado' : 'No Habilitado');
+    $summaryByRutService[$key] = $summary;
+}
 
 header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
 header('Content-Disposition: attachment; filename=habilitaciones_cuadrillas.xls');
@@ -430,7 +486,7 @@ echo '</tr>';
 foreach ($participants as $participant) {
     $rut = hxNormalizeRut((string)($participant['rut'] ?? ''));
     $serviceId = (int)($participant['id_servicio'] ?? 0);
-    $key = $rut . '|' . $serviceId . '|' . (int)($participant['id_proceso_habilitacion'] ?? 0);
+    $key = $rut . '|' . $serviceId;
     $summary = $summaryByRutService[$key] ?? null;
 
     echo '<tr>';
@@ -438,9 +494,9 @@ foreach ($participants as $participant) {
     echo '<td>' . htmlspecialchars((string)($participant['empresa'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($participant['nombre_apellido'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($participant['rut'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
-    echo '<td>' . htmlspecialchars((string)($participant['cargo'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
+    echo '<td>' . htmlspecialchars((string)($summary['cargo'] ?? $participant['cargo'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($participant['servicio'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
-    echo '<td>' . htmlspecialchars((string)($participant['numero_proceso'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
+    echo '<td>' . htmlspecialchars((string)($summary['numero_proceso'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars(hxFormatNote($summary['ultima_teorica_nota'] ?? null), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars(hxFormatDateTime($summary['ultima_teorica_fecha'] ?? null, true), ENT_QUOTES, 'UTF-8') . '</td>';
     echo '<td>' . htmlspecialchars((string)($summary['ultima_teorica_resultado'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>';

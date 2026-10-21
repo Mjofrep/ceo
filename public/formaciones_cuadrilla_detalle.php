@@ -335,11 +335,36 @@ body {background:#f7f9fc;}
           <a id="modalResumenAreasExport" href="#" class="btn btn-success btn-sm" target="_blank" rel="noopener">
             <i class="bi bi-file-earmark-excel"></i> Exportar Excel
           </a>
+          <button type="button" id="btnResumenAreasRespuestas" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalResumenAreasRespuestas">
+            <i class="bi bi-list-check"></i> Ver respuestas
+          </button>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
       </div>
       <div class="modal-body">
         <div id="modalResumenAreasBody" class="small text-muted">Cargando...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modalResumenAreasRespuestas" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">Detalle de respuestas por áreas de competencia</h5>
+          <div id="modalResumenAreasRespuestasSubtitulo" class="small text-muted"></div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <a id="modalResumenAreasRespuestasExport" href="#" class="btn btn-success btn-sm" target="_blank" rel="noopener">
+            <i class="bi bi-file-earmark-excel"></i> Exportar Excel
+          </a>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="modalResumenAreasRespuestasBody" class="small text-muted">Cargando...</div>
       </div>
     </div>
   </div>
@@ -354,7 +379,11 @@ body {background:#f7f9fc;}
   const modalResumenBody = document.getElementById('modalResumenAreasBody');
   const modalResumenSubtitulo = document.getElementById('modalResumenAreasSubtitulo');
   const modalResumenExport = document.getElementById('modalResumenAreasExport');
+  const modalResumenRespuestasBody = document.getElementById('modalResumenAreasRespuestasBody');
+  const modalResumenRespuestasSubtitulo = document.getElementById('modalResumenAreasRespuestasSubtitulo');
+  const modalResumenRespuestasExport = document.getElementById('modalResumenAreasRespuestasExport');
   const btnResumenAreasJornada = document.getElementById('btnResumenAreasJornada');
+  const btnResumenAreasRespuestas = document.getElementById('btnResumenAreasRespuestas');
 
   function escapeHtml(str) {
     return String(str)
@@ -461,6 +490,38 @@ body {background:#f7f9fc;}
     return html;
   }
 
+  function renderRespuestasJornada(data) {
+    if (!data || !data.length) {
+      return '<div class="text-muted">No hay respuestas para mostrar.</div>';
+    }
+
+    let html = '<div class="table-responsive">';
+    html += '<table class="table table-bordered table-sm align-middle">';
+    html += '<thead><tr>';
+    html += '<th>RUT</th><th>Empresa</th><th>Nombre</th><th>Apellido</th>';
+    html += '<th>Área de competencia</th><th>Pregunta</th><th>Alternativas</th>';
+    html += '<th>Correcta</th><th>Elegida</th>';
+    html += '</tr></thead><tbody>';
+
+    data.forEach(row => {
+      const alternativas = escapeHtml(row.alternativas || '').replace(/\n/g, '<br>');
+      html += '<tr' + (Number(row.validacion) === 0 ? ' class="table-danger"' : '') + '>';
+      html += '<td>' + escapeHtml(row.rut || '') + '</td>';
+      html += '<td>' + escapeHtml(row.empresa || '') + '</td>';
+      html += '<td>' + escapeHtml(row.nombre || '') + '</td>';
+      html += '<td>' + escapeHtml(row.apellidos || '') + '</td>';
+      html += '<td>' + escapeHtml(row.area_competencia || '') + '</td>';
+      html += '<td>' + escapeHtml(row.pregunta || '') + '</td>';
+      html += '<td>' + alternativas + '</td>';
+      html += '<td>' + escapeHtml(row.alternativa_correcta || '') + '</td>';
+      html += '<td>' + escapeHtml(row.alternativa_elegida || '') + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
   document.querySelectorAll('.btn-area-detalle').forEach(btn => {
     btn.addEventListener('click', () => {
       const rut = btn.getAttribute('data-rut');
@@ -533,6 +594,42 @@ body {background:#f7f9fc;}
       })
       .catch(() => {
         modalResumenBody.innerHTML = '<div class="text-danger">No se pudo cargar el resumen.</div>';
+      });
+  });
+
+  btnResumenAreasRespuestas?.addEventListener('click', () => {
+    const cuadrilla = btnResumenAreasJornada?.getAttribute('data-cuadrilla') || '';
+    const idServicio = btnResumenAreasJornada?.getAttribute('data-id-servicio') || '';
+    const jornada = btnResumenAreasJornada?.getAttribute('data-jornada') || '';
+    const servicio = btnResumenAreasJornada?.getAttribute('data-servicio') || '';
+
+    if (modalResumenRespuestasSubtitulo) {
+      modalResumenRespuestasSubtitulo.innerHTML = 'Cuadrilla <strong>' + escapeHtml(cuadrilla) + '</strong>'
+        + ' | Jornada: <strong>' + escapeHtml(jornada) + '</strong>'
+        + ' | Servicio: ' + escapeHtml(servicio);
+    }
+
+    if (modalResumenRespuestasExport) {
+      modalResumenRespuestasExport.href = 'formaciones_cuadrilla_areas_respuestas_excel.php?cuadrilla=' + encodeURIComponent(cuadrilla)
+        + '&id_servicio=' + encodeURIComponent(idServicio);
+    }
+
+    if (modalResumenRespuestasBody) {
+      modalResumenRespuestasBody.innerHTML = '<div class="text-muted">Cargando...</div>';
+    }
+
+    fetch('ajax_formacion_area_respuestas_jornada.php?cuadrilla=' + encodeURIComponent(cuadrilla) + '&id_servicio=' + encodeURIComponent(idServicio), { cache: 'no-store' })
+      .then(r => r.json())
+      .then(r => {
+        if (!r || !r.ok) {
+          const msg = r && r.error ? r.error : 'No se pudo cargar el detalle de respuestas.';
+          modalResumenRespuestasBody.innerHTML = '<div class="text-danger">' + escapeHtml(msg) + '</div>';
+          return;
+        }
+        modalResumenRespuestasBody.innerHTML = renderRespuestasJornada(r.data || []);
+      })
+      .catch(() => {
+        modalResumenRespuestasBody.innerHTML = '<div class="text-danger">No se pudo cargar el detalle de respuestas.</div>';
       });
   });
 

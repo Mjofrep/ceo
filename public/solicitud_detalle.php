@@ -742,6 +742,64 @@ document.getElementById('btnAutorizar')?.addEventListener('click', function () {
 // AGREGAR / ACTUALIZAR PARTICIPANTE
 // ===========================================================
 document.addEventListener('DOMContentLoaded', () => {
+const rutParticipanteNuevo = document.getElementById('add_rut');
+const sugerenciaParticipanteNuevo = document.getElementById('add_rut_sugerencia');
+
+function mostrarSugerenciaParticipante(text, kind = 'muted') {
+    if (!sugerenciaParticipanteNuevo) return;
+    sugerenciaParticipanteNuevo.className = 'small text-' + kind + ' mt-1';
+    sugerenciaParticipanteNuevo.textContent = text;
+}
+
+function limpiarDatosParticipanteNuevo() {
+    ['add_nombre', 'add_apellidop', 'add_apellidom', 'add_cargo'].forEach((id) => {
+        const field = document.getElementById(id);
+        if (field) field.value = '';
+    });
+}
+
+async function buscarParticipantePorRut() {
+    const rut = rutParticipanteNuevo?.value.trim() || '';
+    if (rut === '') {
+        limpiarDatosParticipanteNuevo();
+        mostrarSugerenciaParticipante('');
+        return;
+    }
+
+    mostrarSugerenciaParticipante('Buscando datos...', 'secondary');
+    const rutConsultado = rut;
+    try {
+        const response = await fetch('ajax_solicitud_participante_buscar.php?rut=' + encodeURIComponent(rut), {
+            cache: 'no-store',
+            credentials: 'same-origin'
+        });
+        const data = await response.json();
+        if (rutParticipanteNuevo?.value.trim() !== rutConsultado) return;
+        if (!data?.ok) throw new Error(data?.error || 'No se pudo buscar el RUT.');
+        if (!data.found || !data.person) {
+            limpiarDatosParticipanteNuevo();
+            mostrarSugerenciaParticipante('No se encontraron datos. Complete los campos manualmente.', 'muted');
+            return;
+        }
+
+        const person = data.person;
+        document.getElementById('add_nombre').value = person.nombre || '';
+        document.getElementById('add_apellidop').value = person.apellidop || '';
+        document.getElementById('add_apellidom').value = person.apellidom || '';
+        document.getElementById('add_cargo').value = person.cargo || '';
+        mostrarSugerenciaParticipante('Datos sugeridos desde ' + (data.source || 'registro existente') + '.', 'success');
+    } catch (error) {
+        mostrarSugerenciaParticipante(error.message || 'No se pudo buscar el RUT.', 'danger');
+    }
+}
+
+rutParticipanteNuevo?.addEventListener('blur', buscarParticipantePorRut);
+rutParticipanteNuevo?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    buscarParticipantePorRut();
+});
+
 document.getElementById('btnGuardarParticipanteNuevo')?.addEventListener('click', async function () {
     const btn = this;
     const msg = document.getElementById('agregarParticipanteMsg');
@@ -808,6 +866,7 @@ document.getElementById('btnGuardarParticipanteNuevo')?.addEventListener('click'
           <div class="col-md-4">
             <label class="form-label">RUT</label>
             <input type="text" class="form-control form-control-sm" id="add_rut" placeholder="12345678-9" required>
+            <div id="add_rut_sugerencia" class="small text-muted mt-1"></div>
           </div>
           <div class="col-md-4">
             <label class="form-label">Nombre</label>

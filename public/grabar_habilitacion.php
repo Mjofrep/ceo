@@ -39,45 +39,62 @@ if (!$fecha || !$jornada || !$servicio || empty($particip)) {
 try {
     $pdo->beginTransaction();
 
-    /* ============================================================
-        1) SI YA EXISTE CUADRILLA → ACTUALIZAR (NO GENERAR NUEVA)
-    ============================================================ */
     if ($cuadrillaExistente > 0) {
         $cuadrilla = $cuadrillaExistente;
 
-        if ($esContratista) {
-            $stEmpresa = $pdo->prepare("
-                SELECT empresa
-                FROM ceo_habilitacion
-                WHERE cuadrilla = :cuadrilla
-                LIMIT 1
-            ");
-            $stEmpresa->execute([':cuadrilla' => $cuadrilla]);
-            $idEmpresaCuadrilla = (int) $stEmpresa->fetchColumn();
+        $stHabExistente = $pdo->prepare('
+            SELECT id, empresa
+            FROM ceo_habilitacion
+            WHERE cuadrilla = :cuadrilla
+              AND fecha = :fecha
+              AND jornada = :jornada
+              AND id_servicio = :servicio
+            LIMIT 1
+            FOR UPDATE
+        ');
+        $stHabExistente->execute([
+            ':cuadrilla' => $cuadrilla,
+            ':fecha' => $fecha,
+            ':jornada' => $jornada,
+            ':servicio' => $servicio,
+        ]);
+        $habilitacionExistente = $stHabExistente->fetch(PDO::FETCH_ASSOC);
 
-            if ($idEmpresaCuadrilla <= 0 || $idEmpresaCuadrilla !== $empresa) {
-                throw new Exception('No puedes modificar cuadrillas de otra empresa');
-            }
+        if (!$habilitacionExistente) {
+            throw new Exception('No se encontró la planificación a modificar');
         }
 
-        // Borrar participantes previos
-        $stDel = $pdo->prepare("DELETE FROM ceo_habilitacion_participantes WHERE id_cuadrilla = ?");
-        $stDel->execute([$cuadrilla]);
+        if ($esContratista && (int) $habilitacionExistente['empresa'] !== $empresa) {
+            throw new Exception('No puedes modificar cuadrillas de otra empresa');
+        }
+
+        // Una vez programadas pruebas, la planificación deja de ser editable.
+        $stPruebas = $pdo->prepare('
+            SELECT COUNT(*)
+            FROM ceo_evaluaciones_programadas
+            WHERE cuadrilla = :cuadrilla
+              AND id_servicio = :servicio
+        ');
+        $stPruebas->execute([
+            ':cuadrilla' => $cuadrilla,
+            ':servicio' => $servicio,
+        ]);
+        if ((int) $stPruebas->fetchColumn() > 0) {
+            throw new Exception('No se puede modificar una cuadrilla con pruebas planificadas o ejecutadas');
+        }
+
+        $idHabilitacion = (int) $habilitacionExistente['id'];
+        $stUo = $pdo->prepare('UPDATE ceo_habilitacion SET uo = :uo WHERE id = :id');
+        $stUo->execute([':uo' => $uo, ':id' => $idHabilitacion]);
 
     } else {
-        /* ============================================================
-            2) OBTENER NUEVO NÚMERO DE CUADRILLA
-        ============================================================ */
         $pdo->exec("
             UPDATE ceo_secuencia_cuadrilla
             SET ultimo_numero = LAST_INSERT_ID(ultimo_numero + 1)
         ");
         $cuadrilla = (int)$pdo->lastInsertId();
 
-        /* ============================================================
-            3) INSERTAR REGISTRO EN ceo_habilitacion
-        ============================================================ */
-        $sqlHab = "INSERT INTO ceo_habilitacion 
+        $sqlHab = "INSERT INTO ceo_habilitacion
                     (fecha, jornada, id_servicio, cuadrilla, empresa, uo, gestor)
                    VALUES (:f, :j, :s, :c, :e, :u, :g)";
         $st = $pdo->prepare($sqlHab);
@@ -90,75 +107,99 @@ try {
             ':u' => $uo,
             ':g' => $gestor
         ]);
+        $stHabId = $pdo->prepare('SELECT id FROM ceo_habilitacion WHERE cuadrilla = :cuadrilla LIMIT 1');
+        $stHabId->execute([':cuadrilla' => $cuadrilla]);
+        $idHabilitacion = (int) $stHabId->fetchColumn();
     }
 
-// 🔑 Obtener id_habilitacion existente
-$stHabId = $pdo->prepare("
-    SELECT id
-    FROM ceo_habilitacion
-    WHERE cuadrilla = :c
-    LIMIT 1
-");
-$stHabId->execute([':c' => $cuadrilla]);
-$idHabilitacion = (int)$stHabId->fetchColumn();
+    if ($idHabilitacion <= 0) {
+        throw new Exception("No se encontró la habilitación para la cuadrilla {$cuadrilla}");
+    }
 
-if ($idHabilitacion <= 0) {
-    throw new Exception("No se encontró la habilitación para la cuadrilla {$cuadrilla}");
-}
+    $participantes = [];
+    foreach ($particip as $p) {
+        $rut = normalizar_rut(trim((string) ($p['rut'] ?? '')));
+        $rutKey = clave_rut($rut);
+        if ($rutKey === '') {
+            throw new Exception('Todos los participantes deben tener RUT');
+        }
+        if (isset($participantes[$rutKey])) {
+            throw new Exception("El RUT {$rut} está repetido en la cuadrilla");
+        }
 
-    /* ============================================================
-        4) GUARDAR PARTICIPANTES
-    ============================================================ */
-    $sqlPart = "INSERT INTO ceo_habilitacion_participantes
-                (id_cuadrilla, reevaluo, rut, nombre, apellidos, cargo)
-                VALUES (:c, :r, :rut, :nom, :ape, :cargo)";
+        $participantes[$rutKey] = [
+            'rut' => $rut,
+            'nombre' => trim((string) ($p['nombre'] ?? '')),
+            'apellidos' => trim((string) ($p['app'] ?? '') . ' ' . (string) ($p['apm'] ?? '')),
+            'cargo' => trim((string) ($p['cargo'] ?? '')),
+        ];
+    }
 
-    $stp = $pdo->prepare($sqlPart);
-    $sqlBase = "
-    INSERT INTO ceo_habilitacion_personas
-    (id_habilitacion, rut, nombre, apellidos, cargo, tipo_participacion, estado)
-    VALUES
-    (:id_hab, :rut, :nom, :ape, :cargo, :tipo, 'ACTIVO')
-    ON DUPLICATE KEY UPDATE
-        nombre = VALUES(nombre),
-        apellidos = VALUES(apellidos),
-        cargo = VALUES(cargo),
-        estado = 'ACTIVO'
-    ";
-    
-    $stBase = $pdo->prepare($sqlBase);
+    $sqlClaveRut = "REPLACE(REPLACE(REPLACE(UPPER(rut), '.', ''), '-', ''), ' ', '')";
+    $stExistentes = $pdo->prepare("SELECT rut FROM ceo_habilitacion_participantes WHERE id_cuadrilla = :cuadrilla");
+    $stExistentes->execute([':cuadrilla' => $cuadrilla]);
+    $stEliminarParticipante = $pdo->prepare("DELETE FROM ceo_habilitacion_participantes WHERE id_cuadrilla = :cuadrilla AND {$sqlClaveRut} = :rut_key");
+    foreach ($stExistentes->fetchAll(PDO::FETCH_COLUMN) as $rutExistente) {
+        if (!isset($participantes[clave_rut($rutExistente)])) {
+            $stEliminarParticipante->execute([
+                ':cuadrilla' => $cuadrilla,
+                ':rut_key' => clave_rut($rutExistente),
+            ]);
+        }
+    }
 
-foreach ($particip as $p) {
+    $stExistentesBase = $pdo->prepare("SELECT rut FROM ceo_habilitacion_personas WHERE id_habilitacion = :id_habilitacion AND tipo_participacion = 'NO_EVALUA'");
+    $stExistentesBase->execute([':id_habilitacion' => $idHabilitacion]);
+    $stEliminarBase = $pdo->prepare("DELETE FROM ceo_habilitacion_personas WHERE id_habilitacion = :id_habilitacion AND tipo_participacion = 'NO_EVALUA' AND {$sqlClaveRut} = :rut_key");
+    foreach ($stExistentesBase->fetchAll(PDO::FETCH_COLUMN) as $rutExistente) {
+        if (!isset($participantes[clave_rut($rutExistente)])) {
+            $stEliminarBase->execute([
+                ':id_habilitacion' => $idHabilitacion,
+                ':rut_key' => clave_rut($rutExistente),
+            ]);
+        }
+    }
 
-    $rut = normalizar_rut($p['rut']);
-    $nombre = trim($p['nombre']);
-    $apellidos = trim($p['app'] . ' ' . $p['apm']);
+    $stBuscarParticipante = $pdo->prepare("SELECT 1 FROM ceo_habilitacion_participantes WHERE id_cuadrilla = :cuadrilla AND {$sqlClaveRut} = :rut_key LIMIT 1");
+    $stActualizarParticipante = $pdo->prepare("UPDATE ceo_habilitacion_participantes SET rut = :rut, nombre = :nombre, apellidos = :apellidos, cargo = :cargo WHERE id_cuadrilla = :cuadrilla AND {$sqlClaveRut} = :rut_key");
+    $stInsertarParticipante = $pdo->prepare('INSERT INTO ceo_habilitacion_participantes (id_cuadrilla, reevaluo, rut, nombre, apellidos, cargo) VALUES (:cuadrilla, 0, :rut, :nombre, :apellidos, :cargo)');
+    $stBuscarBase = $pdo->prepare("SELECT 1 FROM ceo_habilitacion_personas WHERE id_habilitacion = :id_habilitacion AND {$sqlClaveRut} = :rut_key LIMIT 1");
+    $stActualizarBase = $pdo->prepare("UPDATE ceo_habilitacion_personas SET rut = :rut, nombre = :nombre, apellidos = :apellidos, cargo = :cargo, estado = 'ACTIVO' WHERE id_habilitacion = :id_habilitacion AND {$sqlClaveRut} = :rut_key");
+    $stInsertarBase = $pdo->prepare("INSERT INTO ceo_habilitacion_personas (id_habilitacion, rut, nombre, apellidos, cargo, tipo_participacion, estado) VALUES (:id_habilitacion, :rut, :nombre, :apellidos, :cargo, 'NO_EVALUA', 'ACTIVO')");
 
-    /* ============================================================
-       4.1) INSERTAR SIEMPRE EN TABLA BASE (PERMISO)
-    ============================================================ */
-    $stBase->execute([
-    ':id_hab' => $idHabilitacion,   // 🔑 USAR SIEMPRE ESTE
-    ':rut'    => $rut,
-    ':nom'    => $nombre,
-    ':ape'    => $apellidos,
-    ':cargo'  => $p['cargo'],
-    ':tipo'   => 'NO_EVALUA'
-]);
+    foreach ($participantes as $rutKey => $p) {
+        $paramsParticipante = [
+            ':cuadrilla' => $cuadrilla,
+            ':rut_key' => $rutKey,
+            ':rut' => $p['rut'],
+            ':nombre' => $p['nombre'],
+            ':apellidos' => $p['apellidos'],
+            ':cargo' => $p['cargo'],
+        ];
+        $stBuscarParticipante->execute([':cuadrilla' => $cuadrilla, ':rut_key' => $rutKey]);
+        if ($stBuscarParticipante->fetchColumn()) {
+            $stActualizarParticipante->execute($paramsParticipante);
+        } else {
+            unset($paramsParticipante[':rut_key']);
+            $stInsertarParticipante->execute($paramsParticipante);
+        }
 
-
-    /* ============================================================
-       4.2) INSERTAR EN TABLA DE EVALUACIÓN (LO QUE YA EXISTÍA)
-    ============================================================ */
-    $stp->execute([
-        ':c'     => $cuadrilla,
-        ':r'     => 0,
-        ':rut'   => $rut,
-        ':nom'   => $nombre,
-        ':ape'   => $apellidos,
-        ':cargo' => $p['cargo']
-    ]);
-}
+        $paramsBase = [
+            ':id_habilitacion' => $idHabilitacion,
+            ':rut_key' => $rutKey,
+            ':rut' => $p['rut'],
+            ':nombre' => $p['nombre'],
+            ':apellidos' => $p['apellidos'],
+            ':cargo' => $p['cargo'],
+        ];
+        $stBuscarBase->execute([':id_habilitacion' => $idHabilitacion, ':rut_key' => $rutKey]);
+        if ($stBuscarBase->fetchColumn()) {
+            $stActualizarBase->execute($paramsBase);
+        } else {
+            unset($paramsBase[':rut_key']);
+            $stInsertarBase->execute($paramsBase);
+        }
+    }
 
 
     $pdo->commit();
@@ -217,8 +258,10 @@ foreach ($particip as $p) {
 }
     echo json_encode(['ok' => true, 'cuadrilla' => $cuadrilla]);
 
-} catch (Exception $e) {
-    $pdo->rollBack();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     echo json_encode(['ok' => false, 'msg' => $e->getMessage()]);
 }
 
@@ -238,4 +281,8 @@ function normalizar_rut($rut) {
 
     // Insertar guion antes del último carácter
     return substr($rut, 0, -1) . '-' . substr($rut, -1);
+}
+
+function clave_rut($rut) {
+    return str_replace(['.', '-', ' '], '', strtoupper(trim((string) $rut)));
 }

@@ -16,6 +16,11 @@ $pdo = db();
 $rut = trim((string)($_GET['rut'] ?? ''));
 $cuadrilla = (int)($_GET['cuadrilla'] ?? 0);
 $idServicio = (int)($_GET['id_servicio'] ?? 0);
+$returnTo = trim((string)($_GET['return_to'] ?? ''));
+$volverUrl = 'formaciones_cuadrilla_detalle.php?cuadrilla=' . $cuadrilla;
+if (str_starts_with($returnTo, 'formaciones_huka.php')) {
+    $volverUrl = $returnTo;
+}
 
 $error = '';
 $formacion = null;
@@ -23,6 +28,7 @@ $participante = null;
 $programacion = null;
 $respuestas = [];
 $resumenAreas = [];
+$porcentajeMinimo = 80.0;
 
 function frmPreguntaEstado(int $validacion): string
 {
@@ -39,7 +45,7 @@ if ($rut === '' || $cuadrilla <= 0 || $idServicio <= 0) {
 } else {
     try {
         $stmt = $pdo->prepare('
-            SELECT f.id, f.cuadrilla, f.fecha, f.jornada, f.id_servicio, fs.servicio, e.nombre AS empresa, u.desc_uo AS uo
+            SELECT f.id, f.cuadrilla, f.fecha, f.jornada, f.id_servicio, f.id_agrupacion, fs.servicio, e.nombre AS empresa, u.desc_uo AS uo
             FROM ceo_formacion f
             LEFT JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
             LEFT JOIN ceo_empresas e ON e.id = f.empresa
@@ -54,6 +60,9 @@ if ($rut === '' || $cuadrilla <= 0 || $idServicio <= 0) {
             ':id_servicio' => $idServicio,
         ]);
         $formacion = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if ($formacion) {
+            $porcentajeMinimo = obtenerPorcentajeMinimoFormacionAgrupacion($pdo, (int)($formacion['id_agrupacion'] ?? 0));
+        }
 
         $stmt = $pdo->prepare('
             SELECT rut, nombre, apellidos, cargo
@@ -171,6 +180,8 @@ body {background:#f7f9fc;}
 .brand-title {color:#0065a4; font-weight:600;}
 .card {border:none; box-shadow:0 2px 8px rgba(0,0,0,.06);}
 .table thead th {background:#eaf2fb; white-space:nowrap;}
+.area-aprobada {background:#d1e7dd !important;}
+.area-reprobada {background:#f8d7da !important;}
 </style>
 </head>
 <body>
@@ -184,7 +195,7 @@ body {background:#f7f9fc;}
         <small class="text-secondary"><?= APP_SUBTITLE ?></small>
       </div>
     </div>
-    <a href="formaciones_cuadrilla_detalle.php?cuadrilla=<?= (int)$cuadrilla ?>" class="btn btn-outline-primary btn-sm">&larr; Volver</a>
+    <a href="<?= esc($volverUrl) ?>" class="btn btn-outline-primary btn-sm">&larr; Volver</a>
   </div>
 </header>
 
@@ -228,7 +239,8 @@ body {background:#f7f9fc;}
               </thead>
               <tbody>
               <?php foreach ($resumenAreas as $area): ?>
-                <tr>
+                <?php $porcentajeArea = (int)$area['total'] > 0 ? ((int)$area['buenas'] / (int)$area['total']) * 100 : 0; ?>
+                <tr class="<?= $porcentajeArea >= $porcentajeMinimo ? 'area-aprobada' : 'area-reprobada' ?>">
                   <td><?= esc((string)$area['area']) ?></td>
                   <td><?= (int)$area['buenas'] ?></td>
                   <td><?= (int)$area['malas'] ?></td>

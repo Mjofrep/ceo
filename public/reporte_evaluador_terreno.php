@@ -120,6 +120,7 @@ body { background:#f7f9fc; }
               <th>Nombre</th>
               <th>Asistencia</th>
               <th>Empresa</th>
+              <th>Solicitud</th>
             </tr>
           </thead>
           <tbody>
@@ -138,6 +139,7 @@ body { background:#f7f9fc; }
                   <td><?= retEsc(trim((string)($row['nombre'] ?? '') . ' ' . (string)($row['apellidos'] ?? ''))) ?></td>
                   <td class="text-center"><?= retEsc((string)($row['asistencia'] ?? 'ASISTIO')) ?></td>
                   <td><?= retEsc((string)($row['empresa'] ?? '')) ?></td>
+                  <td><?= retEsc((string)($row['nsolicitud'] ?? '')) ?></td>
                 </tr>
               <?php endforeach; ?>
             <?php endif; ?>

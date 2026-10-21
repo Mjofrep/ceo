@@ -50,12 +50,60 @@ if ($rutAlumno !== '') {
             INNER JOIN ceo_habilitacion h
                     ON h.cuadrilla = ep.cuadrilla
                    AND h.id_servicio = ep.id_servicio
+            INNER JOIN ceo_habilitacion_participantes hp
+                    ON hp.id_cuadrilla = h.cuadrilla
+                   AND REPLACE(REPLACE(REPLACE(UPPER(hp.rut), '.', ''), '-', ''), ' ', '') =
+                       REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '')
             LEFT JOIN ceo_proceso_habilitacion ph ON ph.id = ep.id_proceso_habilitacion
-            WHERE ep.rut = :rut
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '') =
+                  REPLACE(REPLACE(REPLACE(UPPER(:rut), '.', ''), '-', ''), ' ', '')
               AND ep.estado = 'PENDIENTE'
               AND ep.resultado = 'PENDIENTE'
               AND ep.tipo = 'PRUEBA'
-            ORDER BY ep.fecha_programacion ASC, ep.id ASC");
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ceo_habilitacion h_reciente
+                  INNER JOIN ceo_habilitacion_participantes hp_reciente
+                          ON hp_reciente.id_cuadrilla = h_reciente.cuadrilla
+                  WHERE h_reciente.id_servicio = ep.id_servicio
+                    AND REPLACE(REPLACE(REPLACE(UPPER(hp_reciente.rut), '.', ''), '-', ''), ' ', '') =
+                        REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '')
+                    AND (
+                        h_reciente.fecha > h.fecha
+                        OR (h_reciente.fecha = h.fecha AND h_reciente.cuadrilla > h.cuadrilla)
+                        OR (h_reciente.fecha = h.fecha AND h_reciente.cuadrilla = h.cuadrilla AND h_reciente.id > h.id)
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ceo_evaluaciones_programadas ep_reciente
+                  WHERE REPLACE(REPLACE(REPLACE(UPPER(ep_reciente.rut), '.', ''), '-', ''), ' ', '') =
+                        REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '')
+                    AND ep_reciente.id_servicio = ep.id_servicio
+                    AND ep_reciente.cuadrilla = ep.cuadrilla
+                    AND ep_reciente.estado = 'PENDIENTE'
+                    AND ep_reciente.resultado = 'PENDIENTE'
+                    AND ep_reciente.tipo = 'PRUEBA'
+                    AND (
+                        ep_reciente.fecha_programacion > ep.fecha_programacion
+                        OR (ep_reciente.fecha_programacion = ep.fecha_programacion AND ep_reciente.id > ep.id)
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ceo_vigencia_detalle vd
+                  INNER JOIN ceo_vigencia_general vg
+                          ON REPLACE(REPLACE(REPLACE(UPPER(vg.rut), '.', ''), '-', ''), ' ', '') =
+                             REPLACE(REPLACE(REPLACE(UPPER(vd.rut), '.', ''), '-', ''), ' ', '')
+                         AND vg.id_proceso = vd.id_proceso
+                  WHERE REPLACE(REPLACE(REPLACE(UPPER(vd.rut), '.', ''), '-', ''), ' ', '') =
+                        REPLACE(REPLACE(REPLACE(UPPER(ep.rut), '.', ''), '-', ''), ' ', '')
+                    AND vd.id_servicio = ep.id_servicio
+                    AND CURDATE() BETWEEN DATE(vd.fechavig_ini) AND DATE(vd.fechavig_fin)
+                    AND CURDATE() BETWEEN DATE(vg.fechavig_ini) AND DATE(vg.fechavig_fin)
+                    AND DATE(vd.fechavig_ini) >= DATE(ep.fecha_programacion)
+              )
+            ORDER BY ep.fecha_programacion DESC, ep.id DESC");
         $stmtPruebas->execute([':rut' => $rutAlumno]);
         $pendientes = $stmtPruebas->fetchAll(PDO::FETCH_ASSOC);
 

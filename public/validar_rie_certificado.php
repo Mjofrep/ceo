@@ -7,6 +7,7 @@ require_once __DIR__ . '/../config/app.php';
 $token = trim((string)($_GET['token'] ?? ''));
 $cert = null;
 $error = '';
+$servicio = 'RIE';
 
 function vrieEsc(mixed $value): string
 {
@@ -29,12 +30,13 @@ if ($token === '') {
 } else {
     try {
         $pdo = db();
-        $stmt = $pdo->prepare('SELECT nombres, apellidos, rut FROM ceo_rie_aprobados WHERE token_qr = :token LIMIT 1');
+        $stmt = $pdo->prepare('SELECT nombres, apellidos, rut, servicio FROM ceo_rie_aprobados WHERE token_qr = :token LIMIT 1');
         $stmt->execute([':token' => $token]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         if (!$row) {
-            $error = 'Certificado RIE no encontrado.';
+            $error = 'Certificado no encontrado.';
         } else {
+            $servicio = trim((string)($row['servicio'] ?? '')) ?: $servicio;
             $cert = [
                 'nombre' => trim((string)$row['nombres'] . ' ' . (string)$row['apellidos']),
                 'rut' => (string)$row['rut'],
@@ -43,7 +45,7 @@ if ($token === '') {
             ];
         }
     } catch (Throwable $e) {
-        $error = 'No fue posible consultar el certificado RIE.';
+        $error = 'No fue posible consultar el certificado.';
     }
 }
 ?>
@@ -52,7 +54,7 @@ if ($token === '') {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Consulta Certificado RIE - <?= vrieEsc(APP_NAME) ?></title>
+  <title>Consulta Certificado <?= vrieEsc($servicio) ?> - <?= vrieEsc(APP_NAME) ?></title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f4f7fb; }
@@ -70,7 +72,7 @@ if ($token === '') {
     <img src="<?= vrieEsc(APP_LOGO) ?>" alt="Logo" style="height:52px;">
     <div>
       <div class="brand"><?= vrieEsc(APP_NAME) ?></div>
-      <div class="text-muted small">Consulta publica certificado RIE</div>
+      <div class="text-muted small">Consulta publica de certificado</div>
     </div>
   </div>
 </header>
@@ -78,7 +80,7 @@ if ($token === '') {
 <main class="container wrap mb-5">
   <div class="card rounded-4">
     <div class="card-body p-4 p-md-5">
-      <h1 class="h4 text-primary fw-bold mb-4">Consulta de Certificado RIE</h1>
+      <h1 class="h4 text-primary fw-bold mb-4">Consulta de Certificado <?= vrieEsc($servicio) ?></h1>
 
       <?php if ($error !== ''): ?>
         <div class="alert alert-danger mb-0"><?= vrieEsc($error) ?></div>

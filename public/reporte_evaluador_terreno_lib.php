@@ -116,10 +116,7 @@ function retFetchRows(PDO $pdo, array $filters): array
             sp.servicio,
             ph.numero_proceso,
             COALESCE(ep.cuadrilla, CAST(et.codigo_evaluacion AS UNSIGNED), 0) AS cuadrilla,
-            CASE
-                WHEN UPPER(TRIM(COALESCE(ep.resultado, ''))) = 'NO ASISTIO' THEN 'NO ASISTIO'
-                ELSE 'ASISTIO'
-            END AS asistencia,
+            rti.asistencia,
             COALESCE(hp.nombre, ct.nombre, '') AS nombre,
             COALESCE(hp.apellidos, ct.apellidos, '') AS apellidos,
             COALESCE(
@@ -127,8 +124,48 @@ function retFetchRows(PDO $pdo, array $filters): array
                 NULLIF(TRIM(COALESCE(et.contratista, '')), ''),
                 emp_c.nombre,
                 ''
-            ) AS empresa
-        FROM ceo_resultado_terreno_intento rti
+            ) AS empresa,
+            h.nsolicitud
+        FROM (
+            SELECT
+                intento.id,
+                intento.fecha_rendicion,
+                intento.hora_rendicion,
+                CONVERT(intento.rut USING utf8mb4) COLLATE utf8mb4_unicode_ci AS rut,
+                intento.id_servicio,
+                intento.id_proceso_habilitacion,
+                intento.id_evaluador,
+                NULL AS id_planificacion,
+                'ASISTIO' AS asistencia
+            FROM ceo_resultado_terreno_intento intento
+
+            UNION ALL
+
+            SELECT
+                ausencia.id,
+                DATE(ausencia.fecha_resultado),
+                TIME(ausencia.fecha_resultado),
+                CONVERT(ausencia.rut USING utf8mb4) COLLATE utf8mb4_unicode_ci,
+                ausencia.id_servicio,
+                ausencia.id_proceso_habilitacion,
+                (
+                    SELECT evaluador.id
+                    FROM ceo_usuarios usuario
+                    INNER JOIN ceo_evaluadores evaluador
+                        ON LOWER(TRIM(CONVERT(evaluador.correo USING utf8mb4))) COLLATE utf8mb4_unicode_ci =
+                           LOWER(TRIM(CONVERT(usuario.correo USING utf8mb4))) COLLATE utf8mb4_unicode_ci
+                    WHERE usuario.id = ausencia.usuario_programa
+                      AND TRIM(COALESCE(usuario.correo, '')) <> ''
+                    ORDER BY evaluador.id
+                    LIMIT 1
+                ),
+                ausencia.id,
+                'NO ASISTIO'
+            FROM ceo_evaluaciones_programadas ausencia
+            WHERE ausencia.tipo = 'TERRENO'
+              AND ausencia.estado = 'EJECUTADA'
+              AND UPPER(TRIM(COALESCE(ausencia.resultado, ''))) = 'NO ASISTIO'
+        ) rti
         LEFT JOIN ceo_evaluadores ev
             ON ev.id = rti.id_evaluador
         INNER JOIN ceo_servicios_pruebas sp
@@ -136,20 +173,21 @@ function retFetchRows(PDO $pdo, array $filters): array
         LEFT JOIN ceo_proceso_habilitacion ph
             ON ph.id = rti.id_proceso_habilitacion
         LEFT JOIN ceo_evaluaciones_programadas ep
-            ON ep.id = (
+            ON ep.id = COALESCE(rti.id_planificacion, (
                 SELECT ep2.id
                 FROM ceo_evaluaciones_programadas ep2
                 WHERE ep2.id_proceso_habilitacion = rti.id_proceso_habilitacion
                   AND ep2.id_servicio = rti.id_servicio
                   AND ep2.tipo = 'TERRENO'
                   AND ep2.estado = 'EJECUTADA'
+                  AND UPPER(TRIM(COALESCE(ep2.resultado, ''))) <> 'NO ASISTIO'
                   AND REPLACE(REPLACE(REPLACE(UPPER(ep2.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci =
                       REPLACE(REPLACE(REPLACE(UPPER(rti.rut), '.', ''), '-', ''), ' ', '') COLLATE utf8mb4_unicode_ci
                 ORDER BY ep2.intento DESC, ep2.id DESC
                 LIMIT 1
-            )
+            ))
         LEFT JOIN ceo_evaluacion_terreno et
-            ON et.id = (
+            ON rti.asistencia = 'ASISTIO' AND et.id = (
                 SELECT et2.id
                 FROM ceo_evaluacion_terreno et2
                 WHERE et2.id_proceso_habilitacion = rti.id_proceso_habilitacion
@@ -184,8 +222,9 @@ function retFetchRows(PDO $pdo, array $filters): array
     $deduped = [];
 
     foreach ($rows as $row) {
-        // Para pago se considera el cierre mas reciente por rut, servicio, cuadrilla y proceso.
+        // Para pago se considera el cierre mas reciente por dia, rut, servicio, cuadrilla y proceso.
         $key = implode('|', [
+            (string)($row['fecha_rendicion'] ?? ''),
             retRutKey((string)($row['rut'] ?? '')),
             (int)($row['id_servicio'] ?? 0),
             (string)($row['cuadrilla'] ?? ''),

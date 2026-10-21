@@ -81,6 +81,14 @@ $apps = [
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230d6efd'/%3E%3Cstop offset='100%25' stop-color='%2381b1ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Ccircle cx='240' cy='88' r='62' fill='rgba(255,255,255,0.18)'/%3E%3Cpath d='M70 220c26-58 74-92 146-104' stroke='white' stroke-width='18' stroke-linecap='round' fill='none' opacity='.85'/%3E%3Cpath d='M72 226h170' stroke='white' stroke-width='14' stroke-linecap='round' opacity='.7'/%3E%3Crect x='74' y='76' width='90' height='90' rx='22' fill='rgba(255,255,255,0.22)'/%3E%3C/svg%3E",
     ],
     [
+        'title' => 'Ranking de Errores',
+        'description' => 'Identifica las preguntas con mayor cantidad y porcentaje de respuestas incorrectas.',
+        'url' => '/ceo.noetica.cl/public/ranking_errores_preguntas.php',
+        'tag' => 'Reportes',
+        'accent' => '#dc3545',
+        'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Crect width='320' height='320' rx='40' fill='%23dc3545'/%3E%3Crect x='64' y='60' width='192' height='200' rx='26' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M96 220v-56M142 220v-94M188 220v-132M234 220v-38' stroke='%23dc3545' stroke-width='22' stroke-linecap='round'/%3E%3Cpath d='M88 92l55 25 47-36 48 16' fill='none' stroke='%23dc3545' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E",
+    ],
+    [
         'title' => 'Datos Personales',
         'description' => 'Consulta transversal por RUT y trazabilidad interna para responder solicitudes externas.',
         'url' => '/ceo.noetica.cl/public/datos_personales/index.php',
@@ -131,6 +139,15 @@ $apps = [
         'accent' => '#0f766e',
         'roles' => ['administrador', 'registro asistencia'],
         'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230f766e'/%3E%3Cstop offset='100%25' stop-color='%2389e0cf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='320' height='320' rx='40' fill='url(%23g)'/%3E%3Crect x='58' y='88' width='204' height='146' rx='26' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M94 132h132M94 166h132M94 200h72' stroke='%230f766e' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M94 88l28-34h76l28 34' fill='none' stroke='rgba(255,255,255,0.9)' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='230' cy='200' r='24' fill='rgba(15,118,110,0.18)'/%3E%3Cpath d='M220 200h20M230 190v20' stroke='%230f766e' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E",
+    ],
+    [
+        'title' => 'Evaluaciones de Inspectores',
+        'description' => 'Carga y consulta de la base vigente de evaluaciones de inspectores.',
+        'url' => '/ceo.noetica.cl/public/evaluaciones_inspectores.php',
+        'tag' => 'Formacion',
+        'accent' => '#7c3aed',
+        'allowed_ceo_roles' => [1],
+        'image' => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'%3E%3Crect width='320' height='320' rx='40' fill='%237c3aed'/%3E%3Crect x='58' y='58' width='204' height='204' rx='24' fill='rgba(255,255,255,0.9)'/%3E%3Cpath d='M96 116h128M96 160h128M96 204h78' stroke='%237c3aed' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M214 190v42M193 211h42' stroke='%237c3aed' stroke-width='12' stroke-linecap='round'/%3E%3C/svg%3E",
     ],
     [
         'title' => 'Portal Documental',

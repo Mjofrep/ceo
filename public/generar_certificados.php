@@ -471,6 +471,7 @@ function certCandidateSql(array $where): string
             COALESCE(hp.nombre, c.nombre, "") AS nombre,
             COALESCE(hp.apellidos, c.apellidos, "") AS apellidos,
             COALESCE(NULLIF(TRIM(hp.cargo), ""), cc.cargo, "") AS cargo,
+            rfs.fecha_calculo,
             DATE(rfs.fecha_calculo) AS fecha_evaluacion,
             rfs.nota_prueba,
             rfs.nota_terreno,
@@ -910,9 +911,12 @@ try {
     $certificados = $stmtCert->fetchAll(PDO::FETCH_ASSOC);
 
     $certVigentes = [];
-    foreach ($pdo->query("SELECT rut, id_servicio, id_proceso, id_empresa, cargo, fechavig_fin FROM ceo_certificados WHERE estado = 'VIGENTE'")->fetchAll(PDO::FETCH_ASSOC) as $cert) {
+    foreach ($pdo->query("SELECT rut, id_servicio, fecha_generacion FROM ceo_certificados WHERE estado = 'VIGENTE'")->fetchAll(PDO::FETCH_ASSOC) as $cert) {
         $key = certRutKey((string)$cert['rut']) . '|' . (int)$cert['id_servicio'];
-        $certVigentes[$key] = true;
+        $fechaGeneracion = (string)$cert['fecha_generacion'];
+        if (!isset($certVigentes[$key]) || $fechaGeneracion > $certVigentes[$key]) {
+            $certVigentes[$key] = $fechaGeneracion;
+        }
     }
 
     $candWhere = [
@@ -944,7 +948,11 @@ try {
 
     foreach ($candidatos as $cand) {
         $key = certCandidateKey($cand);
-        if (!isset($certVigentes[$key])) {
+        $fechaCertificado = $certVigentes[$key] ?? null;
+        $fechaResultado = (string)($cand['fecha_calculo'] ?? '');
+
+        // A later approved result belongs to a new habilitation and must replace the prior certificate.
+        if ($fechaCertificado === null || $fechaResultado > $fechaCertificado) {
             $candidatosPendientes[] = $cand;
         }
     }

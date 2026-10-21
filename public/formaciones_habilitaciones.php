@@ -16,6 +16,57 @@ $pdo = db();
 $rolUsuario    = strtolower($_SESSION['auth']['rol'] ?? '');
 $idEmpresaUser = (int)($_SESSION['auth']['id_empresa'] ?? 0);
 $esContratista = ($rolUsuario === 'contratista');
+$mensajeAsociacion = '';
+$tipoMensajeAsociacion = 'success';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'asociar_solicitud') {
+    $idFormacion = (int)($_POST['id_formacion'] ?? 0);
+    $nSolicitud = (int)($_POST['nsolicitud'] ?? 0);
+
+    try {
+        $stmtFormacion = $pdo->prepare('SELECT id, empresa, nsolicitud FROM ceo_formacion WHERE id = :id LIMIT 1');
+        $stmtFormacion->execute([':id' => $idFormacion]);
+        $formacion = $stmtFormacion->fetch(PDO::FETCH_ASSOC);
+
+        if (!$formacion || $idFormacion <= 0 || $nSolicitud <= 0) {
+            throw new RuntimeException('Datos de asociación inválidos.');
+        }
+        if (!empty($formacion['nsolicitud'])) {
+            throw new RuntimeException('La formación ya tiene una solicitud asociada.');
+        }
+        if ($esContratista && (int)$formacion['empresa'] !== $idEmpresaUser) {
+            throw new RuntimeException('No tiene permisos para asociar esta formación.');
+        }
+
+        $stmtSolicitud = $pdo->prepare('
+            SELECT s.nsolicitud
+            FROM ceo_solicitudes s
+            WHERE s.nsolicitud = :nsolicitud
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ceo_formacion f
+                  WHERE f.nsolicitud = s.nsolicitud
+              )
+            LIMIT 1
+        ');
+        $stmtSolicitud->execute([
+            ':nsolicitud' => $nSolicitud,
+        ]);
+        if (!$stmtSolicitud->fetchColumn()) {
+            throw new RuntimeException('La solicitud no está disponible para asociar.');
+        }
+
+        $stmtUpdate = $pdo->prepare('UPDATE ceo_formacion SET nsolicitud = :nsolicitud WHERE id = :id AND (nsolicitud IS NULL OR nsolicitud = 0)');
+        $stmtUpdate->execute([':nsolicitud' => $nSolicitud, ':id' => $idFormacion]);
+        if ($stmtUpdate->rowCount() !== 1) {
+            throw new RuntimeException('No fue posible asociar la solicitud.');
+        }
+        $mensajeAsociacion = 'Solicitud N° ' . $nSolicitud . ' asociada correctamente.';
+    } catch (Throwable $e) {
+        $tipoMensajeAsociacion = 'danger';
+        $mensajeAsociacion = $e->getMessage();
+    }
+}
 
 /* =========================================================
    EMPRESAS (ORDEN)
@@ -41,11 +92,27 @@ foreach ($agrupacionesRows as $agrupacionRow) {
     $agrupacionesPorServicio[$servicioId][] = $agrupacionRow;
 }
 
+$sqlSolicitudesDisponibles = '
+    SELECT s.nsolicitud, s.fecha, s.contratista, e.nombre AS empresa
+    FROM ceo_solicitudes s
+    INNER JOIN ceo_empresas e ON e.id = s.contratista
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM ceo_formacion f
+        WHERE f.nsolicitud = s.nsolicitud
+    )
+';
+$sqlSolicitudesDisponibles .= ' ORDER BY s.fecha DESC, s.nsolicitud DESC';
+$stmtSolicitudesDisponibles = $pdo->prepare($sqlSolicitudesDisponibles);
+$stmtSolicitudesDisponibles->execute();
+$solicitudesDisponibles = $stmtSolicitudesDisponibles->fetchAll(PDO::FETCH_ASSOC);
+
 /* =========================================================
    HABILITACIONES (GRILLA)
 ========================================================= */
 $sql = "
 SELECT
+    h.id AS id_formacion,
     h.cuadrilla,
     h.estado,
     h.id_servicio,
@@ -122,6 +189,13 @@ body { background:#f7f9fc; }
 
 <div class="container-fluid px-4">
 
+<?php if ($mensajeAsociacion !== ''): ?>
+  <div class="alert alert-<?= $tipoMensajeAsociacion === 'success' ? 'success' : 'danger' ?> alert-dismissible fade show" role="alert">
+    <?= esc($mensajeAsociacion) ?>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+<?php endif; ?>
+
 <!-- ======================================================
      CABECERA
 ====================================================== -->
@@ -158,6 +232,7 @@ body { background:#f7f9fc; }
             <th>Fecha</th>
             <th>Gestor</th>
             <th>N° Solicitud</th>
+            <th>Asociar</th>
           </tr>
         </thead>
         <tbody>
@@ -168,6 +243,7 @@ body { background:#f7f9fc; }
             ?>
             <tr
               data-cuadrilla="<?= (int)$r['cuadrilla'] ?>"
+              data-id-formacion="<?= (int)$r['id_formacion'] ?>"
               data-id-servicio="<?= (int)$r['id_servicio'] ?>"
               data-id-agrupacion="<?= (int)($r['id_agrupacion'] ?? 0) ?>"
               data-empresa="<?= (int)$r['empresa'] ?>"
@@ -204,13 +280,43 @@ body { background:#f7f9fc; }
               <td><?= esc($r['servicio']) ?></td>
               <td><?= esc($r['fecha']) ?></td>
               <td><?= esc($r['gestor']) ?></td>
-              <td><?= esc($r['nsolicitud']) ?></td>
+               <td><?= esc($r['nsolicitud']) ?></td>
+               <td class="text-center">
+                 <?php if (empty($r['nsolicitud'])): ?>
+                   <button type="button" class="btn btn-outline-primary btn-sm btn-asociar-solicitud" title="Asociar solicitud" data-id-formacion="<?= (int)$r['id_formacion'] ?>" data-empresa="<?= (int)$r['empresa'] ?>" data-cuadrilla="<?= (int)$r['cuadrilla'] ?>">
+                     <i class="bi bi-link-45deg"></i>
+                   </button>
+                 <?php endif; ?>
+               </td>
             </tr>
             <?php endforeach; ?>
         
         </tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modalAsociarSolicitud" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" class="modal-content">
+      <input type="hidden" name="accion" value="asociar_solicitud">
+      <input type="hidden" name="id_formacion" id="asociarIdFormacion">
+      <div class="modal-header">
+        <h5 class="modal-title">Asociar solicitud a formación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small" id="asociarSolicitudContexto"></p>
+        <label for="asociarSolicitudSelect" class="form-label">Solicitud disponible</label>
+        <select class="form-select" name="nsolicitud" id="asociarSolicitudSelect" required></select>
+        <div class="form-text" id="asociarSolicitudAyuda"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="asociarSolicitudGuardar">Asociar</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -312,6 +418,40 @@ Saludos cordiales.</textarea>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+
+  const solicitudesDisponibles = <?= json_encode($solicitudesDisponibles, JSON_UNESCAPED_UNICODE) ?>;
+  const modalAsociarSolicitud = new bootstrap.Modal(document.getElementById('modalAsociarSolicitud'));
+  const asociarIdFormacion = document.getElementById('asociarIdFormacion');
+  const asociarSolicitudSelect = document.getElementById('asociarSolicitudSelect');
+  const asociarSolicitudContexto = document.getElementById('asociarSolicitudContexto');
+  const asociarSolicitudAyuda = document.getElementById('asociarSolicitudAyuda');
+  const asociarSolicitudGuardar = document.getElementById('asociarSolicitudGuardar');
+
+  document.querySelectorAll('.btn-asociar-solicitud').forEach(button => {
+    button.addEventListener('click', () => {
+      const solicitudes = solicitudesDisponibles;
+      asociarIdFormacion.value = button.dataset.idFormacion || '';
+      asociarSolicitudContexto.textContent = `Cuadrilla ${button.dataset.cuadrilla || ''}. Solo se muestran solicitudes disponibles sin asociación.`;
+      asociarSolicitudSelect.innerHTML = '';
+
+      if (!solicitudes.length) {
+        asociarSolicitudSelect.innerHTML = '<option value="">Sin solicitudes disponibles</option>';
+        asociarSolicitudAyuda.textContent = 'No existen solicitudes sin asociar.';
+        asociarSolicitudGuardar.disabled = true;
+      } else {
+        asociarSolicitudSelect.innerHTML = '<option value="">Seleccione una solicitud...</option>';
+        solicitudes.forEach(solicitud => {
+          const option = document.createElement('option');
+          option.value = solicitud.nsolicitud;
+          option.textContent = `N° ${solicitud.nsolicitud} | ${solicitud.fecha || ''} | ${solicitud.empresa || ''}`;
+          asociarSolicitudSelect.appendChild(option);
+        });
+        asociarSolicitudAyuda.textContent = '';
+        asociarSolicitudGuardar.disabled = false;
+      }
+      modalAsociarSolicitud.show();
+    });
+  });
 
   document.querySelectorAll('.sel-prueba').forEach(sel => {
     sel.addEventListener('change', function () {
