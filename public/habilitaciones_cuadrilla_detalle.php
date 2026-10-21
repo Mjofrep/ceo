@@ -15,6 +15,7 @@ if (empty($_SESSION['auth'])) {
     header('Location: ' . app_url('/public/index.php'));
     exit;
 }
+$esContratista = strtolower((string)($_SESSION['auth']['rol'] ?? '')) === 'contratista';
 
 try {
     $pdo = db();
@@ -63,6 +64,7 @@ foreach ($headers as $header) {
     <div class="modal fade" id="modalRespuestasTeoricas" tabindex="-1" aria-labelledby="tituloModalRespuestasTeoricas" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><div><h5 class="modal-title" id="tituloModalRespuestasTeoricas">Detalle de respuestas teóricas</h5><div id="subtituloRespuestasTeoricas" class="small text-muted"></div></div><div class="d-flex gap-2"><a id="excelRespuestasTeoricas" class="btn btn-success btn-sm" target="_blank" rel="noopener"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</a><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div></div><div class="modal-body" id="contenidoRespuestasTeoricas">Cargando...</div></div></div></div>
     <div class="modal fade" id="modalRespuestasTerreno" tabindex="-1" aria-labelledby="tituloModalRespuestasTerreno" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><div><h5 class="modal-title" id="tituloModalRespuestasTerreno">Revisión de preguntas de terreno</h5><div id="subtituloRespuestasTerreno" class="small text-muted"></div></div><div class="d-flex gap-2"><a id="excelRespuestasTerreno" class="btn btn-success btn-sm" target="_blank" rel="noopener"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</a><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div></div><div class="modal-body" id="contenidoRespuestasTerreno">Cargando...</div></div></div></div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>const esContratista=<?= $esContratista ? 'true' : 'false' ?>;</script>
 <script>
 const modal=new bootstrap.Modal('#modalAreas'),body=document.getElementById('contenido'),sub=document.getElementById('subtitulo'),excel=document.getElementById('excel'),selectedIds=<?= json_encode($selectedIds, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,multiple=<?= $multiple ? 'true' : 'false' ?>,service=<?= json_encode($service, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,crews=<?= json_encode($crewNumbers, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}function query(){return selectedIds.map(id=>'ids[]='+encodeURIComponent(id)).join('&')}function render(data){if(!data.participants?.length)return '<div class="text-muted">No hay participantes con esta evaluación rendida.</div>';let h='<div class="table-responsive"><table class="table table-bordered table-sm align-middle"><thead><tr>'+(multiple?'<th>Cuadrilla</th>':'')+'<th>RUT</th><th>Empresa</th><th>Nombre / Apellidos</th><th>Fecha de evaluación</th><th>Nota</th>';data.areas.forEach(a=>h+='<th>'+esc(a.area)+'</th>');h+='</tr></thead><tbody>';data.participants.forEach(p=>{h+='<tr>'+(multiple?'<td>'+esc(p.cuadrilla)+'</td>':'')+'<td>'+esc(p.rut)+'</td><td>'+esc(p.empresa)+'</td><td>'+esc(p.nombre_completo)+'</td><td>'+esc(p.fecha_evaluacion)+'</td><td>'+esc(p.nota_final)+'</td>';data.areas.forEach(a=>{const x=p.areas[String(a.id_area)];h+=x?'<td class="text-center '+(x.aprobada?'area-good':'area-bad')+'" title="'+esc(x.correctas)+' / '+esc(x.total)+'">'+esc(x.nota)+'</td>':'<td></td>'});h+='</tr>'});return h+'</tbody></table></div>'}document.querySelectorAll('[data-area-action]').forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.tipo,params=query();sub.textContent='Cuadrilla'+(multiple?'s ':' ')+crews.join(', ')+' | '+(type==='teorica'?'Evaluación teórica':'Evaluación de terreno')+' | '+service;excel.href='habilitaciones_cuadrilla_areas_'+type+'_excel.php?'+params;body.innerHTML='Cargando...';modal.show();fetch('ajax_habilitacion_area_'+type+'_resumen.php?'+params,{cache:'no-store'}).then(response=>response.json()).then(response=>body.innerHTML=response.ok?render(response):'<div class="text-danger">'+esc(response.error||'No se pudo cargar el resumen.')+'</div>').catch(()=>body.innerHTML='<div class="text-danger">No se pudo cargar el resumen.</div>')}));
 </script>
@@ -94,6 +96,8 @@ function render(data) {
 </script>
 <script>
 (() => {
+  if (esContratista) return;
+
   const areaExcel = document.getElementById('excel');
   const responsesModal = new bootstrap.Modal(document.getElementById('modalRespuestasTeoricas'));
   const responsesBody = document.getElementById('contenidoRespuestasTeoricas');
@@ -152,6 +156,8 @@ function render(data) {
 </script>
 <script>
 (() => {
+  if (esContratista) return;
+
   const areaExcel = document.getElementById('excel');
   const terrainModal = new bootstrap.Modal(document.getElementById('modalRespuestasTerreno'));
   const terrainBody = document.getElementById('contenidoRespuestasTerreno');
