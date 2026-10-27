@@ -162,6 +162,156 @@ function gpExtractDocx(string $path): array
     return [gpCleanExtractedText(implode("\n\n", array_filter($parts))), ''];
 }
 
+function gpDocxParagraphText(DOMXPath $xpath, DOMElement $paragraph): string
+{
+    $text = '';
+    foreach ($xpath->query('.//w:t|.//w:tab|.//w:br|.//w:cr', $paragraph) as $node) {
+        if ($node->localName === 't') {
+            $text .= $node->textContent;
+        } elseif ($node->localName === 'tab') {
+            $text .= ' ';
+        } else {
+            $text .= "\n";
+        }
+    }
+    return gpCleanExtractedText($text);
+}
+
+function gpDocxParagraphHasRedText(DOMXPath $xpath, DOMElement $paragraph): bool
+{
+    foreach ($xpath->query('.//w:color', $paragraph) as $color) {
+        $value = strtoupper((string)$color->getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val'));
+        if (in_array($value, ['DC0000', 'FF0000', 'C00000', 'RED'], true)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function gpConvertDocxToImportRows(string $path): array
+{
+    if (!class_exists('ZipArchive') || !class_exists('DOMDocument')) {
+        throw new RuntimeException('El servidor no tiene las extensiones necesarias para leer DOCX.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        throw new RuntimeException('No se pudo abrir el documento Word.');
+    }
+    $xml = $zip->getFromName('word/document.xml');
+    $zip->close();
+    if (!is_string($xml) || $xml === '') {
+        throw new RuntimeException('El documento Word no contiene el contenido principal.');
+    }
+    $dom = new DOMDocument();
+    if (!@$dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+        throw new RuntimeException('El contenido XML del documento Word no es valido.');
+    }
+    $xpath = new DOMXPath($dom);
+    $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+    $questions = [];
+    $current = null;
+    foreach ($xpath->query('//w:body/w:p') as $paragraph) {
+        $styleNode = $xpath->query('./w:pPr/w:pStyle', $paragraph)->item(0);
+        $style = $styleNode instanceof DOMElement
+            ? (string)$styleNode->getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')
+            : '';
+        $text = gpDocxParagraphText($xpath, $paragraph);
+        if ($style === 'BancoPregunta') {
+            if ($current !== null) {
+                $questions[] = $current;
+            }
+            $current = [
+                'pregunta' => gpCleanExtractedText(preg_replace('/^\s*\d+\s*[\.)]\s*/u', '', $text) ?? $text),
+                'alternativas' => [],
+            ];
+            continue;
+        }
+        if ($style !== 'BancoAlternativa' || $current === null || $text === '' || !preg_match('/^\s*([A-D])\.\s*(.*?)\s*$/isu', $text, $match)) {
+            continue;
+        }
+        $hasCorrectMarker = preg_match('/\s*\bcorrecta\.?\s*$/iu', $match[2]) === 1;
+        $current['alternativas'][] = [
+            'letra' => $match[1],
+            'texto' => gpCleanExtractedText(preg_replace('/\s*\bcorrecta\.?\s*$/iu', '', $match[2]) ?? $match[2]),
+            'correcta' => $hasCorrectMarker || gpDocxParagraphHasRedText($xpath, $paragraph),
+        ];
+    }
+    if ($current !== null) {
+        $questions[] = $current;
+    }
+
+    $rows = [];
+    $errors = [];
+    foreach ($questions as $index => $question) {
+        $letters = array_column($question['alternativas'], 'letra');
+        $corrects = count(array_filter($question['alternativas'], static fn(array $alt): bool => !empty($alt['correcta'])));
+        if ($question['pregunta'] === '' || $letters !== ['A', 'B', 'C', 'D'] || $corrects !== 1) {
+            $errors[] = 'Pregunta ' . ($index + 1) . ': se requieren alternativas A-D y una sola correcta.';
+            continue;
+        }
+        if (array_filter($question['alternativas'], static fn(array $alt): bool => $alt['texto'] === '')) {
+            $errors[] = 'Pregunta ' . ($index + 1) . ': contiene una alternativa vacia.';
+            continue;
+        }
+        foreach ($question['alternativas'] as $alternative) {
+            $rows[] = [
+                $index + 1,
+                $question['pregunta'],
+                '',
+                $alternative['texto'],
+                $alternative['correcta'] ? "✔ Correcta" : 'Incorrecta',
+                '',
+            ];
+        }
+    }
+    if ($errors || !$rows) {
+        throw new RuntimeException('No fue posible convertir el documento. ' . implode(' ', array_slice($errors, 0, 10)));
+    }
+    return $rows;
+}
+
+function gpDownloadImportXlsx(array $rows): void
+{
+    require_once __DIR__ . '/../vendor/autoload.php';
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->setTitle('Importar');
+    $lines = [];
+    $currentQuestionId = null;
+    $alternativeIndex = 0;
+    $correctLetter = '';
+    foreach ($rows as $row) {
+        if ($row[0] !== $currentQuestionId) {
+            if ($correctLetter !== '') {
+                $lines[] = ['Respuesta correcta: ' . $correctLetter];
+            }
+            $currentQuestionId = $row[0];
+            $alternativeIndex = 0;
+            $correctLetter = '';
+            $lines[] = [$row[1]];
+        }
+        $letter = chr(65 + $alternativeIndex);
+        $alternativeIndex++;
+        $lines[] = [$letter . '. ' . $row[3]];
+        if ($row[4] === "✔ Correcta") {
+            $correctLetter = $letter;
+        }
+    }
+    if ($correctLetter !== '') {
+        $lines[] = ['Respuesta correcta: ' . $correctLetter];
+    }
+    $sheet->fromArray(array_map(static fn(array $line): array => [$line[0], ''], $lines), null, 'A1');
+    $sheet->getColumnDimension('A')->setWidth(100);
+    $sheet->getColumnDimension('B')->setWidth(18);
+    $sheet->getStyle('A1:A' . count($lines))->getAlignment()->setWrapText(true);
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="preguntas_para_revision.xlsx"');
+    header('Cache-Control: max-age=0');
+    (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save('php://output');
+    exit;
+}
+
 function gpExtractXlsx(string $path): array
 {
     if (!class_exists('ZipArchive')) {
@@ -459,7 +609,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $accion = (string)($_POST['accion'] ?? '');
         try {
-            if ($accion === 'crear') {
+            if ($accion === 'convertir_docx_excel') {
+                $upload = $_FILES['documento_word'] ?? null;
+                if (!is_array($upload) || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || empty($upload['tmp_name'])) {
+                    throw new RuntimeException('Selecciona un documento Word para convertir.');
+                }
+                if (!is_uploaded_file($upload['tmp_name'])) {
+                    throw new RuntimeException('Carga de documento invalida.');
+                }
+                if (strtolower(pathinfo((string)($upload['name'] ?? ''), PATHINFO_EXTENSION)) !== 'docx') {
+                    throw new RuntimeException('El archivo debe tener formato DOCX.');
+                }
+                if ((int)($upload['size'] ?? 0) > 15 * 1024 * 1024) {
+                    throw new RuntimeException('El archivo supera el maximo permitido de 15 MB.');
+                }
+                gpDownloadImportXlsx(gpConvertDocxToImportRows($upload['tmp_name']));
+            } elseif ($accion === 'crear') {
                 $titulo = trim((string)($_POST['titulo'] ?? ''));
                 $destino = (string)($_POST['destino'] ?? '');
                 $idServicio = (int)($_POST['id_servicio'] ?? 0);
@@ -806,6 +971,25 @@ $csrf = Csrf::token();
 <main class="container pb-5">
   <?php if ($msg !== ''): ?><div class="alert alert-success"><?= gpEsc($msg) ?></div><?php endif; ?>
   <?php if ($error !== ''): ?><div class="alert alert-danger"><?= gpEsc($error) ?></div><?php endif; ?>
+
+  <div class="card p-4 mb-4">
+    <h2 class="h5 fw-bold mb-2">Convertir Word a Excel</h2>
+    <p class="text-muted mb-3">Genera un Excel para importarlo como preguntas existentes para revision. El documento no se guarda ni crea registros.</p>
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="<?= gpEsc($csrf) ?>">
+      <input type="hidden" name="accion" value="convertir_docx_excel">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-8">
+          <label class="form-label">Documento Word</label>
+          <input type="file" name="documento_word" class="form-control" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+          <div class="form-text">Formato DOCX. Maximo 15 MB. Completa la columna B del Excel generado con el ID de area en cada fila de pregunta.</div>
+        </div>
+        <div class="col-md-4">
+          <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-file-earmark-excel me-1"></i>Generar y descargar Excel</button>
+        </div>
+      </div>
+    </form>
+  </div>
 
   <div class="card p-4 mb-4">
     <h2 class="h5 fw-bold mb-3">Nueva fuente</h2>

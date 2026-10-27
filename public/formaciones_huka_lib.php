@@ -36,8 +36,60 @@ function fhQueryString(array $filters): string
     return http_build_query(array_filter($filters, static fn ($value): bool => $value !== '' && $value !== 0));
 }
 
+function fhEnsureCertificateColumns(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS ceo_rie_aprobados (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        rut VARCHAR(20) NOT NULL,
+        nombres VARCHAR(120) NOT NULL,
+        apellidos VARCHAR(160) NOT NULL,
+        cargo VARCHAR(160) NOT NULL DEFAULT '',
+        empresa VARCHAR(180) NOT NULL,
+        servicio VARCHAR(180) NOT NULL DEFAULT '',
+        emitido TINYINT(1) NOT NULL DEFAULT 0,
+        token_qr VARCHAR(128) NULL DEFAULT NULL,
+        qr_actualizado TINYINT(1) NOT NULL DEFAULT 0,
+        id_servicio INT NULL,
+        id_programacion INT NULL,
+        fecha_emision DATE NULL,
+        fecha_vigencia DATE NULL,
+        fecha_inicio DATE NULL,
+        fecha_termino DATE NULL,
+        plantilla_version TINYINT UNSIGNED NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_rie_token_qr (token_qr),
+        UNIQUE KEY uq_rie_programacion (id_programacion)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $columns = [
+        'id_servicio' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN id_servicio INT NULL AFTER servicio',
+        'id_programacion' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN id_programacion INT NULL AFTER id_servicio',
+        'fecha_emision' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_emision DATE NULL AFTER id_programacion',
+        'fecha_vigencia' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_vigencia DATE NULL AFTER fecha_emision',
+        'fecha_inicio' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_inicio DATE NULL AFTER fecha_vigencia',
+        'fecha_termino' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_termino DATE NULL AFTER fecha_inicio',
+        'plantilla_version' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN plantilla_version TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER fecha_termino',
+    ];
+    foreach ($columns as $column => $sql) {
+        $stmt = $pdo->query("SHOW COLUMNS FROM ceo_rie_aprobados LIKE '{$column}'");
+        if (!$stmt || !$stmt->fetch(PDO::FETCH_ASSOC)) {
+            $pdo->exec($sql);
+        }
+    }
+
+    $stmt = $pdo->query("SHOW INDEX FROM ceo_rie_aprobados WHERE Key_name = 'uq_rie_rut'");
+    if ($stmt && $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec('ALTER TABLE ceo_rie_aprobados DROP INDEX uq_rie_rut');
+    }
+    $stmt = $pdo->query("SHOW INDEX FROM ceo_rie_aprobados WHERE Key_name = 'uq_rie_programacion'");
+    if (!$stmt || !$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec('ALTER TABLE ceo_rie_aprobados ADD UNIQUE KEY uq_rie_programacion (id_programacion)');
+    }
+}
+
 function fhFetchRows(PDO $pdo, array $filters): array
 {
+    fhEnsureCertificateColumns($pdo);
     $where = ['f.fecha >= :fecha_minima', 's.contratista = :empresa'];
     $params = [
         ':fecha_minima' => FORMACIONES_HUKA_FECHA_MINIMA,
@@ -91,7 +143,9 @@ function fhFetchRows(PDO $pdo, array $filters): array
             ri.puntaje_maximo,
             ri.correctas,
             ri.incorrectas,
-            ri.ncontestadas
+            ri.ncontestadas,
+            cert.id AS id_certificado,
+            cert.emitido AS certificado_emitido
         FROM ceo_formacion f
         INNER JOIN ceo_solicitudes s ON s.nsolicitud = f.nsolicitud
         INNER JOIN ceo_formacion_participantes p ON p.id_cuadrilla = f.cuadrilla
@@ -117,6 +171,7 @@ function fhFetchRows(PDO $pdo, array $filters): array
             ORDER BY TIMESTAMP(ri2.fecha_rendicion, ri2.hora_rendicion) DESC, ri2.id DESC
             LIMIT 1
         )
+        LEFT JOIN ceo_rie_aprobados cert ON cert.id_programacion = ep.id
         WHERE ' . implode(' AND ', $where) . '
         ORDER BY f.fecha DESC, fs.servicio ASC, p.apellidos ASC, p.nombre ASC';
 

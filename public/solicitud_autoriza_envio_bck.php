@@ -124,7 +124,6 @@ try {
 
     $mail->setFrom('no-reply@ceo.enel.com', 'Centro Excelencia Operacional');
     $to = [
-        'yanett.henriquez@enel.com',
         'lmoralesv@drs.cl',
         'prevencionistaceoenel@gmail.com',
         'melanie.lopez.external@enel.com',

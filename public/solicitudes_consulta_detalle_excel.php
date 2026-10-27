@@ -128,6 +128,10 @@ function scdxFetchRows(PDO $pdo, array $filters): array
         $where[] = 'COALESCE(s.tipo_visita, \'\') = :tipo_visita';
         $params[':tipo_visita'] = $filters['tipo_visita'];
     }
+    if ($filters['observacion'] !== '') {
+        $where[] = 'COALESCE(s.observacion, \'\') LIKE :observacion';
+        $params[':observacion'] = '%' . $filters['observacion'] . '%';
+    }
     if ($filters['asistio'] !== '') {
         $where[] = "COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') = :asistio";
         $params[':asistio'] = $filters['asistio'];
@@ -175,6 +179,7 @@ $filters = [
     'charla' => max(0, (int)($_GET['charla'] ?? 0)),
     'motivoreinduccion' => max(0, (int)($_GET['motivoreinduccion'] ?? 0)),
     'tipo_visita' => trim((string)($_GET['tipo_visita'] ?? '')),
+    'observacion' => trim((string)($_GET['observacion'] ?? '')),
     'asistio' => in_array((string)($_GET['asistio'] ?? ''), ['0', '1'], true) ? (string)$_GET['asistio'] : '',
 ];
 

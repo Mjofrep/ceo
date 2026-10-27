@@ -135,6 +135,10 @@ function scdFetchRows(PDO $pdo, array $filters): array
         $where[] = "COALESCE(s.tipo_visita, '') = :tipo_visita";
         $params[':tipo_visita'] = $filters['tipo_visita'];
     }
+    if ($filters['observacion'] !== '') {
+        $where[] = "COALESCE(s.observacion, '') LIKE :observacion";
+        $params[':observacion'] = '%' . $filters['observacion'] . '%';
+    }
     if ($filters['asistio'] !== '') {
         $where[] = "COALESCE(NULLIF(TRIM(CAST(ps.asistio AS CHAR)), ''), '0') = :asistio";
         $params[':asistio'] = $filters['asistio'];
@@ -218,6 +222,10 @@ function scdFetchAttendanceSummary(PDO $pdo, array $filters): array
     if ($filters['tipo_visita'] !== '') {
         $where[] = "COALESCE(s.tipo_visita, '') = :tipo_visita";
         $params[':tipo_visita'] = $filters['tipo_visita'];
+    }
+    if ($filters['observacion'] !== '') {
+        $where[] = "COALESCE(s.observacion, '') LIKE :observacion";
+        $params[':observacion'] = '%' . $filters['observacion'] . '%';
     }
 
     $personKeySql = scdBuildAttendancePersonKeySql();
@@ -1586,6 +1594,7 @@ $filters = [
     'charla' => max(0, (int)($_GET['charla'] ?? 0)),
     'motivoreinduccion' => max(0, (int)($_GET['motivoreinduccion'] ?? 0)),
     'tipo_visita' => trim((string)($_GET['tipo_visita'] ?? '')),
+    'observacion' => trim((string)($_GET['observacion'] ?? '')),
     'asistio' => in_array((string)($_GET['asistio'] ?? ''), ['0', '1'], true) ? (string)$_GET['asistio'] : '',
 ];
 
@@ -1853,6 +1862,10 @@ $attendanceSummaryJson = json_encode($attendanceSummaryRows, JSON_UNESCAPED_UNIC
               <option value="<?= scdEsc($tipoVisita) ?>" <?= $filters['tipo_visita'] === $tipoVisita ? 'selected' : '' ?>><?= scdEsc($tipoVisita) ?></option>
             <?php endforeach; ?>
           </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Observación</label>
+          <input type="text" name="observacion" class="form-control form-control-sm" value="<?= scdEsc($filters['observacion']) ?>" placeholder="Buscar texto">
         </div>
         <div class="col-md-3">
           <label class="form-label">Asistió</label>

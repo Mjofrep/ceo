@@ -17,6 +17,11 @@ function gpImpXmlText(string $xml): string
     return gpImpClean($xml);
 }
 
+function gpImpNormalizeXlsxXml(string $xml): string
+{
+    return preg_replace('/<(\/?)\w+:(\w+)/', '<$1$2', $xml) ?? $xml;
+}
+
 function gpImpCellValue(string $cellXml, array $sharedStrings): string
 {
     $type = '';
@@ -47,7 +52,7 @@ function gpImpExtractSheetLines(string $path): array
     }
 
     $sharedStrings = [];
-    $sharedXml = (string)$zip->getFromName('xl/sharedStrings.xml');
+    $sharedXml = gpImpNormalizeXlsxXml((string)$zip->getFromName('xl/sharedStrings.xml'));
     if ($sharedXml !== '' && preg_match_all('/<si[^>]*>(.*?)<\/si>/is', $sharedXml, $matches)) {
         foreach ($matches[1] as $si) {
             $sharedStrings[] = gpImpXmlText($si);
@@ -55,14 +60,16 @@ function gpImpExtractSheetLines(string $path): array
     }
 
     $rels = [];
-    $relsXml = (string)$zip->getFromName('xl/_rels/workbook.xml.rels');
-    if ($relsXml !== '' && preg_match_all('/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/i', $relsXml, $matches, PREG_SET_ORDER)) {
+    $relsXml = gpImpNormalizeXlsxXml((string)$zip->getFromName('xl/_rels/workbook.xml.rels'));
+    if ($relsXml !== '' && preg_match_all('/<Relationship\b([^>]*)\/?\s*>/i', $relsXml, $matches, PREG_SET_ORDER)) {
         foreach ($matches as $rel) {
-            $rels[$rel[1]] = $rel[2];
+            if (preg_match('/\bId="([^"]+)"/i', $rel[1], $idMatch) && preg_match('/\bTarget="([^"]+)"/i', $rel[1], $targetMatch)) {
+                $rels[$idMatch[1]] = $targetMatch[1];
+            }
         }
     }
 
-    $workbookXml = (string)$zip->getFromName('xl/workbook.xml');
+    $workbookXml = gpImpNormalizeXlsxXml((string)$zip->getFromName('xl/workbook.xml'));
     if ($workbookXml === '') {
         $zip->close();
         throw new RuntimeException('El XLSX no contiene workbook.xml.');
@@ -75,14 +82,17 @@ function gpImpExtractSheetLines(string $path): array
             if ($target === '') {
                 continue;
             }
-            $file = str_starts_with($target, 'xl/') ? $target : 'xl/' . ltrim($target, '/');
+            $file = ltrim($target, '/');
+            if (!str_starts_with($file, 'xl/')) {
+                $file = 'xl/' . $file;
+            }
             $sheets[] = ['name' => html_entity_decode($sheet[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'), 'file' => $file];
         }
     }
 
     $result = [];
     foreach ($sheets as $sheet) {
-        $sheetXml = (string)$zip->getFromName($sheet['file']);
+        $sheetXml = gpImpNormalizeXlsxXml((string)$zip->getFromName($sheet['file']));
         if ($sheetXml === '') {
             continue;
         }
@@ -90,16 +100,26 @@ function gpImpExtractSheetLines(string $path): array
         if (preg_match_all('/<row\b[^>]*r="(\d+)"[^>]*>(.*?)<\/row>/is', $sheetXml, $rows, PREG_SET_ORDER)) {
             foreach ($rows as $row) {
                 $parts = [];
+                $cellsByColumn = [];
                 if (preg_match_all('/<c\b[^>]*>.*?<\/c>/is', $row[2], $cells)) {
                     foreach ($cells[0] as $cellXml) {
                         $value = gpImpCellValue($cellXml, $sharedStrings);
                         if ($value !== '') {
+                            $column = '';
+                            if (preg_match('/\sr="([A-Z]+)\d+"/i', $cellXml, $cellRef)) {
+                                $column = strtoupper($cellRef[1]);
+                                $cellsByColumn[$column] = $value;
+                            }
                             $parts[] = $value;
                         }
                     }
                 }
                 if ($parts) {
-                    $lines[] = ['row' => (int)$row[1], 'text' => gpImpClean(implode(' ', $parts))];
+                    $lines[] = [
+                        'row' => (int)$row[1],
+                        'text' => gpImpClean($cellsByColumn['A'] ?? implode(' ', $parts)),
+                        'codigo_area' => gpImpClean($cellsByColumn['B'] ?? ''),
+                    ];
                 }
             }
         }
@@ -157,7 +177,8 @@ function gpImpParseXlsxQuestions(string $path): array
         $start = 0;
         foreach ($lines as $i => $lineInfo) {
             $line = $lineInfo['text'];
-            if (stripos($line, 'respuesta correcta') === false) {
+            $correct = gpImpCorrectLetter($line);
+            if ($correct === '') {
                 continue;
             }
 
@@ -166,8 +187,12 @@ function gpImpParseXlsxQuestions(string $path): array
             $alts = [];
             $qParts = [];
             $seenAlt = false;
+            $codigoArea = '';
 
             foreach ($chunk as $chunkLineInfo) {
+                if ($codigoArea === '' && !empty($chunkLineInfo['codigo_area'])) {
+                    $codigoArea = (string)$chunkLineInfo['codigo_area'];
+                }
                 $chunkLine = gpImpNormalizeQuestionLine($chunkLineInfo['text']);
                 if (gpImpIsNoise($chunkLine)) {
                     continue;
@@ -183,7 +208,6 @@ function gpImpParseXlsxQuestions(string $path): array
                 }
             }
 
-            $correct = gpImpCorrectLetter($line);
             foreach ($alts as &$alt) {
                 $alt['correcta'] = $correct !== '' && $alt['letra'] === $correct;
             }
@@ -196,6 +220,7 @@ function gpImpParseXlsxQuestions(string $path): array
             $records[] = [
                 'pregunta' => $pregunta,
                 'alternativas' => $alts,
+                'codigo_area' => $codigoArea,
                 'referencia' => $sheet['name'] . ' / fila ' . (int)$lineInfo['row'],
             ];
         }
@@ -286,6 +311,8 @@ function gpImpInsertQuestions(PDO $pdo, int $idFuente, array $records, int $crea
     }
 
     $origen = $origen === 'IA' ? 'IA' : 'MANUAL';
+    $areaTable = (string)$fuente['destino'] === 'FORMACION' ? 'ceo_areacompetencia_formacion' : 'ceo_areacompetencias';
+    $stmtArea = $pdo->prepare('SELECT id FROM ' . $areaTable . ' WHERE id = :id AND id_servicio = :id_servicio LIMIT 1');
     $stmtPregunta = $pdo->prepare('INSERT INTO ceo_gp_preguntas (id_fuente, destino, id_servicio, id_agrupacion, id_area, pregunta, referencia, import_referencia, origen, estado, creado_por) VALUES (:id_fuente, :destino, :id_servicio, :id_agrupacion, :id_area, :pregunta, :referencia, :import_referencia, :origen, "REVISION", :creado_por)');
     $stmtAlt = $pdo->prepare('INSERT INTO ceo_gp_alternativas (id_pregunta, orden, alternativa, correcta, estado) VALUES (:id_pregunta, :orden, :alternativa, :correcta, "A")');
 
@@ -298,12 +325,26 @@ function gpImpInsertQuestions(PDO $pdo, int $idFuente, array $records, int $crea
             $skipped[] = 'Registro ' . ($idx + 1) . ': ' . implode(', ', $errors);
             continue;
         }
+        $codigoArea = trim((string)($record['codigo_area'] ?? ''));
+        $idArea = (int)($fuente['id_area'] ?? 0);
+        if ($codigoArea !== '') {
+            if (!ctype_digit($codigoArea) || (int)$codigoArea <= 0) {
+                $skipped[] = 'Registro ' . ($idx + 1) . ' (' . (string)($record['referencia'] ?? '') . '): codigo de area invalido (' . $codigoArea . ').';
+                continue;
+            }
+            $stmtArea->execute([':id' => (int)$codigoArea, ':id_servicio' => (int)$fuente['id_servicio']]);
+            $idArea = (int)$stmtArea->fetchColumn();
+            if ($idArea <= 0) {
+                $skipped[] = 'Registro ' . ($idx + 1) . ' (' . (string)($record['referencia'] ?? '') . '): el codigo de area ' . $codigoArea . ' no corresponde al servicio.';
+                continue;
+            }
+        }
         $stmtPregunta->execute([
             ':id_fuente' => $idFuente,
             ':destino' => $fuente['destino'],
             ':id_servicio' => (int)$fuente['id_servicio'],
             ':id_agrupacion' => (int)($fuente['id_agrupacion'] ?? 0) > 0 ? (int)$fuente['id_agrupacion'] : null,
-            ':id_area' => (int)($fuente['id_area'] ?? 0) > 0 ? (int)$fuente['id_area'] : null,
+            ':id_area' => $idArea > 0 ? $idArea : null,
             ':pregunta' => gpImpClean((string)$record['pregunta']),
             ':referencia' => (string)($record['referencia'] ?? ''),
             ':import_referencia' => (string)($record['referencia'] ?? ''),

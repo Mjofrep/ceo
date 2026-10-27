@@ -316,7 +316,6 @@ try {
   // Destinatarios solicitados
   $destinatarios = [
       'leonel.morales2.external@enel.com',
-      'yanett.henriquez@enel.com',
       'marcelo.jofre.external@enel.com'
   ];
   foreach ($destinatarios as $d) {
@@ -355,8 +354,6 @@ try {
   $correosRegistrados = [];
   $mail2->addAddress('patricio.acuna@enel.com', 'Patricio Acuña');
   $correosRegistrados['patricio.acuna@enel.com'] = true;
-  $mail2->addAddress('yanett.henriquez@enel.com', 'Yanett Henriquez');
-  $correosRegistrados['yanett.henriquez@enel.com'] = true;
   $mail2->addAddress('leonel.morales2.external@enel.com', 'Leonel Morales');
   $correosRegistrados['leonel.morales2.external@enel.com'] = true;
   if (!empty($sol['correo']) && filter_var($sol['correo'], FILTER_VALIDATE_EMAIL)) {

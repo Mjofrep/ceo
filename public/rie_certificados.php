@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config/auth.php';
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/formaciones_huka_lib.php';
 
 $pdo = db();
 $message = '';
@@ -84,9 +85,11 @@ function rieValidationUrl(string $token): string
     return $scheme . '://' . $host . $path;
 }
 
-function rieLogoDataUri(): string
+function rieLogoDataUri(bool $esFormacionHuka = false): string
 {
-    $paths = [
+    $paths = $esFormacionHuka ? [
+        dirname(__DIR__) . '/config/assets/huka.jpg',
+    ] : [
         dirname(__DIR__) . '/config/assets/logo.png',
         dirname(__DIR__) . '/config/assets/ceonext.png',
     ];
@@ -252,13 +255,20 @@ function riePdfData(array $row): array
         throw new RuntimeException('El certificado RIE no tiene token de validacion.');
     }
 
+    $esFormacionHuka = (int)($row['id_programacion'] ?? 0) > 0;
+
     return [
         'codigo_certificado' => rieFmtCertificateNumber(rieCertificateNumber($row)),
         'nombre' => trim((string)$row['nombres'] . ' ' . (string)$row['apellidos']),
         'rut' => rieFmtRut((string)$row['rut']),
         'cargo' => trim((string)($row['cargo'] ?? '')),
-        'fecha_evaluacion' => rieFechaEmisionBase(),
-        'fechavig_fin' => rieFechaVigenciaHasta(),
+        'es_formacion_huka' => $esFormacionHuka,
+        'fecha_inicio' => trim((string)($row['fecha_inicio'] ?? '')),
+        'fecha_termino' => trim((string)($row['fecha_termino'] ?? '')),
+        'duracion' => '60 horas',
+        'formacion' => 'Líneas Energizadas (LLEE)',
+        'fecha_evaluacion' => trim((string)($row['fecha_emision'] ?? '')) ?: rieFechaEmisionBase(),
+        'fechavig_fin' => trim((string)($row['fecha_vigencia'] ?? '')) ?: rieFechaVigenciaHasta(),
         'servicio' => trim((string)($row['servicio'] ?? '')) !== ''
             ? trim((string)$row['servicio'])
             : 'Responsable Instalación Eléctrica (RIE)',
@@ -318,20 +328,25 @@ body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; color:#1f2d3d; fo
     </div>
   </div>
 
-  <div class="title">Habilitación CEO</div>
-  <div class="intro">Se certifica que el trabajador individualizado se encuentra habilitado para el servicio indicado.</div>
+  <div class="title"><?= $cert['es_formacion_huka'] ? 'Formación CEO' : 'Habilitación CEO' ?></div>
+  <div class="intro"><?= $cert['es_formacion_huka'] ? 'Se certifica que el trabajador individualizado aprobó la actividad de formación indicada.' : 'Se certifica que el trabajador individualizado se encuentra habilitado para el servicio indicado.' ?></div>
 
   <table class="data">
     <tr><td class="label">Nombre</td><td class="value"><?= rieEsc((string)$cert['nombre']) ?></td></tr>
     <tr><td class="label">RUT</td><td class="value"><?= rieEsc((string)$cert['rut']) ?></td></tr>
     <tr><td class="label">Cargo</td><td class="value"><?= rieEsc((string)$cert['cargo']) ?></td></tr>
-    <tr><td class="label">Fecha Evaluación</td><td class="value"><?= rieEsc(rieFmtFecha((string)$cert['fecha_evaluacion'])) ?></td></tr>
+    <?php if ($cert['es_formacion_huka']): ?>
+      <tr><td class="label">Fecha Actividad</td><td class="value"><?= rieEsc($cert['fecha_inicio'] !== '' ? rieFmtFecha((string)$cert['fecha_inicio']) : '') ?> a <?= rieEsc($cert['fecha_termino'] !== '' ? rieFmtFecha((string)$cert['fecha_termino']) : '') ?></td></tr>
+      <tr><td class="label">Duración</td><td class="value"><?= rieEsc((string)$cert['duracion']) ?></td></tr>
+    <?php else: ?>
+      <tr><td class="label">Fecha Evaluación</td><td class="value"><?= rieEsc(rieFmtFecha((string)$cert['fecha_evaluacion'])) ?></td></tr>
+    <?php endif; ?>
     <tr><td class="label">Fecha Vigencia</td><td class="value"><strong><?= rieEsc(rieFmtFecha((string)$cert['fechavig_fin'])) ?></strong></td></tr>
-    <tr><td class="service-label">Servicio</td><td class="service-value"><?= rieEsc((string)$cert['servicio']) ?></td></tr>
+    <tr><td class="service-label"><?= $cert['es_formacion_huka'] ? 'Formación' : 'Servicio' ?></td><td class="service-value"><?= rieEsc($cert['es_formacion_huka'] ? (string)$cert['formacion'] : (string)$cert['servicio']) ?></td></tr>
   </table>
 
   <div class="note">
-    Este certificado acredita la habilitación CEO para el servicio señalado, conforme a los resultados registrados en CEONext y a la vigencia calculada para el proceso correspondiente.
+    <?= $cert['es_formacion_huka'] ? 'Este certificado acredita la aprobación de la actividad de aprendizaje teórico-práctica de Líneas Energizadas de 60 hrs.' : 'Este certificado acredita la habilitación CEO para el servicio señalado, conforme a los resultados registrados en CEONext y a la vigencia calculada para el proceso correspondiente.' ?>
   </div>
 
   <table class="validation">
@@ -341,7 +356,7 @@ body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; color:#1f2d3d; fo
       </td>
       <td class="validation-text">
       <strong>Validación del certificado</strong><br>
-      Escanee el código QR para consultar este certificado RIE en CEONext.<br>
+      Escanee el código QR para consultar este certificado en CEONext.<br>
       Identificador de consulta:<br>
       <span class="token-short"><?= rieEsc((string)$cert['qr_text']) ?></span>
       </td>
@@ -376,7 +391,14 @@ function rieEnsureTable(PDO $pdo): void
       servicio VARCHAR(180) NOT NULL DEFAULT '',
       emitido TINYINT(1) NOT NULL DEFAULT 0,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_rie_rut (rut)
+      id_servicio INT NULL,
+       id_programacion INT NULL,
+       fecha_emision DATE NULL,
+       fecha_vigencia DATE NULL,
+       fecha_inicio DATE NULL,
+       fecha_termino DATE NULL,
+       plantilla_version TINYINT UNSIGNED NOT NULL DEFAULT 1,
+       UNIQUE KEY uq_rie_programacion (id_programacion)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     $stmt = $pdo->query("SHOW COLUMNS FROM ceo_rie_aprobados LIKE 'cargo'");
@@ -404,6 +426,34 @@ function rieEnsureTable(PDO $pdo): void
     if (!$stmt || !$stmt->fetch(PDO::FETCH_ASSOC)) {
         $pdo->exec("ALTER TABLE ceo_rie_aprobados ADD COLUMN qr_actualizado TINYINT(1) NOT NULL DEFAULT 0 AFTER token_qr");
     }
+
+    $columns = [
+        'id_servicio' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN id_servicio INT NULL AFTER servicio',
+        'id_programacion' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN id_programacion INT NULL AFTER id_servicio',
+        'fecha_emision' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_emision DATE NULL AFTER id_programacion',
+        'fecha_vigencia' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_vigencia DATE NULL AFTER fecha_emision',
+        'fecha_inicio' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_inicio DATE NULL AFTER fecha_vigencia',
+        'fecha_termino' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN fecha_termino DATE NULL AFTER fecha_inicio',
+        'plantilla_version' => 'ALTER TABLE ceo_rie_aprobados ADD COLUMN plantilla_version TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER fecha_termino',
+    ];
+    foreach ($columns as $column => $sql) {
+        $stmt = $pdo->query("SHOW COLUMNS FROM ceo_rie_aprobados LIKE '{$column}'");
+        if (!$stmt || !$stmt->fetch(PDO::FETCH_ASSOC)) {
+            $pdo->exec($sql);
+        }
+    }
+
+    $pdo->exec('UPDATE ceo_rie_aprobados SET fecha_vigencia = DATE_ADD(fecha_emision, INTERVAL 2 YEAR) WHERE id_programacion IS NOT NULL AND fecha_emision IS NOT NULL AND (fecha_vigencia IS NULL OR fecha_vigencia <> DATE_ADD(fecha_emision, INTERVAL 2 YEAR))');
+    $pdo->exec('UPDATE ceo_rie_aprobados cert INNER JOIN ceo_formacion_programadas ep ON ep.id = cert.id_programacion SET cert.fecha_inicio = DATE(ep.fecha_inicio), cert.fecha_termino = DATE(ep.fecha_termino) WHERE cert.id_programacion IS NOT NULL AND (cert.fecha_inicio IS NULL OR cert.fecha_termino IS NULL)');
+
+    $stmt = $pdo->query("SHOW INDEX FROM ceo_rie_aprobados WHERE Key_name = 'uq_rie_rut'");
+    if ($stmt && $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec('ALTER TABLE ceo_rie_aprobados DROP INDEX uq_rie_rut');
+    }
+    $stmt = $pdo->query("SHOW INDEX FROM ceo_rie_aprobados WHERE Key_name = 'uq_rie_programacion'");
+    if (!$stmt || !$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec('ALTER TABLE ceo_rie_aprobados ADD UNIQUE KEY uq_rie_programacion (id_programacion)');
+    }
 }
 
 function rieEnsureToken(PDO $pdo, array $row): array
@@ -426,7 +476,7 @@ function rieEnsureToken(PDO $pdo, array $row): array
 
 function rieFetchRow(PDO $pdo, int $id): array
 {
-    $stmt = $pdo->prepare('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado FROM ceo_rie_aprobados WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado, id_servicio, id_programacion, fecha_emision, fecha_vigencia, fecha_inicio, fecha_termino, plantilla_version FROM ceo_rie_aprobados WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
@@ -447,6 +497,9 @@ function rieStorageDir(): string
 function riePdfFilename(array $row): string
 {
     $rut = preg_replace('/[^0-9Kk]/', '', (string)$row['rut']);
+    if ((int)($row['id_programacion'] ?? 0) > 0) {
+        return 'Certificado_' . rieFilePart((string)$row['servicio']) . '_' . $rut . '_' . (int)$row['id_programacion'] . '.pdf';
+    }
     return 'Certificado_RIE_' . $rut . '_' . rieFilePart((string)$row['apellidos']) . '_' . rieFilePart((string)$row['nombres']) . '.pdf';
 }
 
@@ -465,6 +518,12 @@ function rieNeedsQrRefresh(array $row): bool
     return (int)($row['qr_actualizado'] ?? 0) !== 1;
 }
 
+function rieNeedsCertificateRefresh(array $row): bool
+{
+    return rieNeedsQrRefresh($row)
+        || ((int)($row['id_programacion'] ?? 0) > 0 && (int)($row['plantilla_version'] ?? 1) < 5);
+}
+
 function rieMarkQrUpdated(PDO $pdo, int $id): void
 {
     $stmt = $pdo->prepare('UPDATE ceo_rie_aprobados SET qr_actualizado = 1 WHERE id = :id');
@@ -473,7 +532,7 @@ function rieMarkQrUpdated(PDO $pdo, int $id): void
 
 function rieMarkIssued(PDO $pdo, int $id): void
 {
-    $stmt = $pdo->prepare('UPDATE ceo_rie_aprobados SET emitido = 1 WHERE id = :id');
+    $stmt = $pdo->prepare('UPDATE ceo_rie_aprobados SET emitido = 1, plantilla_version = CASE WHEN id_programacion IS NOT NULL THEN 5 ELSE plantilla_version END WHERE id = :id');
     $stmt->execute([':id' => $id]);
 }
 
@@ -487,6 +546,8 @@ function rieStreamPdfFile(array $row): void
     $size = filesize($path);
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . riePdfFilename($row) . '"');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
     if ($size !== false) {
         header('Content-Length: ' . (string)$size);
     }
@@ -498,7 +559,10 @@ function rieGeneratePdf(array $row, bool $stream = false): string
 {
     $dir = rieStorageDir();
     $path = $dir . DIRECTORY_SEPARATOR . riePdfFilename($row);
-    $qrPath = $dir . DIRECTORY_SEPARATOR . 'QR_RIE_' . preg_replace('/[^0-9Kk]/', '', (string)$row['rut']) . '.png';
+    $qrName = (int)($row['id_programacion'] ?? 0) > 0
+        ? 'QR_' . (int)$row['id'] . '.png'
+        : 'QR_RIE_' . preg_replace('/[^0-9Kk]/', '', (string)$row['rut']) . '.png';
+    $qrPath = $dir . DIRECTORY_SEPARATOR . $qrName;
     $cert = riePdfData($row);
 
     $qrError = '';
@@ -516,7 +580,7 @@ function rieGeneratePdf(array $row, bool $stream = false): string
     $options->setChroot(dirname(__DIR__));
 
     $dompdf = new \Dompdf\Dompdf($options);
-    $dompdf->loadHtml(rieHtml($cert, rieLogoDataUri(), 'file://' . $qrRealPath), 'UTF-8');
+    $dompdf->loadHtml(rieHtml($cert, rieLogoDataUri((bool)$cert['es_formacion_huka']), 'file://' . $qrRealPath), 'UTF-8');
     $dompdf->setPaper('letter', 'portrait');
     $dompdf->render();
     $pdf = $dompdf->output();
@@ -536,6 +600,80 @@ function rieGeneratePdf(array $row, bool $stream = false): string
     return $path;
 }
 
+function rieFetchHukaApproved(PDO $pdo, int $idProgramacion): array
+{
+    $stmt = $pdo->prepare('
+        SELECT ep.id AS id_programacion, p.rut, p.nombre AS nombres, p.apellidos, COALESCE(p.cargo, \'\') AS cargo,
+               e.nombre AS empresa, f.id_servicio, fs.servicio, f.fecha AS fecha_emision,
+               DATE(ep.fecha_inicio) AS fecha_inicio, DATE(ep.fecha_termino) AS fecha_termino
+        FROM ceo_formacion_programadas ep
+        INNER JOIN ceo_formacion f ON f.cuadrilla = ep.cuadrilla AND f.id_servicio = ep.id_servicio
+        INNER JOIN ceo_solicitudes s ON s.nsolicitud = f.nsolicitud
+        INNER JOIN ceo_formacion_participantes p ON p.id_cuadrilla = f.cuadrilla
+            AND p.rut COLLATE utf8mb4_unicode_ci = ep.rut COLLATE utf8mb4_unicode_ci
+        INNER JOIN ceo_formacion_servicios fs ON fs.id = f.id_servicio
+        INNER JOIN ceo_empresas e ON e.id = s.contratista
+        WHERE ep.id = :id_programacion
+          AND s.contratista = :empresa_huka
+          AND f.fecha >= :fecha_minima
+          AND UPPER(TRIM(COALESCE(ep.resultado, \'\'))) = \'APROBADO\'
+        LIMIT 1
+    ');
+    $stmt->execute([
+        ':id_programacion' => $idProgramacion,
+        ':empresa_huka' => FORMACIONES_HUKA_EMPRESA,
+        ':fecha_minima' => FORMACIONES_HUKA_FECHA_MINIMA,
+    ]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        throw new RuntimeException('La formación no está aprobada o no corresponde a HUKA.');
+    }
+    return $row;
+}
+
+function rieUpsertHukaCertificate(PDO $pdo, array $source): array
+{
+    $stmt = $pdo->prepare('SELECT id FROM ceo_rie_aprobados WHERE id_programacion = :id_programacion LIMIT 1');
+    $stmt->execute([':id_programacion' => (int)$source['id_programacion']]);
+    $id = (int)($stmt->fetchColumn() ?: 0);
+    $fechaVigencia = (new DateTimeImmutable((string)$source['fecha_emision']))->modify('+2 years')->format('Y-m-d');
+
+    if ($id > 0) {
+        $stmt = $pdo->prepare('
+            UPDATE ceo_rie_aprobados
+            SET rut = :rut, nombres = :nombres, apellidos = :apellidos, cargo = :cargo,
+                 empresa = :empresa, servicio = :servicio, id_servicio = :id_servicio,
+                 fecha_emision = :fecha_emision, fecha_vigencia = :fecha_vigencia,
+                 fecha_inicio = :fecha_inicio, fecha_termino = :fecha_termino
+            WHERE id = :id
+        ');
+        $stmt->execute([
+            ':rut' => $source['rut'], ':nombres' => $source['nombres'], ':apellidos' => $source['apellidos'],
+            ':cargo' => $source['cargo'], ':empresa' => $source['empresa'], ':servicio' => $source['servicio'],
+            ':id_servicio' => (int)$source['id_servicio'], ':fecha_emision' => $source['fecha_emision'],
+            ':fecha_vigencia' => $fechaVigencia, ':fecha_inicio' => $source['fecha_inicio'],
+            ':fecha_termino' => $source['fecha_termino'], ':id' => $id,
+        ]);
+    } else {
+        $stmt = $pdo->prepare('
+            INSERT INTO ceo_rie_aprobados
+                (rut, nombres, apellidos, cargo, empresa, servicio, id_servicio, id_programacion, fecha_emision, fecha_vigencia, fecha_inicio, fecha_termino)
+            VALUES
+                (:rut, :nombres, :apellidos, :cargo, :empresa, :servicio, :id_servicio, :id_programacion, :fecha_emision, :fecha_vigencia, :fecha_inicio, :fecha_termino)
+        ');
+        $stmt->execute([
+            ':rut' => $source['rut'], ':nombres' => $source['nombres'], ':apellidos' => $source['apellidos'],
+            ':cargo' => $source['cargo'], ':empresa' => $source['empresa'], ':servicio' => $source['servicio'],
+            ':id_servicio' => (int)$source['id_servicio'], ':id_programacion' => (int)$source['id_programacion'],
+            ':fecha_emision' => $source['fecha_emision'], ':fecha_vigencia' => $fechaVigencia,
+            ':fecha_inicio' => $source['fecha_inicio'], ':fecha_termino' => $source['fecha_termino'],
+        ]);
+        $id = (int)$pdo->lastInsertId();
+    }
+
+    return rieFetchRow($pdo, $id);
+}
+
 rieEnsureTable($pdo);
 
 try {
@@ -543,7 +681,7 @@ try {
         $row = rieFetchRow($pdo, (int)$_GET['descargar']);
         $row = rieEnsureToken($pdo, $row);
         $emitido = (int)($row['emitido'] ?? 0) === 1;
-        if (riePdfExists($row) && !rieNeedsQrRefresh($row)) {
+        if (riePdfExists($row) && !rieNeedsCertificateRefresh($row)) {
             rieStreamPdfFile($row);
         }
         if ($emitido) {
@@ -558,13 +696,33 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $accion = (string)($_POST['accion'] ?? '');
 
-        if ($accion === 'generar_uno') {
+        if ($accion === 'generar_huka') {
+            header('Content-Type: application/json; charset=utf-8');
+            try {
+                $source = rieFetchHukaApproved($pdo, (int)($_POST['id_programacion'] ?? 0));
+                $row = rieEnsureToken($pdo, rieUpsertHukaCertificate($pdo, $source));
+                if (!(int)($row['emitido'] ?? 0) || !riePdfExists($row) || rieNeedsCertificateRefresh($row)) {
+                    rieGeneratePdf($row);
+                    rieMarkIssued($pdo, (int)$row['id']);
+                    rieMarkQrUpdated($pdo, (int)$row['id']);
+                }
+                echo json_encode([
+                    'ok' => true,
+                    'id' => (int)$row['id'],
+                    'descarga' => 'rie_certificados.php?descargar=' . (int)$row['id'],
+                ], JSON_UNESCAPED_UNICODE);
+            } catch (Throwable $e) {
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            }
+            exit;
+        } elseif ($accion === 'generar_uno') {
             $row = rieFetchRow($pdo, (int)($_POST['id'] ?? 0));
             $row = rieEnsureToken($pdo, $row);
             $pdfExists = riePdfExists($row);
             $emitido = (int)($row['emitido'] ?? 0) === 1;
 
-            if ($emitido && $pdfExists && !rieNeedsQrRefresh($row)) {
+            if ($emitido && $pdfExists && !rieNeedsCertificateRefresh($row)) {
                 $message = 'El certificado ya fue emitido para ' . trim((string)$row['nombres'] . ' ' . (string)$row['apellidos']) . ' y no se regeneró.';
             } else {
                 $path = rieGeneratePdf($row);
@@ -581,13 +739,13 @@ try {
                     : 'Certificado generado correctamente para ' . trim((string)$row['nombres'] . ' ' . (string)$row['apellidos']) . '.';
             }
         } elseif ($accion === 'generar_todos') {
-            $rows = $pdo->query('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado FROM ceo_rie_aprobados ORDER BY apellidos, nombres, rut')->fetchAll(PDO::FETCH_ASSOC);
+            $rows = $pdo->query('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado, id_servicio, id_programacion, fecha_emision, fecha_vigencia, fecha_inicio, fecha_termino, plantilla_version FROM ceo_rie_aprobados ORDER BY apellidos, nombres, rut')->fetchAll(PDO::FETCH_ASSOC);
             $skipped = 0;
             foreach ($rows as $row) {
                 $row = rieEnsureToken($pdo, $row);
                 $pdfExists = riePdfExists($row);
                 $emitido = (int)($row['emitido'] ?? 0) === 1;
-                if ($emitido && $pdfExists && !rieNeedsQrRefresh($row)) {
+                if ($emitido && $pdfExists && !rieNeedsCertificateRefresh($row)) {
                     $skipped++;
                     continue;
                 }
@@ -597,6 +755,7 @@ try {
                 rieMarkQrUpdated($pdo, (int)$row['id']);
                 $row['emitido'] = 1;
                 $row['qr_actualizado'] = 1;
+                $row['plantilla_version'] = (int)($row['id_programacion'] ?? 0) > 0 ? 5 : (int)($row['plantilla_version'] ?? 1);
                 $generated[] = [
                     'row' => $row,
                     'path' => $path,
@@ -616,7 +775,7 @@ try {
     $error = $e->getMessage();
 }
 
-$rows = $pdo->query('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado FROM ceo_rie_aprobados ORDER BY apellidos, nombres, rut')->fetchAll(PDO::FETCH_ASSOC);
+$rows = $pdo->query('SELECT id, rut, nombres, apellidos, cargo, empresa, servicio, emitido, token_qr, qr_actualizado, id_servicio, id_programacion, fecha_emision, fecha_vigencia, fecha_inicio, fecha_termino, plantilla_version FROM ceo_rie_aprobados ORDER BY apellidos, nombres, rut')->fetchAll(PDO::FETCH_ASSOC);
 $storageYear = date('Y');
 ?>
 <!doctype html>
@@ -692,7 +851,7 @@ $storageYear = date('Y');
             <tbody>
               <?php foreach ($rows as $index => $row): ?>
                 <?php $pdfExists = riePdfExists($row); ?>
-                <?php $needsQrRefresh = rieNeedsQrRefresh($row); ?>
+                <?php $needsCertificateRefresh = rieNeedsCertificateRefresh($row); ?>
                 <tr>
                   <td><?= $index + 1 ?></td>
                   <td><?= rieEsc(rieFmtRut((string)$row['rut'])) ?></td>
@@ -713,7 +872,7 @@ $storageYear = date('Y');
                       <form method="post" class="m-0">
                         <input type="hidden" name="accion" value="generar_uno">
                         <input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
-                        <button type="submit" class="btn btn-success btn-sm" <?= ((int)($row['emitido'] ?? 0) === 1 && $pdfExists && !$needsQrRefresh) ? 'disabled' : '' ?>>
+                        <button type="submit" class="btn btn-success btn-sm" <?= ((int)($row['emitido'] ?? 0) === 1 && $pdfExists && !$needsCertificateRefresh) ? 'disabled' : '' ?>>
                           <i class="bi bi-file-earmark-pdf"></i> Generar
                         </button>
                       </form>

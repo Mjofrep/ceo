@@ -105,26 +105,55 @@ function hcaHeadersFromRequest(PDO $pdo, array $request): array
 
 function hcaParticipants(PDO $pdo, array $header): array
 {
-    $stmt = $pdo->prepare('
+    $sql = '
         SELECT p.rut, p.nombre, p.apellidos, p.cargo,
-               (
-                   SELECT ep.id_proceso_habilitacion
-                   FROM ceo_evaluaciones_programadas ep
+                (
+                    SELECT ep.id_proceso_habilitacion
+                    FROM ceo_evaluaciones_programadas ep
                    WHERE REPLACE(REPLACE(REPLACE(UPPER(ep.rut), \'.\', \'\'), \'-\', \'\'), \' \', \'\') = REPLACE(REPLACE(REPLACE(UPPER(p.rut), \'.\', \'\'), \'-\', \'\'), \' \', \'\')
                      AND ep.id_servicio = :id_servicio_proceso
                      AND ep.cuadrilla = :cuadrilla_proceso
                    ORDER BY ep.id DESC
                    LIMIT 1
-               ) AS id_proceso_habilitacion
+                ) AS id_proceso_habilitacion
         FROM ceo_habilitacion_participantes p
         WHERE p.id_cuadrilla = :cuadrilla
-        ORDER BY p.apellidos, p.nombre
-    ');
-    $stmt->execute([
+    ';
+    $params = [
         ':cuadrilla' => (int)$header['cuadrilla'],
         ':id_servicio_proceso' => (int)$header['id_servicio'],
         ':cuadrilla_proceso' => (int)$header['cuadrilla'],
-    ]);
+    ];
+
+    if (strtolower((string)($_SESSION['auth']['rol'] ?? '')) === 'contratista') {
+        $sql .= '
+            AND EXISTS (
+                SELECT 1
+                FROM ceo_reportewf wf
+                WHERE REPLACE(REPLACE(UPPER(wf.rut_empleado), \'.\', \'\'), \' \', \'\') = REPLACE(REPLACE(UPPER(p.rut), \'.\', \'\'), \' \', \'\')
+                  AND (
+                      UPPER(TRIM(wf.contratista)) = :empresa_wf_exacta
+                      OR (
+                          CHAR_LENGTH(TRIM(wf.contratista)) >= 4
+                          AND CHAR_LENGTH(:empresa_wf_largo) >= 4
+                          AND (
+                              LOCATE(UPPER(TRIM(wf.contratista)), :empresa_wf_contiene_wf) > 0
+                              OR LOCATE(:empresa_wf_contiene_empresa, UPPER(TRIM(wf.contratista))) > 0
+                          )
+                      )
+                  )
+            )
+        ';
+        $empresa = mb_strtoupper(trim((string)$header['empresa']), 'UTF-8');
+        $params[':empresa_wf_exacta'] = $empresa;
+        $params[':empresa_wf_largo'] = $empresa;
+        $params[':empresa_wf_contiene_wf'] = $empresa;
+        $params[':empresa_wf_contiene_empresa'] = $empresa;
+    }
+
+    $sql .= ' ORDER BY p.apellidos, p.nombre';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 

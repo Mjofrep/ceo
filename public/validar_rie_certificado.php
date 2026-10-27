@@ -30,8 +30,14 @@ if ($token === '') {
 } else {
     try {
         $pdo = db();
-        $stmt = $pdo->prepare('SELECT nombres, apellidos, rut, servicio FROM ceo_rie_aprobados WHERE token_qr = :token LIMIT 1');
-        $stmt->execute([':token' => $token]);
+        try {
+            $stmt = $pdo->prepare('SELECT nombres, apellidos, rut, servicio, fecha_emision, fecha_vigencia FROM ceo_rie_aprobados WHERE token_qr = :token LIMIT 1');
+            $stmt->execute([':token' => $token]);
+        } catch (PDOException) {
+            // Keep existing RIE QR validations available until the certificate migration runs.
+            $stmt = $pdo->prepare('SELECT nombres, apellidos, rut, servicio FROM ceo_rie_aprobados WHERE token_qr = :token LIMIT 1');
+            $stmt->execute([':token' => $token]);
+        }
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         if (!$row) {
             $error = 'Certificado no encontrado.';
@@ -40,8 +46,8 @@ if ($token === '') {
             $cert = [
                 'nombre' => trim((string)$row['nombres'] . ' ' . (string)$row['apellidos']),
                 'rut' => (string)$row['rut'],
-                'fecha_emision' => '2026-07-14',
-                'fecha_vigencia' => '2029-07-14',
+                'fecha_emision' => (string)($row['fecha_emision'] ?? '') ?: '2026-07-14',
+                'fecha_vigencia' => (string)($row['fecha_vigencia'] ?? '') ?: '2029-07-14',
             ];
         }
     } catch (Throwable $e) {

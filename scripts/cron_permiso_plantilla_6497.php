@@ -516,7 +516,6 @@ function enviarCorreoFinal(PDO $pdo, int $nsolicitud, array $solicitud, array $p
     $correosRegistrados = [];
     $destinatarios = [
         ['correo' => 'patricio.acuna@enel.com', 'nombre' => 'Patricio Acuña', 'modo' => 'to'],
-        ['correo' => 'yanett.henriquez@enel.com', 'nombre' => 'Yanett Henriquez', 'modo' => 'to'],
         ['correo' => 'leonel.morales2.external@enel.com', 'nombre' => 'Leonel Morales', 'modo' => 'to'],
         ['correo' => 'marcelo.jofre.external@enel.com', 'nombre' => '', 'modo' => 'cc'],
         ['correo' => 'angela.herrera.external@enel.com', 'nombre' => '', 'modo' => 'cc'],
